@@ -288,9 +288,9 @@ class RetreatSearchPanel(QWidget):
 
         res_group = QGroupBox("资源剩余值")
         res_grid = QGridLayout(res_group)
-        res_grid.setSpacing(2)
-        res_grid.setContentsMargins(6, 6, 6, 6)
-        res_grid.setVerticalSpacing(2)
+        res_grid.setSpacing(4)
+        res_grid.setContentsMargins(8, 8, 8, 8)
+        res_grid.setVerticalSpacing(4)
         self.res_btn_group = QButtonGroup(self)
         self.res_vi_lower = QRadioButton("VI下限 (--)")
         self.res_vi_mean = QRadioButton("VI均值 (--)")
@@ -315,6 +315,7 @@ class RetreatSearchPanel(QWidget):
         res_grid.addLayout(manual_layout, 2, 0, 1, 3)
         self.res_manual.setChecked(True)
         source_layout.addWidget(res_group)
+        source_layout.setStretchFactor(res_group, 1)
 
         pity_group = QGroupBox("保底水位")
         pity_layout = QVBoxLayout(pity_group)
@@ -355,13 +356,13 @@ class RetreatSearchPanel(QWidget):
 
         search_group = QGroupBox("搜索配置")
         search_layout = QVBoxLayout(search_group)
-        search_layout.setSpacing(4)
-        search_layout.setContentsMargins(8, 8, 8, 8)
+        search_layout.setSpacing(2)
+        search_layout.setContentsMargins(6, 6, 6, 6)
 
         mode_group = QGroupBox("搜索模式")
         mode_layout = QHBoxLayout(mode_group)
         mode_layout.setSpacing(8)
-        mode_layout.setContentsMargins(6, 6, 6, 6)
+        mode_layout.setContentsMargins(4, 4, 4, 4)
         self.mode_resource = QRadioButton("最少额外资源")
         self.mode_target = QRadioButton("最多目标卡")
         self.mode_pareto = QRadioButton("Pareto前沿")
@@ -376,6 +377,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addWidget(mode_group)
 
         threshold_layout = QHBoxLayout()
+        threshold_layout.setSpacing(4)
         threshold_layout.addWidget(QLabel("成功率阈值:"))
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0.01, 1.0)
@@ -386,6 +388,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addLayout(threshold_layout)
 
         sim_layout = QHBoxLayout()
+        sim_layout.setSpacing(4)
         sim_layout.addWidget(QLabel("每步模拟次数:"))
         self.sim_spin = QSpinBox()
         self.sim_spin.setRange(50, 10000)
@@ -395,6 +398,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addLayout(sim_layout)
 
         worker_layout = QHBoxLayout()
+        worker_layout.setSpacing(4)
         worker_layout.addWidget(QLabel("并行数:"))
         self.worker_spin = QSpinBox()
         self.worker_spin.setRange(1, os.cpu_count() or 16)
@@ -403,6 +407,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addLayout(worker_layout)
 
         gdr_layout = QHBoxLayout()
+        gdr_layout.setSpacing(4)
         gdr_layout.addWidget(QLabel("GDR指标:"))
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
@@ -412,6 +417,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addLayout(gdr_layout)
 
         gdr_threshold_layout = QHBoxLayout()
+        gdr_threshold_layout.setSpacing(4)
         gdr_threshold_layout.addWidget(QLabel("GDR阈值:"))
         self.gdr_threshold_spin = QDoubleSpinBox()
         self.gdr_threshold_spin.setRange(0.0, 9999999.0)
