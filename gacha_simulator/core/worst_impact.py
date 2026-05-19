@@ -140,6 +140,7 @@ class WorstImpactAnalyzer:
     def analyze(self, condition='failure', alpha=0.05,
                 num_simulations=500, progress_callback=None):
         success_checker = self._build_success_checker()
+        self._success_checker = success_checker
         self.cond_dist = ConditionalResourceDistribution(
             self.simulation_results, success_checker
         )
