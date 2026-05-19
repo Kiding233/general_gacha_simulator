@@ -261,10 +261,12 @@ class RetreatSearchPanel(QWidget):
         ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+        import uuid
+        tmp_dir = tempfile.gettempdir()
+        tmp_path = os.path.join(tmp_dir, f"retreat_pareto_{uuid.uuid4().hex}.png")
+        fig.savefig(tmp_path, dpi=200, bbox_inches='tight')
         plt.close(fig)
-        return tmp.name
+        return tmp_path
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
