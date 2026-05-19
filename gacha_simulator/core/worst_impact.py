@@ -179,6 +179,14 @@ class WorstImpactAnalyzer:
         )
         return self._checker.is_success
 
+    def _check_pool_success(self, card_counts):
+        if not self._featured_ids:
+            return False
+        for cid in self._featured_ids:
+            if card_counts.get(cid, 0) < 1:
+                return False
+        return True
+
     def _get_pity_cost(self):
         if not self.store.pity.enabled or not self.store.pity.pities:
             return 90 * 160
@@ -224,13 +232,14 @@ class WorstImpactAnalyzer:
 
         self._featured_ids = set()
         self._ssr_ids = set()
-        for r, prob in rewards:
-            rarity = r.extra_info.get('rarity', '').upper()
-            featured = r.extra_info.get('featured', False)
-            if rarity == 'SSR':
-                self._ssr_ids.add(r.id)
-                if featured:
-                    self._featured_ids.add(r.id)
+        for pool_entry in pool_entries:
+            if pool_entry.distribution:
+                for de in pool_entry.distribution:
+                    rarity = de.rarity.upper()
+                    if rarity == 'SSR':
+                        self._ssr_ids.add(de.card_id)
+                        if de.featured:
+                            self._featured_ids.add(de.card_id)
 
         if not self._featured_ids and self._ssr_ids:
             self._featured_ids = set(self._ssr_ids)
@@ -451,7 +460,7 @@ class WorstImpactAnalyzer:
         result = service.run_simulation_compact(state)
 
         card_counts = result.get('card_counts', {})
-        success = self._success_checker(result)
+        success = self._check_pool_success(card_counts)
 
         remaining_resource = result.get('final_resources', {}).get('draw_resource', 0)
 
