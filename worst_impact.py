@@ -140,6 +140,7 @@ class WorstImpactAnalyzer:
     def analyze(self, condition='failure', alpha=0.05,
                 num_simulations=500, progress_callback=None):
         success_checker = self._build_success_checker()
+        self._success_checker = success_checker
         self.cond_dist = ConditionalResourceDistribution(
             self.simulation_results, success_checker
         )
@@ -178,14 +179,6 @@ class WorstImpactAnalyzer:
         )
         return self._checker.is_success
 
-    def _check_single_pool_success(self, card_counts):
-        if not self._featured_ids:
-            return False
-        for cid in self._featured_ids:
-            if card_counts.get(cid, 0) < 1:
-                return False
-        return True
-
     def _get_pity_cost(self):
         if not self.store.pity.enabled or not self.store.pity.pities:
             return 90 * 160
@@ -217,22 +210,6 @@ class WorstImpactAnalyzer:
         cost_str = getattr(pe, 'cost', 'draw_resource:160')
         self._parsed_cost = parse_cost_string(cost_str)
 
-        # 收集所有池子的限定卡和SSR卡
-        self._featured_ids = set()
-        self._ssr_ids = set()
-        for pool_entry in pool_entries:
-            if pool_entry.distribution:
-                for de in pool_entry.distribution:
-                    rarity = de.rarity.upper()
-                    if rarity == 'SSR':
-                        self._ssr_ids.add(de.card_id)
-                        if de.featured:
-                            self._featured_ids.add(de.card_id)
-
-        if not self._featured_ids and self._ssr_ids:
-            self._featured_ids = set(self._ssr_ids)
-
-        # 使用最后一个池子的分布作为新池子的分布
         rewards = []
         if pe.distribution:
             for de in pe.distribution:
@@ -244,6 +221,19 @@ class WorstImpactAnalyzer:
                 )
                 prob = de.probability
                 rewards.append((r, prob))
+
+        self._featured_ids = set()
+        self._ssr_ids = set()
+        for r, prob in rewards:
+            rarity = r.extra_info.get('rarity', '').upper()
+            featured = r.extra_info.get('featured', False)
+            if rarity == 'SSR':
+                self._ssr_ids.add(r.id)
+                if featured:
+                    self._featured_ids.add(r.id)
+
+        if not self._featured_ids and self._ssr_ids:
+            self._featured_ids = set(self._ssr_ids)
 
         pool_duration_days = pe.end_day - pe.start_day
         if pool_duration_days <= 0:
@@ -461,21 +451,18 @@ class WorstImpactAnalyzer:
         result = service.run_simulation_compact(state)
 
         card_counts = result.get('card_counts', {})
-        success = self._check_single_pool_success(card_counts)
+        success = self._success_checker(result)
 
         remaining_resource = result.get('final_resources', {}).get('draw_resource', 0)
 
         final_pity_state = dict(pity_state)
         pool_end_pity = result.get('pool_end_pity_states', {})
-        final_pity_from_result = result.get('final_pity_state', {})
         if pool_end_pity:
             if pool.id in pool_end_pity:
                 final_pity_state = pool_end_pity[pool.id].get('counters', {})
             else:
                 last_key = list(pool_end_pity.keys())[-1]
                 final_pity_state = pool_end_pity[last_key].get('counters', {})
-        elif final_pity_from_result:
-            final_pity_state = final_pity_from_result.get('counters', {})
 
         return {
             'success': success,
