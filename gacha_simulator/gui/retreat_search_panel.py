@@ -358,8 +358,10 @@ class RetreatSearchPanel(QWidget):
         search_layout.setSpacing(4)
         search_layout.setContentsMargins(8, 8, 8, 8)
 
-        mode_label = QLabel("搜索模式:")
-        search_layout.addWidget(mode_label)
+        mode_group = QGroupBox("搜索模式")
+        mode_layout = QHBoxLayout(mode_group)
+        mode_layout.setSpacing(8)
+        mode_layout.setContentsMargins(6, 6, 6, 6)
         self.mode_resource = QRadioButton("最少额外资源")
         self.mode_target = QRadioButton("最多目标卡")
         self.mode_pareto = QRadioButton("Pareto前沿")
@@ -367,9 +369,11 @@ class RetreatSearchPanel(QWidget):
         for btn in [self.mode_resource, self.mode_target, self.mode_pareto]:
             self.mode_btn_group.addButton(btn)
         self.mode_pareto.setChecked(True)
-        search_layout.addWidget(self.mode_resource)
-        search_layout.addWidget(self.mode_target)
-        search_layout.addWidget(self.mode_pareto)
+        mode_layout.addWidget(self.mode_resource)
+        mode_layout.addWidget(self.mode_target)
+        mode_layout.addWidget(self.mode_pareto)
+        mode_layout.addStretch()
+        search_layout.addWidget(mode_group)
 
         threshold_layout = QHBoxLayout()
         threshold_layout.addWidget(QLabel("成功率阈值:"))
