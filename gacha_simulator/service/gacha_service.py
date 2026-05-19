@@ -402,6 +402,7 @@ class GachaService:
             'pity_triggers': stats.pity_triggers,
             'final_resources': dict(resources),
             'final_time': real_time,
+            'final_pity_state': pity_state.to_dict(),
             'pool_end_resources': pool_end_resources,
             'pool_end_pity_states': pool_end_pity_states,
         }

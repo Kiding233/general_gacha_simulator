@@ -81,6 +81,25 @@ class _TargetPoolEnd(StopCondition):
         return ""
 
 
+class _TargetAcquiredOrPoolEnd(StopCondition):
+    def __init__(self, end_time: float, target_card_ids: Set[str]):
+        self.end_time = end_time
+        self.target_card_ids = target_card_ids
+
+    def check(self, state, history, stats=None):
+        if state.real_time >= self.end_time:
+            return True
+        if stats is not None and self.target_card_ids:
+            for cid in self.target_card_ids:
+                if stats.card_counts.get(cid, 0) < 1:
+                    return False
+            return True
+        return False
+
+    def description(self):
+        return ""
+
+
 class _DrawTargetStrategy(Strategy):
     lookahead = None
 
@@ -150,6 +169,8 @@ class WorstImpactAnalyzer:
 
         self._prepare_pool_info()
 
+        self._pool_success_checker = self._build_pool_success_checker()
+
         pity_state = self._get_initial_pity_state()
 
         result = self._compute_pool_distribution(
@@ -178,6 +199,28 @@ class WorstImpactAnalyzer:
             ssr_ids=self._ssr_ids,
         )
         return self._checker.is_success
+
+    def _build_pool_success_checker(self):
+        from .gdr import SuccessChecker
+        pool_target_specs = {cid: 1 for cid in self._featured_ids}
+        if not pool_target_specs:
+            pool_target_specs = dict(self.target_specs)
+        checker = SuccessChecker(
+            target_specs=pool_target_specs,
+            gdr_key=self.gdr_key,
+            gdr_threshold=self.gdr_threshold,
+            desire_weights=self.desire_weights,
+            miss_cost_weights=self.miss_cost_weights,
+            card_value_weights=self.card_value_weights,
+            ssr_ids=self._ssr_ids,
+        )
+        return checker.is_success
+
+    def _can_afford_draw(self, resource):
+        for opt in self._parsed_cost:
+            if all(resource >= opt.get(k, float('inf')) for k in opt):
+                return True
+        return False
 
     def _get_pity_cost(self):
         if not self.store.pity.enabled or not self.store.pity.pities:
@@ -395,6 +438,7 @@ class WorstImpactAnalyzer:
         success_counts = defaultdict(int)
         total_steps = num_simulations
         max_pools = 99
+        pool_checker = self._pool_success_checker
 
         for sim_idx in range(num_simulations):
             current_resource = resource
@@ -402,15 +446,18 @@ class WorstImpactAnalyzer:
             consecutive = 0
             pool_index = 0
 
-            while current_resource > 0 and pool_index < max_pools:
+            while self._can_afford_draw(current_resource) and pool_index < max_pools:
                 pool = self._create_new_pool(pool_index)
                 target_set = self._build_target_card_set(pool.id)
                 strategy = _DrawTargetStrategy(self._featured_ids, pool.id)
-                stop_cond = _TargetPoolEnd(pool.available_until)
+                stop_cond = _TargetAcquiredOrPoolEnd(
+                    pool.available_until, self._featured_ids
+                )
 
                 result = self._run_single_simulation(
                     pool, current_resource, current_pity,
-                    target_set, strategy, stop_cond
+                    target_set, strategy, stop_cond,
+                    success_checker=pool_checker,
                 )
                 if result['success']:
                     consecutive += 1
@@ -433,7 +480,8 @@ class WorstImpactAnalyzer:
         return {'distribution': distribution, 'expected': expected}
 
     def _run_single_simulation(self, pool, resource, pity_state,
-                                target_set, strategy, stop_cond):
+                                target_set, strategy, stop_cond,
+                                success_checker=None):
         pity_state_obj = PityState()
         if pity_state:
             for cname, cval in pity_state.items():
@@ -450,19 +498,22 @@ class WorstImpactAnalyzer:
         state = GachaState(resources={'draw_resource': resource})
         result = service.run_simulation_compact(state)
 
-        card_counts = result.get('card_counts', {})
-        success = self._success_checker(result)
+        checker = success_checker or self._success_checker
+        success = checker(result)
 
         remaining_resource = result.get('final_resources', {}).get('draw_resource', 0)
 
         final_pity_state = dict(pity_state)
         pool_end_pity = result.get('pool_end_pity_states', {})
+        final_pity_from_result = result.get('final_pity_state', {})
         if pool_end_pity:
             if pool.id in pool_end_pity:
                 final_pity_state = pool_end_pity[pool.id].get('counters', {})
             else:
                 last_key = list(pool_end_pity.keys())[-1]
                 final_pity_state = pool_end_pity[last_key].get('counters', {})
+        elif final_pity_from_result:
+            final_pity_state = final_pity_from_result.get('counters', {})
 
         return {
             'success': success,
