@@ -11,7 +11,7 @@ from .pity import (
 )
 from .state import GachaState
 from .target_card import TargetCard, TargetCardSet
-from .stop_condition import StopCondition
+from .stop_condition import StopCondition, ResourceThresholdCondition, TimeLimitCondition, CompositeStopCondition
 from .schedule import PoolSchedule, PoolScheduleManager
 from .strategy import SmartStrategy
 from ..service.gacha_service import GachaService
@@ -67,17 +67,6 @@ class WorstImpactResult:
             if self.get_p_ge(k) >= threshold:
                 return k
         return 0
-
-
-class _AllPoolsEnd(StopCondition):
-    def __init__(self, end_time: float):
-        self.end_time = end_time
-
-    def check(self, state, history=None, stats=None):
-        return state.real_time >= self.end_time
-
-    def description(self):
-        return ""
 
 
 class WorstImpactAnalyzer:
@@ -383,7 +372,10 @@ class WorstImpactAnalyzer:
         pools, schedule_mgr = self._build_sequential_pools()
         target_set = self._build_target_card_set()
         end_time = self._num_new_pools * self._pool_duration
-        stop_cond = _AllPoolsEnd(end_time)
+        stop_cond = CompositeStopCondition([
+            ResourceThresholdCondition('draw_resource', 0, '<='),
+            TimeLimitCondition(end_time),
+        ], mode='any')
 
         success_counts = defaultdict(int)
 
