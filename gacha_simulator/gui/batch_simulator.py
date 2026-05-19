@@ -594,14 +594,40 @@ def run_batch_parallel(
 
     chunksize = max(1, num_simulations // (max_workers * 4))
 
-    with MPPool(
-        processes=max_workers,
-        initializer=_wk_init,
-        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}),
-    ) as mp_pool:
+    try:
+        with MPPool(
+            processes=max_workers,
+            initializer=_wk_init,
+            initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}),
+        ) as mp_pool:
+            results = [] if on_result is None else None
+            n_failed = 0
+            for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
+                if on_result is not None:
+                    if result is not None:
+                        on_result(result)
+                    else:
+                        n_failed += 1
+                else:
+                    results.append(result)
+                if progress_callback:
+                    progress_callback(i + 1, num_simulations)
+            if n_failed > 0:
+                print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
+
+        return results if on_result is None else []
+    except (OSError, PermissionError) as e:
+        print(f"[WARNING] multiprocessing failed ({e}), falling back to single-thread")
+        _wk_init(
+            pools, schedule_mgr, end_time, pity_engine,
+            resource_gain, pity_state_init, card_defs,
+            strategy_name, strategy_params or {},
+        )
         results = [] if on_result is None else None
         n_failed = 0
-        for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
+        for i in range(num_simulations):
+            s = seeds[i]
+            result = _wk_run_single((s, target_specs, initial_resources))
             if on_result is not None:
                 if result is not None:
                     on_result(result)
@@ -613,8 +639,7 @@ def run_batch_parallel(
                 progress_callback(i + 1, num_simulations)
         if n_failed > 0:
             print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
-
-    return results if on_result is None else []
+        return results if on_result is None else []
 
 
 class SimulationEnvBuilder:

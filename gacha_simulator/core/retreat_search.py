@@ -91,7 +91,7 @@ class RetreatSearchEngine:
             target_specs=target_specs,
             initial_resources=ir,
             num_simulations=self.num_simulations,
-            max_workers=1,
+            max_workers=self.max_workers,
             seed=0,
             strategy_name='smart',
             strategy_params={},

@@ -467,10 +467,14 @@ class RetreatSearchPanel(QWidget):
 
         chart_group = QGroupBox("Pareto前沿图")
         chart_layout = QVBoxLayout(chart_group)
+        chart_scroll = QScrollArea()
+        chart_scroll.setWidgetResizable(True)
+        chart_scroll.setStyleSheet("QScrollArea { background: white; border: none; }")
         self.chart_label = QLabel()
         self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chart_label.setMinimumHeight(200)
-        chart_layout.addWidget(self.chart_label)
+        chart_scroll.setWidget(self.chart_label)
+        chart_layout.addWidget(chart_scroll)
         right_layout.addWidget(chart_group)
 
         detail_group = QGroupBox("详细结果")
@@ -600,14 +604,13 @@ class RetreatSearchPanel(QWidget):
             self._chart_path = chart_path
             pixmap = QPixmap(chart_path)
             if not pixmap.isNull():
-                # 按比例缩放以适应标签宽度，保持宽高比
                 max_w = self.chart_label.width() - 20
-                max_h = 400
                 scaled = pixmap.scaled(
-                    max_w, max_h,
+                    max_w, pixmap.height(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
+                self.chart_label.setFixedSize(scaled.size())
                 self.chart_label.setPixmap(scaled)
             else:
                 self.chart_label.setText("图表生成失败")
