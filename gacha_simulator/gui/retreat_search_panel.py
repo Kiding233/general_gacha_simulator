@@ -276,6 +276,8 @@ class RetreatSearchPanel(QWidget):
 
         source_group = QGroupBox("起始状态（来自脆弱性分析）")
         source_layout = QVBoxLayout(source_group)
+        source_layout.setSpacing(6)
+        source_layout.setContentsMargins(8, 8, 8, 8)
 
         pool_layout = QHBoxLayout()
         pool_layout.addWidget(QLabel("起始池:"))
@@ -286,7 +288,9 @@ class RetreatSearchPanel(QWidget):
 
         res_group = QGroupBox("资源剩余值")
         res_grid = QGridLayout(res_group)
-        res_grid.setSpacing(4)
+        res_grid.setSpacing(2)
+        res_grid.setContentsMargins(6, 6, 6, 6)
+        res_grid.setVerticalSpacing(2)
         self.res_btn_group = QButtonGroup(self)
         self.res_vi_lower = QRadioButton("VI下限 (--)")
         self.res_vi_mean = QRadioButton("VI均值 (--)")
@@ -314,19 +318,23 @@ class RetreatSearchPanel(QWidget):
 
         pity_group = QGroupBox("保底水位")
         pity_layout = QVBoxLayout(pity_group)
+        pity_layout.setContentsMargins(6, 6, 6, 6)
         self.pity_table = QTableWidget()
         self.pity_table.setColumnCount(6)
         self.pity_table.setHorizontalHeaderLabels(["计数器", "均值", "中位", "25%", "75%", "初始值"])
         self.pity_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.pity_table.verticalHeader().setVisible(False)
-        self.pity_table.setMaximumHeight(150)
+        self.pity_table.setMaximumHeight(100)
         pity_layout.addWidget(self.pity_table)
         source_layout.addWidget(pity_group)
 
         left_layout.addWidget(source_group)
+        left_layout.setStretchFactor(source_group, 0)
 
         weight_group = QGroupBox("目标卡权重（错失代价）")
         weight_layout = QVBoxLayout(weight_group)
+        weight_layout.setSpacing(4)
+        weight_layout.setContentsMargins(8, 8, 8, 8)
         weight_info = QLabel("权重越小越先被移除（越不重要）")
         weight_info.setWordWrap(True)
         weight_layout.addWidget(weight_info)
@@ -338,17 +346,22 @@ class RetreatSearchPanel(QWidget):
         wh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.weight_table.setColumnWidth(1, 90)
         self.weight_table.verticalHeader().setVisible(False)
-        self.weight_table.setMinimumHeight(80)
-        self.weight_table.setMaximumHeight(200)
+        self.weight_table.setMinimumHeight(60)
+        self.weight_table.setMaximumHeight(120)
         self.weight_table.cellChanged.connect(self._on_weight_changed)
         weight_layout.addWidget(self.weight_table)
         left_layout.addWidget(weight_group)
+        left_layout.setStretchFactor(weight_group, 0)
 
         search_group = QGroupBox("搜索配置")
         search_layout = QVBoxLayout(search_group)
+        search_layout.setSpacing(4)
+        search_layout.setContentsMargins(8, 8, 8, 8)
 
         mode_group = QGroupBox("搜索模式")
         mode_layout = QVBoxLayout(mode_group)
+        mode_layout.setSpacing(2)
+        mode_layout.setContentsMargins(6, 6, 6, 6)
         self.mode_resource = QRadioButton("最少额外资源")
         self.mode_target = QRadioButton("最多目标卡")
         self.mode_pareto = QRadioButton("Pareto前沿")
@@ -408,6 +421,7 @@ class RetreatSearchPanel(QWidget):
         search_layout.addLayout(gdr_threshold_layout)
 
         left_layout.addWidget(search_group)
+        left_layout.setStretchFactor(search_group, 0)
 
         btn_layout = QHBoxLayout()
         self.run_btn = QPushButton("开始搜索")
