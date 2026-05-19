@@ -81,6 +81,25 @@ class _TargetPoolEnd(StopCondition):
         return ""
 
 
+class _TargetAcquiredOrPoolEnd(StopCondition):
+    def __init__(self, end_time: float, target_card_ids: Set[str]):
+        self.end_time = end_time
+        self.target_card_ids = target_card_ids
+
+    def check(self, state, history, stats=None):
+        if state.real_time >= self.end_time:
+            return True
+        if stats is not None and self.target_card_ids:
+            for cid in self.target_card_ids:
+                if stats.card_counts.get(cid, 0) < 1:
+                    return False
+            return True
+        return False
+
+    def description(self):
+        return ""
+
+
 class _DrawTargetStrategy(Strategy):
     lookahead = None
 
@@ -415,7 +434,9 @@ class WorstImpactAnalyzer:
                 pool = self._create_new_pool(pool_index)
                 target_set = self._build_target_card_set(pool.id)
                 strategy = _DrawTargetStrategy(self._featured_ids, pool.id)
-                stop_cond = _TargetPoolEnd(pool.available_until)
+                stop_cond = _TargetAcquiredOrPoolEnd(
+                    pool.available_until, self._featured_ids
+                )
 
                 result = self._run_single_simulation(
                     pool, current_resource, current_pity,
@@ -466,12 +487,15 @@ class WorstImpactAnalyzer:
 
         final_pity_state = dict(pity_state)
         pool_end_pity = result.get('pool_end_pity_states', {})
+        final_pity_from_result = result.get('final_pity_state', {})
         if pool_end_pity:
             if pool.id in pool_end_pity:
                 final_pity_state = pool_end_pity[pool.id].get('counters', {})
             else:
                 last_key = list(pool_end_pity.keys())[-1]
                 final_pity_state = pool_end_pity[last_key].get('counters', {})
+        elif final_pity_from_result:
+            final_pity_state = final_pity_from_result.get('counters', {})
 
         return {
             'success': success,
