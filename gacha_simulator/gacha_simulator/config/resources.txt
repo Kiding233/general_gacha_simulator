@@ -1,0 +1,5 @@
+# Resource Type Definitions
+# Format: resource_id | display_name
+
+draw_resource | 抽卡资源
+exchange_currency | 兑换货币

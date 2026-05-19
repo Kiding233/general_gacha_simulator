@@ -1,0 +1,17 @@
+# Pity Configuration
+#
+# Format: pity: name | type=soft|hard | params... | target=... | reset=... | pools=...
+#
+#   type=soft:  软保底（渐进递增概率）
+#     start=N     - 开始递增的抽数
+#     end=N       - 达到100%的抽数
+#     func=linear|exp|step  - 递增函数类型（默认linear）
+#   type=hard:  硬保底（阈值时强制概率分布）
+#     threshold=N  - 触发保底的抽数
+#
+#   target=id:weight,id:weight  - 保底目标卡及权重分配
+#     可用绑定键: limited_ssr, standard_ssr, ssr, sr, r
+#   reset=any_ssr|featured_ssr|never  - 计数器重置条件
+#   pools=pattern  - 适用的池子匹配模式（支持通配符）
+
+pity: ssr_soft | type=soft | start=80 | end=90 | func=linear | target=limited_ssr:100 | reset=featured_ssr | pools=pool_c*
