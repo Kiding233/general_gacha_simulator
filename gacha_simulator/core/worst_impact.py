@@ -12,6 +12,7 @@ from .pity import (
 from .state import GachaState
 from .target_card import TargetCard, TargetCardSet
 from .stop_condition import StopCondition
+from .schedule import PoolSchedule, PoolScheduleManager
 from .strategy import SmartStrategy
 from ..service.gacha_service import GachaService
 
@@ -19,7 +20,6 @@ import fnmatch
 
 
 DAY = 86400
-
 
 
 class ConditionalResourceDistribution:
@@ -69,11 +69,11 @@ class WorstImpactResult:
         return 0
 
 
-class _TargetPoolEnd(StopCondition):
+class _AllPoolsEnd(StopCondition):
     def __init__(self, end_time: float):
         self.end_time = end_time
 
-    def check(self, state, history, stats=None):
+    def check(self, state, history=None, stats=None):
         return state.real_time >= self.end_time
 
     def description(self):
@@ -103,6 +103,7 @@ class WorstImpactAnalyzer:
         self._pool_duration = 21 * DAY
         self._parsed_cost = [{'draw_resource': 160}]
         self._rewards = []
+        self._num_new_pools = 20
 
     def analyze(self, condition='failure', alpha=0.05,
                 num_simulations=500, progress_callback=None):
@@ -146,11 +147,11 @@ class WorstImpactAnalyzer:
         )
         return self._checker.is_success
 
-    def _check_pool_success(self, card_counts):
+    def _check_pool_success(self, pool_card_counts):
         if not self._featured_ids:
             return False
         for cid in self._featured_ids:
-            if card_counts.get(cid, 0) < 1:
+            if pool_card_counts.get(cid, 0) < 1:
                 return False
         return True
 
@@ -292,7 +293,7 @@ class WorstImpactAnalyzer:
                 )
 
         pool_specs = {}
-        for pool_idx in range(100):
+        for pool_idx in range(self._num_new_pools):
             pid = f'_worst_impact_pool_{pool_idx}'
             matching = []
             resolved_per_pity = {}
@@ -344,107 +345,86 @@ class WorstImpactAnalyzer:
                 state[p.name] = counter_init
         return state
 
-    def _create_new_pool(self, pool_index: int):
-        pid = f'_worst_impact_pool_{pool_index}'
-        pool = Pool(
-            id=pid,
-            name=f'新池子#{pool_index}',
-            cost=self._parsed_cost,
-            rewards=self._rewards,
-            available_from=0,
-            available_until=self._pool_duration,
-        )
-        return pool
+    def _build_sequential_pools(self):
+        pools = []
+        schedules = []
+        for pool_idx in range(self._num_new_pools):
+            pid = f'_worst_impact_pool_{pool_idx}'
+            pool = Pool(
+                id=pid,
+                name=f'新池子#{pool_idx}',
+                cost=self._parsed_cost,
+                rewards=self._rewards,
+                available_from=pool_idx * self._pool_duration,
+                available_until=(pool_idx + 1) * self._pool_duration,
+            )
+            pools.append(pool)
+            schedules.append(PoolSchedule(
+                pool_id=pid,
+                available_from=pool.available_from,
+                available_until=pool.available_until,
+            ))
+        schedule_mgr = PoolScheduleManager(schedules)
+        return pools, schedule_mgr
 
-    def _build_target_card_set(self, pool_id: str):
+    def _build_target_card_set(self):
+        pool_ids = [f'_worst_impact_pool_{i}' for i in range(self._num_new_pools)]
         targets = []
         for card_id in self._featured_ids:
             targets.append(TargetCard(
                 card_id=card_id,
-                pool_ids=[pool_id],
+                pool_ids=pool_ids,
                 quantity_needed=1,
             ))
         return TargetCardSet(targets)
 
     def _compute_pool_distribution(self, resource, pity_state,
                                     num_simulations, progress_callback=None):
+        pools, schedule_mgr = self._build_sequential_pools()
+        target_set = self._build_target_card_set()
+        end_time = self._num_new_pools * self._pool_duration
+        stop_cond = _AllPoolsEnd(end_time)
+
         success_counts = defaultdict(int)
-        total_steps = num_simulations
-        max_pools = 99
 
         for sim_idx in range(num_simulations):
-            current_resource = resource
-            current_pity = dict(pity_state)
+            strategy = SmartStrategy(target_set, all_pools=pools)
+
+            pity_state_obj = PityState()
+            if pity_state:
+                for cname, cval in pity_state.items():
+                    pity_state_obj.counters[cname] = cval
+
+            service = GachaService(
+                pools=pools,
+                strategy=strategy,
+                stop_condition=stop_cond,
+                target_cards=target_set,
+                schedule_manager=schedule_mgr,
+                pity_engine=self._pity_engine,
+                pity_state=pity_state_obj,
+            )
+            state = GachaState(resources={'draw_resource': resource})
+            result = service.run_simulation_compact(state)
+
+            pool_card_counts = result.get('pool_card_counts', {})
             consecutive = 0
-            pool_index = 0
-
-            while current_resource > 0 and pool_index < max_pools:
-                pool = self._create_new_pool(pool_index)
-                target_set = self._build_target_card_set(pool.id)
-                strategy = SmartStrategy(target_set, all_pools=[pool])
-                stop_cond = _TargetPoolEnd(pool.available_until)
-
-                result = self._run_single_simulation(
-                    pool, current_resource, current_pity,
-                    target_set, strategy, stop_cond
-                )
-                if result['success']:
+            for pool_idx in range(self._num_new_pools):
+                pid = f'_worst_impact_pool_{pool_idx}'
+                pcc = pool_card_counts.get(pid, {})
+                if self._check_pool_success(pcc):
                     consecutive += 1
-                    current_resource = result['remaining_resource']
-                    current_pity = result['final_pity_state']
-                    pool_index += 1
                 else:
                     break
 
             success_counts[consecutive] += 1
 
-            if progress_callback and (sim_idx + 1) % max(1, total_steps // 20) == 0:
-                pct = int((sim_idx + 1) / total_steps * 100)
-                progress_callback(f"模拟中: {sim_idx + 1}/{total_steps}", pct)
+            if progress_callback and (sim_idx + 1) % max(1, num_simulations // 20) == 0:
+                pct = int((sim_idx + 1) / num_simulations * 100)
+                progress_callback(f"模拟中: {sim_idx + 1}/{num_simulations}", pct)
 
         n = num_simulations
         distribution = {k: count / n for k, count in sorted(success_counts.items())}
         expected = sum(k * prob for k, prob in distribution.items())
 
         return {'distribution': distribution, 'expected': expected}
-
-    def _run_single_simulation(self, pool, resource, pity_state,
-                                target_set, strategy, stop_cond):
-        pity_state_obj = PityState()
-        if pity_state:
-            for cname, cval in pity_state.items():
-                pity_state_obj.counters[cname] = cval
-
-        service = GachaService(
-            pools=[pool],
-            strategy=strategy,
-            stop_condition=stop_cond,
-            target_cards=target_set,
-            pity_engine=self._pity_engine,
-            pity_state=pity_state_obj,
-        )
-        state = GachaState(resources={'draw_resource': resource})
-        result = service.run_simulation_compact(state)
-
-        card_counts = result.get('card_counts', {})
-        success = self._check_pool_success(card_counts)
-
-        remaining_resource = result.get('final_resources', {}).get('draw_resource', 0)
-
-        final_pity_state = dict(pity_state)
-        pool_end_pity = result.get('pool_end_pity_states', {})
-        final_pity_from_result = result.get('final_pity_state', {})
-        if pool_end_pity:
-            if pool.id in pool_end_pity:
-                final_pity_state = pool_end_pity[pool.id].get('counters', {})
-            else:
-                last_key = list(pool_end_pity.keys())[-1]
-                final_pity_state = pool_end_pity[last_key].get('counters', {})
-        elif final_pity_from_result:
-            final_pity_state = final_pity_from_result.get('counters', {})
-
-        return {
-            'success': success,
-            'remaining_resource': remaining_resource,
-            'final_pity_state': final_pity_state,
-        }
