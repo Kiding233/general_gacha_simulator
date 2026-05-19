@@ -1,0 +1,16 @@
+# Standard Pool Template (SSR rate: 0.6%, 3-way split)
+
+[1]:0.006
+[1]=[a,b,c]
+[a]:0.5
+[b]:0.25
+[c]:0.25
+[a]=ssr
+[b]=ssr_alt1
+[c]=ssr_alt2
+
+[2]:0.051
+[2]=sr
+
+[3]:0.943
+[3]=r

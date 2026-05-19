@@ -1,0 +1,34 @@
+# Card Definitions
+# Format: card_id | name | rarity
+
+# === 限定SSR ===
+limited_ssr_1 | 限定角色1 | ssr
+limited_ssr_2 | 限定角色2 | ssr
+limited_ssr_3 | 限定角色3 | ssr
+limited_ssr_4 | 限定角色4 | ssr
+limited_ssr_5 | 限定角色5 | ssr
+limited_ssr_6 | 限定角色6 | ssr
+
+# === 常驻SSR ===
+standard_ssr_1 | 常驻角色1 | ssr
+standard_ssr_2 | 常驻角色2 | ssr
+standard_ssr_3 | 常驻角色3 | ssr
+standard_ssr_4 | 常驻角色4 | ssr
+standard_ssr_5 | 常驻角色5 | ssr
+standard_ssr_6 | 常驻角色6 | ssr
+
+# === SR ===
+sr_1 | SR角色1 | sr
+sr_2 | SR角色2 | sr
+sr_3 | SR角色3 | sr
+sr_4 | SR角色4 | sr
+sr_5 | SR角色5 | sr
+sr_6 | SR角色6 | sr
+
+# === R ===
+r_1 | R角色1 | r
+r_2 | R角色2 | r
+r_3 | R角色3 | r
+r_4 | R角色4 | r
+r_5 | R角色5 | r
+r_6 | R角色6 | r
