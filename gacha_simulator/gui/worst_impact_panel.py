@@ -4,11 +4,11 @@ from PyQt6.QtWidgets import (
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QRadioButton, QButtonGroup, QComboBox, QSizePolicy,
-    QSplitter, QLineEdit, QCheckBox, QScrollArea,
+    QSplitter, QLineEdit,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen
-from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold, UNIFIED_GDR_REGISTRY
+from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
 from .config_panel import PoolDistributionDialog
 
 
@@ -147,8 +147,6 @@ class WorstImpactPanel(QWidget):
         self._target_specs = None
         self._worker = None
         self._custom_distribution = None
-        self._gdr_checkboxes = {}
-        self._results = {}
         self._setup_ui()
 
     def set_store(self, store):
@@ -217,44 +215,11 @@ class WorstImpactPanel(QWidget):
         cond_layout.addWidget(self.cond_failure)
         config_form.addRow("条件:", cond_layout)
 
-        # GDR多选区域
-        gdr_select_group = QGroupBox("广义出率指标")
-        gdr_select_layout = QVBoxLayout(gdr_select_group)
-        gdr_select_layout.setSpacing(2)
-        gdr_select_layout.setContentsMargins(4, 4, 4, 4)
-
-        gdr_btn_layout = QHBoxLayout()
-        select_all_btn = QPushButton("全选")
-        select_all_btn.setFixedHeight(22)
-        select_all_btn.setStyleSheet("font-size: 10px;")
-        select_all_btn.clicked.connect(self._select_all_gdr)
-        gdr_btn_layout.addWidget(select_all_btn)
-        deselect_all_btn = QPushButton("全不选")
-        deselect_all_btn.setFixedHeight(22)
-        deselect_all_btn.setStyleSheet("font-size: 10px;")
-        deselect_all_btn.clicked.connect(self._deselect_all_gdr)
-        gdr_btn_layout.addWidget(deselect_all_btn)
-        gdr_btn_layout.addStretch()
-        gdr_select_layout.addLayout(gdr_btn_layout)
-
-        self._gdr_checks_widget = QWidget()
-        self._gdr_checks_layout = QVBoxLayout(self._gdr_checks_widget)
-        self._gdr_checks_layout.setSpacing(2)
-        self._gdr_checks_layout.setContentsMargins(0, 0, 0, 0)
-
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            cb = QCheckBox(defn.display_name)
-            cb.setStyleSheet("font-size: 11px;")
-            self._gdr_checkboxes[key] = cb
-            self._gdr_checks_layout.addWidget(cb)
-
-        # 默认选中第一个
-        first_key = list(UNIFIED_GDR_REGISTRY.keys())[0] if UNIFIED_GDR_REGISTRY else None
-        if first_key and first_key in self._gdr_checkboxes:
-            self._gdr_checkboxes[first_key].setChecked(True)
-
-        gdr_select_layout.addWidget(self._gdr_checks_widget)
-        config_form.addRow(gdr_select_group)
+        self.gdr_combo = QComboBox()
+        self.gdr_combo.setMaxVisibleItems(30)
+        populate_gdr_combo(self.gdr_combo)
+        self.gdr_combo.setCurrentIndex(1)
+        config_form.addRow("GDR指标:", self.gdr_combo)
 
         self.gdr_threshold_spin = QDoubleSpinBox()
         self.gdr_threshold_spin.setRange(-9999999.0, 9999999.0)
@@ -315,38 +280,39 @@ class WorstImpactPanel(QWidget):
         left_layout.addWidget(self.status_label)
         left_layout.addStretch()
 
-        right = QScrollArea()
-        right.setWidgetResizable(True)
-        right.setStyleSheet("QScrollArea { background: #f5f5f5; border: none; }")
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
 
-        self._results_container = QWidget()
-        self._results_container.setStyleSheet("background: #f5f5f5;")
-        self._results_layout = QVBoxLayout(self._results_container)
-        self._results_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._results_layout.setSpacing(12)
-        self._results_layout.setContentsMargins(8, 8, 8, 8)
+        gauge_group = QGroupBox("大保底覆盖")
+        gauge_layout = QVBoxLayout(gauge_group)
+        self.pity_gauge = PityCoverageGauge()
+        gauge_layout.addWidget(self.pity_gauge)
+        right_layout.addWidget(gauge_group)
 
-        self._placeholder_label = QLabel("请选择GDR指标并点击\"开始分析\"")
-        self._placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder_label.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
-        self._results_layout.addWidget(self._placeholder_label)
+        self.result_label = QLabel("尚未运行分析")
+        self.result_label.setWordWrap(True)
+        self.result_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px;")
+        right_layout.addWidget(self.result_label)
 
-        right.setWidget(self._results_container)
+        self.chart_label = QLabel()
+        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chart_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.chart_label.setMinimumHeight(200)
+        right_layout.addWidget(self.chart_label)
+
+        self.detail_table = QTableWidget()
+        self.detail_table.setColumnCount(5)
+        self.detail_table.setHorizontalHeaderLabels(["k", "P(X=k)", "P(X>=k)", "累计概率", "说明"])
+        header = self.detail_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.detail_table.verticalHeader().setVisible(False)
+        right_layout.addWidget(self.detail_table)
+
+        right_layout.addStretch()
 
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setSizes([300, 700])
-
-    def _select_all_gdr(self):
-        for cb in self._gdr_checkboxes.values():
-            cb.setChecked(True)
-
-    def _deselect_all_gdr(self):
-        for cb in self._gdr_checkboxes.values():
-            cb.setChecked(False)
-
-    def _get_selected_gdr_keys(self):
-        return [key for key, cb in self._gdr_checkboxes.items() if cb.isChecked()]
 
     def _edit_distribution(self):
         pool_id = '_worst_impact_pool'
@@ -365,11 +331,6 @@ class WorstImpactPanel(QWidget):
             self.status_label.setText("缺少目标卡规格，请重新运行批量模拟")
             return
 
-        selected_gdrs = self._get_selected_gdr_keys()
-        if not selected_gdrs:
-            self.status_label.setText("请至少选择一个GDR指标")
-            return
-
         if self.cond_success.isChecked():
             condition = 'success'
         elif self.cond_failure.isChecked():
@@ -377,6 +338,9 @@ class WorstImpactPanel(QWidget):
         else:
             condition = 'all'
 
+        gdr_key = self.gdr_combo.currentData()
+        if not gdr_key:
+            gdr_key = self.gdr_combo.currentText()
         gdr_threshold = self.gdr_threshold_spin.value()
 
         custom_pool = {
@@ -396,130 +360,84 @@ class WorstImpactPanel(QWidget):
             miss_cost_weights = main_window.config_panel.get_miss_cost_weights()
             card_value_weights = main_window.config_panel.get_card_value_weights()
 
-        self._results = {}
-        self._pending_gdrs = selected_gdrs.copy()
-        self._condition = condition
-        self._gdr_threshold = gdr_threshold
-        self._custom_pool = custom_pool
-        self._desire_weights = desire_weights
-        self._miss_cost_weights = miss_cost_weights
-        self._card_value_weights = card_value_weights
-
-        self._clear_results()
-        self.run_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self._run_next_gdr()
-
-    def _run_next_gdr(self):
-        if not self._pending_gdrs:
-            self.run_btn.setEnabled(True)
-            self.status_label.setText(f"完成，分析了 {len(self._results)} 个GDR指标")
-            self.status_update.emit("最差后期影响分析完成")
-            return
-
-        gdr_key = self._pending_gdrs.pop(0)
-        self._current_gdr = gdr_key
-
-        from ..core.worst_impact import WorstImpactAnalyzer
-
         analyzer = WorstImpactAnalyzer(
             simulation_results=self._simulation_results,
             target_specs=self._target_specs,
             store=self._store,
             gdr_key=gdr_key,
-            gdr_threshold=self._gdr_threshold,
-            custom_pool_config=self._custom_pool,
-            desire_weights=self._desire_weights,
-            miss_cost_weights=self._miss_cost_weights,
-            card_value_weights=self._card_value_weights,
+            gdr_threshold=gdr_threshold,
+            custom_pool_config=custom_pool,
+            desire_weights=desire_weights,
+            miss_cost_weights=miss_cost_weights,
+            card_value_weights=card_value_weights,
         )
 
         self._worker = WorstImpactWorker(
-            analyzer, self._condition,
+            analyzer, condition,
             self.alpha_spin.value(),
             self.sim_spin.value(),
         )
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(lambda result, key=gdr_key: self._on_gdr_finished(result, key))
+        self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
+
+        self.run_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
         self._worker.start()
 
     def _on_progress(self, msg, pct):
         self.progress_bar.setValue(pct)
-        self.status_label.setText(f"[{self._current_gdr}] {msg}")
+        self.status_label.setText(msg)
         self.status_update.emit(msg)
 
-    def _on_gdr_finished(self, result, gdr_key):
-        self._results[gdr_key] = result
-        self._add_result_widget(gdr_key, result)
-        self._run_next_gdr()
-
     def _on_finished(self, result):
-        pass
+        self.run_btn.setEnabled(True)
+        self.status_label.setText("分析完成")
+        self.status_update.emit("最差后期影响分析完成")
 
-    def _clear_results(self):
-        while self._results_layout.count():
-            item = self._results_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        self.pity_gauge.set_value(result.pity_coverage)
 
-    def _add_result_widget(self, gdr_key, result):
-        defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
-        gdr_name = defn.display_name if defn else gdr_key
-
-        widget = QWidget()
-        widget.setStyleSheet("background: white; border-radius: 6px; padding: 4px;")
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(6)
-        layout.setContentsMargins(8, 8, 8, 8)
-
-        title = QLabel(f"<b>{gdr_name}</b>")
-        title.setStyleSheet("font-size: 14px; color: #2c3e50;")
-        layout.addWidget(title)
-
-        summary = QLabel(
-            f"保守资源: <b>{result.worst_resource:.0f}</b> | "
-            f"大保底覆盖: <b>{result.pity_coverage:.2f}</b> 倍" +
-            (f" | 期望新池子数: <b>{result.expected_pools:.2f}</b>" if result.pool_distribution else "")
-        )
-        summary.setWordWrap(True)
-        summary.setStyleSheet("font-size: 12px; color: #555;")
-        layout.addWidget(summary)
+        lines = [
+            f"保守资源: <b>{result.worst_resource:.0f}</b>",
+            f"大保底覆盖: <b>{result.pity_coverage:.2f}</b> 倍",
+        ]
+        if result.pool_distribution:
+            lines.append(f"期望新池子数: <b>{result.expected_pools:.2f}</b>")
+        self.result_label.setText('<br>'.join(lines))
 
         if result.pool_distribution:
-            chart_label = QLabel()
-            chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            chart_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            chart_label.setMinimumHeight(200)
-            layout.addWidget(chart_label)
+            chart_path = self._plot_chart(result)
+            if chart_path:
+                pixmap = QPixmap(chart_path)
+                if not pixmap.isNull():
+                    max_w = self.chart_label.width() - 20
+                    max_h = 400
+                    scaled = pixmap.scaled(
+                        max_w, max_h,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self.chart_label.setPixmap(scaled)
+                else:
+                    self.chart_label.setText("图表加载失败")
+            else:
+                self.chart_label.setText("图表生成失败")
+        else:
+            self.chart_label.setText("无分布数据")
 
-            pixmap = self._create_chart_pixmap(result, gdr_name)
-            if pixmap and not pixmap.isNull():
-                chart_label.setPixmap(pixmap)
-
-            table = QTableWidget()
-            table.setColumnCount(5)
-            table.setHorizontalHeaderLabels(["k", "P(X=k)", "P(X>=k)", "累计概率", "说明"])
-            table.setMaximumHeight(150)
-            header = table.horizontalHeader()
-            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            table.verticalHeader().setVisible(False)
-
-            table.setRowCount(len(result.pool_distribution))
+        self.detail_table.setRowCount(len(result.pool_distribution) if result.pool_distribution else 0)
+        if result.pool_distribution:
             cumulative = 0.0
             for i, (k, prob) in enumerate(sorted(result.pool_distribution.items())):
-                table.setItem(i, 0, QTableWidgetItem(str(k)))
-                table.setItem(i, 1, QTableWidgetItem(f"{prob:.2%}"))
+                self.detail_table.setItem(i, 0, QTableWidgetItem(str(k)))
+                self.detail_table.setItem(i, 1, QTableWidgetItem(f"{prob:.2%}"))
                 p_ge = result.get_p_ge(k)
-                table.setItem(i, 2, QTableWidgetItem(f"{p_ge:.2%}"))
+                self.detail_table.setItem(i, 2, QTableWidgetItem(f"{p_ge:.2%}"))
                 cumulative += prob
-                table.setItem(i, 3, QTableWidgetItem(f"{cumulative:.2%}"))
-                table.setItem(i, 4, QTableWidgetItem(f"成功{k}个新池子" if k > 0 else "未成功"))
-            layout.addWidget(table)
+                self.detail_table.setItem(i, 3, QTableWidgetItem(f"{cumulative:.2%}"))
+                self.detail_table.setItem(i, 4, QTableWidgetItem(f"成功{k}个新池子" if k > 0 else "未成功"))
 
-        self._results_layout.addWidget(widget)
-
-    def _create_chart_pixmap(self, result, gdr_name):
+    def _plot_chart(self, result):
         if not result.pool_distribution:
             return None
 
@@ -535,7 +453,7 @@ class WorstImpactPanel(QWidget):
         bars = ax.bar(ks, probs, color='coral')
         ax.set_xlabel('成功抽取新池子数 k', fontsize=11)
         ax.set_ylabel('P(X = k)', fontsize=11)
-        ax.set_title(f'{gdr_name} - 新池子数分布 (E[X] = {result.expected_pools:.2f})', fontsize=12)
+        ax.set_title(f'新池子数分布 (E[X] = {result.expected_pools:.2f})', fontsize=12)
         ax.set_xticks(ks)
         ax.axvline(x=result.expected_pools, color='red', linestyle='--',
                   label=f'期望 = {result.expected_pools:.2f}')
@@ -550,8 +468,7 @@ class WorstImpactPanel(QWidget):
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
         plt.close(fig)
-        pixmap = QPixmap(tmp.name)
-        return pixmap
+        return tmp.name
 
     def _on_error(self, err):
         self.run_btn.setEnabled(True)
