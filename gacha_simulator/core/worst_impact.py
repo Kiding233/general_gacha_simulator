@@ -10,10 +10,9 @@ from .pity import (
     SoftPityBehavior, HardPityBehavior,
 )
 from .state import GachaState
-from .action import DrawAction, WaitAction
 from .target_card import TargetCard, TargetCardSet
 from .stop_condition import StopCondition
-from .strategy import Strategy
+from .strategy import SmartStrategy
 from ..service.gacha_service import GachaService
 
 import fnmatch
@@ -79,54 +78,6 @@ class _TargetPoolEnd(StopCondition):
 
     def description(self):
         return ""
-
-
-class _DrawTargetStrategy(Strategy):
-    lookahead = None
-
-    def __init__(self, target_card_ids: Set[str], pool_id: str):
-        self.target_card_ids = target_card_ids
-        self.pool_id = pool_id
-        self.acquired: Dict[str, int] = {}
-
-    @classmethod
-    def description(cls) -> str:
-        return "最差影响分析：从目标池抽卡"
-
-    def _needs_more_cards(self):
-        for cid in self.target_card_ids:
-            if self.acquired.get(cid, 0) < 1:
-                return True
-        return False
-
-    def select_action(self, state, history, current_pools,
-                      future_schedules, target_cards, stop_cond):
-        if not self._needs_more_cards():
-            # 所有目标卡已获得，停止抽卡，保留资源
-            wait_time = 86400
-            for pool in current_pools:
-                if (pool.available_until is not None
-                        and pool.available_until > state.real_time):
-                    wait_time = min(wait_time, pool.available_until - state.real_time)
-            if wait_time <= 0:
-                wait_time = 3600
-            return WaitAction(duration=wait_time)
-        for pool in current_pools:
-            if pool.id == self.pool_id and state.can_afford(pool.cost):
-                return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if (pool.available_until is not None
-                    and pool.available_until > state.real_time):
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
 
 
 class WorstImpactAnalyzer:
@@ -430,7 +381,7 @@ class WorstImpactAnalyzer:
             while current_resource > 0 and pool_index < max_pools:
                 pool = self._create_new_pool(pool_index)
                 target_set = self._build_target_card_set(pool.id)
-                strategy = _DrawTargetStrategy(self._featured_ids, pool.id)
+                strategy = SmartStrategy(target_set, all_pools=[pool])
                 stop_cond = _TargetPoolEnd(pool.available_until)
 
                 result = self._run_single_simulation(
