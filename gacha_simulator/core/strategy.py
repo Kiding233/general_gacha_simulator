@@ -18,6 +18,7 @@ class Strategy(ABC):
     def name(cls) -> str:
         return cls.__name__
 
+    @classmethod
     @abstractmethod
     def description(cls) -> str:
         return ""

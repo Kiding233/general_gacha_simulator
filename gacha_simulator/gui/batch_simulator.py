@@ -190,61 +190,6 @@ def _wk_init(
     _wk_strategy_params = strategy_params
 
 
-# --- Strategy & StopCondition（与 strategy_panel 保持一致）---
-class _SmartStrategy:
-    lookahead = None
-
-    def __init__(self, target_set):
-        self.target_set = target_set
-        self.acquired = {}
-        self._pool_to_targets = {}
-        for t in target_set.targets:
-            for pid in t.pool_ids:
-                if pid not in self._pool_to_targets:
-                    self._pool_to_targets[pid] = []
-                self._pool_to_targets[pid].append(t)
-
-    def _pool_needs_target(self, pool_id):
-        targets = self._pool_to_targets.get(pool_id, [])
-        for t in targets:
-            if self.acquired.get(t.card_id, 0) < t.quantity_needed:
-                return True
-        return False
-
-    def _get_needed_card_exchange(self, state):
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
-                continue
-            for pool in _wk_pools:
-                if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
-                        return pool.id
-        return None
-
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        from gacha_simulator.core.action import DrawAction, WaitAction
-
-        exchange_pool_id = self._get_needed_card_exchange(state)
-        if exchange_pool_id:
-            return DrawAction(pool_id=exchange_pool_id)
-
-        for pool in current_pools:
-            if not pool.is_exchange and self._pool_needs_target(pool.id) and state.can_afford(pool.cost):
-                return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
-
-
 class _AllPoolsEnd:
     def __init__(self, end_time):
         self.end_time = end_time
@@ -431,7 +376,8 @@ class _StopOnTargetStrategy:
 
 
 def _create_smart_strategy(target_set, params):
-    return _SmartStrategy(target_set)
+    from gacha_simulator.core.strategy import SmartStrategy
+    return SmartStrategy(target_set, all_pools=_wk_pools)
 
 def _create_pool_quota_strategy(target_set, params):
     quotas = params.get('pool_quotas', {})
