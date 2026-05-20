@@ -121,19 +121,41 @@ class WorstImpactAnalyzer:
         self._pool_duration = 21 * DAY
         self._parsed_cost = [{'draw_resource': 160}]
         self._rewards = []
+        self._main_ssr_ids: Set[str] = set()
+        for cd in store.card_defs:
+            if getattr(cd, 'rarity', '').upper() == 'SSR':
+                self._main_ssr_ids.add(cd.card_id)
+        if not self._main_ssr_ids:
+            for pe in store.pools:
+                for de in getattr(pe, 'distribution', []):
+                    if getattr(de, 'rarity', '').upper() == 'SSR' and de.card_id != '_no_card':
+                        self._main_ssr_ids.add(de.card_id)
 
     def analyze(self, condition='failure', alpha=0.05,
                 num_simulations=500, progress_callback=None):
-        success_checker = self._build_success_checker()
-        self._success_checker = success_checker
+        self._prepare_pool_info()
+
+        main_checker = self._build_success_checker(
+            target_specs=self.target_specs,
+            ssr_ids=self._main_ssr_ids,
+        )
+
+        pool_target_specs = (
+            {cid: 1 for cid in self._featured_ids}
+            if self._featured_ids else self.target_specs
+        )
+        pool_checker = self._build_success_checker(
+            target_specs=pool_target_specs,
+            ssr_ids=self._ssr_ids,
+        )
+        self._success_checker = pool_checker.is_success
+
         self.cond_dist = ConditionalResourceDistribution(
-            self.simulation_results, success_checker
+            self.simulation_results, main_checker.is_success
         )
 
         worst_resource = self.cond_dist.get_worst_case_resource(condition, alpha)
         pity_coverage = self._compute_pity_coverage(worst_resource)
-
-        self._prepare_pool_info()
 
         pity_state = self._get_initial_pity_state()
 
@@ -151,18 +173,18 @@ class WorstImpactAnalyzer:
         pity_cost = self._get_pity_cost()
         return resource / pity_cost if pity_cost > 0 else float('inf')
 
-    def _build_success_checker(self):
+    def _build_success_checker(self, target_specs=None, ssr_ids=None):
         from .gdr import SuccessChecker
         self._checker = SuccessChecker(
-            target_specs=self.target_specs,
+            target_specs=target_specs or self.target_specs,
             gdr_key=self.gdr_key,
             gdr_threshold=self.gdr_threshold,
             desire_weights=self.desire_weights,
             miss_cost_weights=self.miss_cost_weights,
             card_value_weights=self.card_value_weights,
-            ssr_ids=self._ssr_ids,
+            ssr_ids=ssr_ids or self._ssr_ids,
         )
-        return self._checker.is_success
+        return self._checker
 
     def _get_pity_cost(self):
         if not self.store.pity.enabled or not self.store.pity.pities:
@@ -433,6 +455,7 @@ class WorstImpactAnalyzer:
             target_cards=target_set,
             pity_engine=self._pity_engine,
             pity_state=pity_state_obj,
+            ssr_ids=self._ssr_ids,
         )
         state = GachaState(resources={'draw_resource': resource})
         result = service.run_simulation_compact(state)
