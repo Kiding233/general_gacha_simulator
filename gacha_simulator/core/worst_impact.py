@@ -359,7 +359,7 @@ class WorstImpactAnalyzer:
                 ), prob))
             pool = Pool(
                 id=pid,
-                name=f'新池子#{pool_idx}',
+                name=f'新池子#{pool_idx + 1}',
                 cost=self._parsed_cost,
                 rewards=pool_rewards,
                 available_from=pool_idx * self._pool_duration,
