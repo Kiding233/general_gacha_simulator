@@ -1,3 +1,5 @@
+from .result_types import CompactResult
+from .collector import SimulationCollector, InfoVectorCollector, CompactCollector
 from .pool import Pool, Reward, CostOption, PoolCost, parse_cost_string, cost_to_string
 from .action import Action, DrawAction, WaitAction
 from .state import GachaState
@@ -8,7 +10,12 @@ from .pity import (
     PityState, PityEngine,
     parse_pity_file, build_pity_engine,
 )
-from .strategy import Strategy, FixedCountStrategy, TargetHuntingStrategy, CompositeStrategy
+from .strategy import (
+    Strategy, StrategyContext,
+    SmartStrategy, PoolQuotaStrategy, PityReserveStrategy, StopOnTargetStrategy,
+    FixedCountStrategy, TargetHuntingStrategy, CompositeStrategy,
+    STRATEGY_REGISTRY, create_strategy, strategy_type_to_key, strategy_key_to_type,
+)
 from .stop_condition import StopCondition, FixedActionCountCondition, ResourceThresholdCondition, TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition
 from .resource_gain import ResourceGainFunction, LinearResourceGain, PeriodicResourceGain, StepResourceGain, CompositeResourceGain, ScheduleResourceGain
 from .generalized_drop_rate import (
@@ -52,6 +59,8 @@ from .process_analysis import (
 )
 
 __all__ = [
+    'CompactResult',
+    'SimulationCollector', 'InfoVectorCollector', 'CompactCollector',
     'Pool', 'Reward', 'CostOption', 'PoolCost', 'parse_cost_string', 'cost_to_string',
     'Action', 'DrawAction', 'WaitAction',
     'GachaState',
@@ -60,7 +69,10 @@ __all__ = [
     'PityDefParsed', 'PoolPitySpec',
     'PityState', 'PityEngine',
     'parse_pity_file', 'build_pity_engine',
-    'Strategy', 'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
+    'Strategy', 'StrategyContext',
+    'SmartStrategy', 'PoolQuotaStrategy', 'PityReserveStrategy', 'StopOnTargetStrategy',
+    'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
+    'STRATEGY_REGISTRY', 'create_strategy',
     'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition', 'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
     'ResourceGainFunction', 'LinearResourceGain', 'PeriodicResourceGain', 'StepResourceGain', 'CompositeResourceGain', 'ScheduleResourceGain',
     'GeneralizedDropRate', 'RarityValueAtT', 'CumulativeResourceEfficiency', 'PityProgressAtT',

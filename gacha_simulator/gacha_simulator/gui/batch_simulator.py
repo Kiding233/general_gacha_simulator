@@ -13,6 +13,11 @@ from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import Pool as MPPool
 from dataclasses import dataclass, field as dc_field
 
+from gacha_simulator.core.stop_condition import StopCondition
+from gacha_simulator.core.strategy import (
+    STRATEGY_REGISTRY, create_strategy,
+)
+
 
 @dataclass
 class SimulationEnv:
@@ -190,62 +195,7 @@ def _wk_init(
     _wk_strategy_params = strategy_params
 
 
-# --- Strategy & StopCondition（与 strategy_panel 保持一致）---
-class _SmartStrategy:
-    lookahead = None
-
-    def __init__(self, target_set):
-        self.target_set = target_set
-        self.acquired = {}
-        self._pool_to_targets = {}
-        for t in target_set.targets:
-            for pid in t.pool_ids:
-                if pid not in self._pool_to_targets:
-                    self._pool_to_targets[pid] = []
-                self._pool_to_targets[pid].append(t)
-
-    def _pool_needs_target(self, pool_id):
-        targets = self._pool_to_targets.get(pool_id, [])
-        for t in targets:
-            if self.acquired.get(t.card_id, 0) < t.quantity_needed:
-                return True
-        return False
-
-    def _get_needed_card_exchange(self, state):
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
-                continue
-            for pool in _wk_pools:
-                if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
-                        return pool.id
-        return None
-
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        from gacha_simulator.core.action import DrawAction, WaitAction
-
-        exchange_pool_id = self._get_needed_card_exchange(state)
-        if exchange_pool_id:
-            return DrawAction(pool_id=exchange_pool_id)
-
-        for pool in current_pools:
-            if not pool.is_exchange and self._pool_needs_target(pool.id) and state.can_afford(pool.cost):
-                return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
-
-
-class _AllPoolsEnd:
+class _AllPoolsEnd(StopCondition):
     def __init__(self, end_time):
         self.end_time = end_time
 
@@ -254,250 +204,6 @@ class _AllPoolsEnd:
 
     def description(self):
         return ""
-
-
-class _PoolQuotaStrategy:
-    lookahead = None
-
-    def __init__(self, target_set, pool_quotas=None):
-        self.target_set = target_set
-        self.acquired = {}
-        self.pool_quotas = pool_quotas or {}
-        self.pool_draw_counts = {}
-
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        from gacha_simulator.core.action import DrawAction, WaitAction
-
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
-                continue
-            for pool in _wk_pools:
-                if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
-                        return DrawAction(pool_id=pool.id)
-
-        for pool in current_pools:
-            if pool.is_exchange or not state.can_afford(pool.cost):
-                continue
-            pid = pool.id
-            quota = self.pool_quotas.get(pid)
-            drawn = self.pool_draw_counts.get(pid, 0)
-            if quota is None or drawn < quota:
-                if self._pool_needs_target(pool.id):
-                    self.pool_draw_counts[pid] = drawn + 1
-                    return DrawAction(pool_id=pid)
-
-        for pool in current_pools:
-            if not pool.is_exchange and state.can_afford(pool.cost):
-                pid = pool.id
-                quota = self.pool_quotas.get(pid)
-                drawn = self.pool_draw_counts.get(pid, 0)
-                if quota is None or drawn < quota:
-                    self.pool_draw_counts[pid] = drawn + 1
-                    return DrawAction(pool_id=pid)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def _pool_needs_target(self, pool_id):
-        for t in self.target_set.targets:
-            for pid in t.pool_ids:
-                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
-                    return True
-        return False
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
-
-
-class _PityReserveStrategy:
-    lookahead = None
-
-    def __init__(self, target_set, pity_threshold_pct=80.0):
-        self.target_set = target_set
-        self.acquired = {}
-        self.pity_threshold_pct = pity_threshold_pct / 100.0
-
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        from gacha_simulator.core.action import DrawAction, WaitAction
-
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
-                continue
-            for pool in _wk_pools:
-                if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
-                        return DrawAction(pool_id=pool.id)
-
-        for pool in current_pools:
-            if pool.is_exchange or not state.can_afford(pool.cost):
-                continue
-            if not self._pool_needs_target(pool.id):
-                continue
-
-            if _wk_pity_engine:
-                from gacha_simulator.core.pity import PityState
-                ps = PityState()
-                if _wk_pity_state_init and 'counters' in _wk_pity_state_init:
-                    for cname, cval in _wk_pity_state_init['counters'].items():
-                        ps.counters[cname] = cval
-                for iv in history:
-                    if iv.action_type == 'draw' and iv.pool_id == pool.id:
-                        _wk_pity_engine.after_draw(pool.id, ps, iv.card_id)
-                probs = {r.id: p for r, p in pool.rewards}
-                modified = _wk_pity_engine.before_draw(pool.id, ps, probs)
-                ssr_prob = sum(p for cid, p in modified.items() if 'ssr' in cid.lower())
-                if ssr_prob >= self.pity_threshold_pct:
-                    return DrawAction(pool_id=pool.id)
-            else:
-                return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def _pool_needs_target(self, pool_id):
-        for t in self.target_set.targets:
-            for pid in t.pool_ids:
-                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
-                    return True
-        return False
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
-
-
-class _StopOnTargetStrategy:
-    lookahead = None
-
-    def __init__(self, target_set, stop_on_featured=True, stop_on_any_target=False):
-        self.target_set = target_set
-        self.acquired = {}
-        self.stop_on_featured = stop_on_featured
-        self.stop_on_any_target = stop_on_any_target
-        self._stopped = False
-
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        from gacha_simulator.core.action import DrawAction, WaitAction
-
-        if self._stopped:
-            return WaitAction(duration=0)
-
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
-                continue
-            for pool in _wk_pools:
-                if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
-                        return DrawAction(pool_id=pool.id)
-
-        for pool in current_pools:
-            if not pool.is_exchange and self._pool_needs_target(pool.id) and state.can_afford(pool.cost):
-                return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in current_pools:
-            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-    def _pool_needs_target(self, pool_id):
-        for t in self.target_set.targets:
-            for pid in t.pool_ids:
-                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
-                    return True
-        return False
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
-            if self.stop_on_featured and iv.pity_triggered:
-                self._stopped = True
-            if self.stop_on_any_target and iv.card_id in {t.card_id for t in self.target_set.targets}:
-                self._stopped = True
-
-
-def _create_smart_strategy(target_set, params):
-    return _SmartStrategy(target_set)
-
-def _create_pool_quota_strategy(target_set, params):
-    quotas = params.get('pool_quotas', {})
-    return _PoolQuotaStrategy(target_set, pool_quotas=quotas)
-
-def _create_pity_reserve_strategy(target_set, params):
-    pct = params.get('pity_threshold_pct', 80.0)
-    return _PityReserveStrategy(target_set, pity_threshold_pct=pct)
-
-def _create_stop_on_target_strategy(target_set, params):
-    featured = params.get('stop_on_featured', True)
-    any_target = params.get('stop_on_any_target', False)
-    return _StopOnTargetStrategy(target_set, stop_on_featured=featured, stop_on_any_target=any_target)
-
-
-STRATEGY_REGISTRY = {
-    'smart': {
-        'display_name': '按需追卡',
-        'description': '优先兑换→按目标追卡→等待下一个池',
-        'factory': _create_smart_strategy,
-        'params': {},
-    },
-    'pool_quota': {
-        'display_name': '指定池配额',
-        'description': '在指定池子抽指定数量后切换',
-        'factory': _create_pool_quota_strategy,
-        'params': {
-            'pool_quotas': {
-                'type': 'pool_int_map',
-                'display_name': '各池配额',
-                'default': {},
-            },
-        },
-    },
-    'pity_reserve': {
-        'display_name': '保底预留',
-        'description': '只在大保底概率≥阈值时才抽卡',
-        'factory': _create_pity_reserve_strategy,
-        'params': {
-            'pity_threshold_pct': {
-                'type': 'float',
-                'display_name': '保底概率阈值(%)',
-                'default': 80.0,
-                'min': 0.0,
-                'max': 100.0,
-            },
-        },
-    },
-    'stop_on_target': {
-        'display_name': '目标即停',
-        'description': '抽到当期up/目标卡就停止',
-        'factory': _create_stop_on_target_strategy,
-        'params': {
-            'stop_on_featured': {
-                'type': 'bool',
-                'display_name': '抽到up即停',
-                'default': True,
-            },
-            'stop_on_any_target': {
-                'type': 'bool',
-                'display_name': '抽到任意目标即停',
-                'default': False,
-            },
-        },
-    },
-}
 
 
 # --- 单次模拟执行 ---
@@ -520,8 +226,7 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             targets.append(TargetCard(card_id=card_id, pool_ids=pools, quantity_needed=qty))
 
         target_set = TargetCardSet(targets)
-        strategy_factory = STRATEGY_REGISTRY.get(_wk_strategy_name, STRATEGY_REGISTRY['smart'])['factory']
-        strategy = strategy_factory(target_set, _wk_strategy_params)
+        strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
         stop_cond = _AllPoolsEnd(_wk_end_time)
 
         pity_state = None

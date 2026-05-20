@@ -1,5 +1,7 @@
-from typing import List, Dict, Set, Tuple, Optional, Callable, Any, NamedTuple
+from typing import List, Dict, Set, Tuple, Optional, Callable, Any, NamedTuple, Union
 from dataclasses import dataclass, field
+
+from .result_types import CompactResult
 
 
 @dataclass
@@ -588,7 +590,7 @@ def compute_custom_weighted_gdr(
 
 
 def compute_gdr_from_compact(
-    compact: Dict[str, Any],
+    compact: Union[Dict[str, Any], CompactResult],
     target_specs: Dict[str, int],
     gdr_key: str = 'target_achievement',
     desire_weights: Dict[str, float] = None,

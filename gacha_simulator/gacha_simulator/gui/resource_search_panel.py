@@ -107,6 +107,7 @@ class ResourceSearchWorker(QThread):
 
     def _simulate_with_resource(self, resource_value):
         from .batch_simulator import run_batch_parallel
+        from ..core.strategy import strategy_type_to_key
         ir = dict(self._initial_resources_backup)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
@@ -122,8 +123,8 @@ class ResourceSearchWorker(QThread):
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
-            strategy_name='smart',
-            strategy_params={},
+            strategy_name=strategy_type_to_key(self.config_store.strategy_type),
+            strategy_params=self.config_store.strategy_params,
         )
         from gacha_simulator.core.gdr import compute_success_probability
         return compute_success_probability(histories, self.target_specs, self.gdr_key, self.gdr_threshold,

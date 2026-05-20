@@ -1,14 +1,43 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import List, Optional, TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Dict, Set, TYPE_CHECKING
+
 from .action import Action
 from .schedule import PoolSchedule
 from .target_card import TargetCardSet
 
 if TYPE_CHECKING:
     from .state import GachaState
-    from .info_vector import InfoVector
     from .pool import Pool
     from .stop_condition import StopCondition
+    from .pity import PityEngine, PityState
+
+
+@dataclass
+class StrategyContext:
+    state: 'GachaState'
+    current_pools: List['Pool']
+    all_pools: List['Pool']
+    future_schedules: List[PoolSchedule]
+    target_cards: TargetCardSet
+    stop_condition: 'StopCondition'
+    _pity_engine: Optional['PityEngine'] = field(default=None, repr=False)
+    _pity_state: Optional['PityState'] = field(default=None, repr=False)
+    acquired: Dict[str, int] = field(default_factory=dict)
+    pool_draw_counts: Dict[str, int] = field(default_factory=dict)
+    total_draws: int = 0
+    last_draw_pity_triggered: bool = False
+
+    def get_pity_probabilities(self, pool_id: str) -> Dict[str, float]:
+        if self._pity_engine is None:
+            return {}
+        pool = next((p for p in self.current_pools if p.id == pool_id), None)
+        if pool is None or pool.is_exchange:
+            return {}
+        probs = {r.id: p for r, p in pool.rewards}
+        return self._pity_engine.before_draw(pool_id, self._pity_state, probs)
 
 
 class Strategy(ABC):
@@ -18,21 +47,225 @@ class Strategy(ABC):
     def name(cls) -> str:
         return cls.__name__
 
+    @classmethod
     @abstractmethod
     def description(cls) -> str:
         return ""
 
     @abstractmethod
-    def select_action(
-        self,
-        state: 'GachaState',
-        history: List['InfoVector'],
-        current_pools: List['Pool'],
-        future_schedules: List[PoolSchedule],
-        target_cards: TargetCardSet,
-        stop_condition: 'StopCondition',
-    ) -> Action:
+    def select_action(self, ctx: StrategyContext) -> Action:
         pass
+
+
+class SmartStrategy(Strategy):
+    lookahead = None
+
+    def __init__(self):
+        self._pool_to_targets: Dict[str, list] = {}
+        self._last_target_cards_id: int = 0
+
+    @classmethod
+    def description(cls) -> str:
+        return "按需追卡：优先兑换→按目标追卡→等待下一个池"
+
+    def _ensure_pool_to_targets(self, ctx: StrategyContext):
+        tc_id = id(ctx.target_cards)
+        if tc_id != self._last_target_cards_id:
+            self._pool_to_targets.clear()
+            for t in ctx.target_cards.targets:
+                for pid in t.pool_ids:
+                    if pid not in self._pool_to_targets:
+                        self._pool_to_targets[pid] = []
+                    self._pool_to_targets[pid].append(t)
+            self._last_target_cards_id = tc_id
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        self._ensure_pool_to_targets(ctx)
+        for t in self._pool_to_targets.get(pool_id, []):
+            if ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def _get_needed_card_exchange(self, ctx: StrategyContext) -> Optional[str]:
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in ctx.all_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
+                        return pool.id
+        return None
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import DrawAction, WaitAction
+
+        exchange_pool_id = self._get_needed_card_exchange(ctx)
+        if exchange_pool_id:
+            return DrawAction(pool_id=exchange_pool_id)
+
+        for pool in ctx.current_pools:
+            if not pool.is_exchange and self._pool_needs_target(pool.id, ctx) and ctx.state.can_afford(pool.cost):
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+
+class PoolQuotaStrategy(Strategy):
+    lookahead = None
+
+    def __init__(self, pool_quotas: Optional[Dict[str, int]] = None):
+        self.pool_quotas = pool_quotas or {}
+
+    @classmethod
+    def description(cls) -> str:
+        return "指定池配额：在指定池子抽指定数量后切换"
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        for t in ctx.target_cards.targets:
+            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import DrawAction, WaitAction
+
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in ctx.all_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in ctx.current_pools:
+            if pool.is_exchange or not ctx.state.can_afford(pool.cost):
+                continue
+            pid = pool.id
+            quota = self.pool_quotas.get(pid)
+            drawn = ctx.pool_draw_counts.get(pid, 0)
+            if quota is None or drawn < quota:
+                if self._pool_needs_target(pool.id, ctx):
+                    return DrawAction(pool_id=pid)
+
+        for pool in ctx.current_pools:
+            if not pool.is_exchange and ctx.state.can_afford(pool.cost):
+                pid = pool.id
+                quota = self.pool_quotas.get(pid)
+                drawn = ctx.pool_draw_counts.get(pid, 0)
+                if quota is None or drawn < quota:
+                    return DrawAction(pool_id=pid)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+
+class PityReserveStrategy(Strategy):
+    lookahead = None
+
+    def __init__(self, pity_threshold_pct: float = 80.0):
+        self.pity_threshold_pct = pity_threshold_pct / 100.0
+
+    @classmethod
+    def description(cls) -> str:
+        return "保底预留：只在大保底概率≥阈值时才抽卡"
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        for t in ctx.target_cards.targets:
+            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import DrawAction, WaitAction
+
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in ctx.all_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in ctx.current_pools:
+            if pool.is_exchange or not ctx.state.can_afford(pool.cost):
+                continue
+            if not self._pool_needs_target(pool.id, ctx):
+                continue
+
+            pool_probs = ctx.get_pity_probabilities(pool.id)
+            if pool_probs:
+                ssr_prob = sum(p for cid, p in pool_probs.items() if 'ssr' in cid.lower())
+                if ssr_prob >= self.pity_threshold_pct:
+                    return DrawAction(pool_id=pool.id)
+            else:
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+
+class StopOnTargetStrategy(Strategy):
+    lookahead = None
+
+    def __init__(self, stop_on_featured: bool = True, stop_on_any_target: bool = False):
+        self.stop_on_featured = stop_on_featured
+        self.stop_on_any_target = stop_on_any_target
+
+    @classmethod
+    def description(cls) -> str:
+        return "目标即停：抽到当期up/目标卡就停止"
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        for t in ctx.target_cards.targets:
+            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import DrawAction, WaitAction
+
+        if self.stop_on_featured and ctx.last_draw_pity_triggered:
+            return WaitAction(duration=0)
+        if self.stop_on_any_target:
+            for t in ctx.target_cards.targets:
+                if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                    return WaitAction(duration=0)
+
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in ctx.all_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in ctx.current_pools:
+            if not pool.is_exchange and self._pool_needs_target(pool.id, ctx) and ctx.state.can_afford(pool.cost):
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
 
 
 class FixedCountStrategy(Strategy):
@@ -43,22 +276,13 @@ class FixedCountStrategy(Strategy):
     def description(cls) -> str:
         return "抽指定次数后停止"
 
-    def select_action(
-        self,
-        state: 'GachaState',
-        history: List['InfoVector'],
-        current_pools: List['Pool'],
-        future_schedules: List[PoolSchedule],
-        target_cards: TargetCardSet,
-        stop_condition: 'StopCondition',
-    ) -> Action:
-        from .action import WaitAction
-        if len(history) >= self.count:
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import WaitAction, DrawAction
+        if ctx.total_draws >= self.count:
             return WaitAction(duration=0)
-        if not current_pools:
+        if not ctx.current_pools:
             return WaitAction(duration=1)
-        from .action import DrawAction
-        return DrawAction(pool_id=current_pools[0].id)
+        return DrawAction(pool_id=ctx.current_pools[0].id)
 
 
 class TargetHuntingStrategy(Strategy):
@@ -69,19 +293,11 @@ class TargetHuntingStrategy(Strategy):
     def description(cls) -> str:
         return "指定池抽卡：只从指定池子抽卡"
 
-    def select_action(
-        self,
-        state: 'GachaState',
-        history: List['InfoVector'],
-        current_pools: List['Pool'],
-        future_schedules: List[PoolSchedule],
-        target_cards: TargetCardSet,
-        stop_condition: 'StopCondition',
-    ) -> Action:
+    def select_action(self, ctx: StrategyContext) -> Action:
         from .action import DrawAction, WaitAction
-        target_pools = [p for p in current_pools if p.id in self.target_pool_ids]
+        target_pools = [p for p in ctx.current_pools if p.id in self.target_pool_ids]
         for pool in target_pools:
-            if state.can_afford(pool.cost):
+            if ctx.state.can_afford(pool.cost):
                 return DrawAction(pool_id=pool.id)
         return WaitAction(duration=3600)
 
@@ -95,20 +311,124 @@ class CompositeStrategy(Strategy):
     def description(cls) -> str:
         return "组合多个策略"
 
-    def select_action(
-        self,
-        state: 'GachaState',
-        history: List['InfoVector'],
-        current_pools: List['Pool'],
-        future_schedules: List[PoolSchedule],
-        target_cards: TargetCardSet,
-        stop_condition: 'StopCondition',
-    ) -> Action:
+    def select_action(self, ctx: StrategyContext) -> Action:
         for strategy in self.strategies:
-            action = strategy.select_action(
-                state, history, current_pools, future_schedules, target_cards, stop_condition
-            )
+            action = strategy.select_action(ctx)
             if self.mode == 'first_valid' and action is not None:
                 return action
         from .action import WaitAction
         return WaitAction(duration=0)
+
+
+STRATEGY_REGISTRY = {
+    'smart': {
+        'display_name': '按需追卡',
+        'description': '优先兑换→按目标追卡→等待下一个池',
+        'class': SmartStrategy,
+        'params': {},
+    },
+    'pool_quota': {
+        'display_name': '指定池配额',
+        'description': '在指定池子抽指定数量后切换',
+        'class': PoolQuotaStrategy,
+        'params': {
+            'pool_quotas': {
+                'type': 'pool_int_map',
+                'display_name': '各池配额',
+                'default': {},
+            },
+        },
+    },
+    'pity_reserve': {
+        'display_name': '保底预留',
+        'description': '只在大保底概率≥阈值时才抽卡',
+        'class': PityReserveStrategy,
+        'params': {
+            'pity_threshold_pct': {
+                'type': 'float',
+                'display_name': '保底概率阈值(%)',
+                'default': 80.0,
+                'min': 0.0,
+                'max': 100.0,
+            },
+        },
+    },
+    'stop_on_target': {
+        'display_name': '目标即停',
+        'description': '抽到当期up/目标卡就停止',
+        'class': StopOnTargetStrategy,
+        'params': {
+            'stop_on_featured': {
+                'type': 'bool',
+                'display_name': '抽到up即停',
+                'default': True,
+            },
+            'stop_on_any_target': {
+                'type': 'bool',
+                'display_name': '抽到任意目标即停',
+                'default': False,
+            },
+        },
+    },
+    'target_hunting': {
+        'display_name': '指定池追卡',
+        'description': '只从指定池子抽卡',
+        'class': TargetHuntingStrategy,
+        'params': {
+            'target_pool_ids': {
+                'type': 'string_list',
+                'display_name': '目标池ID列表',
+                'default': [],
+            },
+        },
+    },
+    'fixed_count': {
+        'display_name': '固定次数',
+        'description': '抽指定次数后停止',
+        'class': FixedCountStrategy,
+        'params': {
+            'count': {
+                'type': 'int',
+                'display_name': '抽卡次数',
+                'default': 100,
+                'min': 1,
+            },
+        },
+    },
+}
+
+
+def create_strategy(strategy_name: str, params: Optional[Dict[str, Any]] = None) -> Strategy:
+    entry = STRATEGY_REGISTRY.get(strategy_name)
+    if entry is None:
+        raise ValueError(f"Unknown strategy: {strategy_name}")
+    cls = entry['class']
+    p = params or {}
+    if strategy_name == 'smart':
+        return cls()
+    elif strategy_name == 'pool_quota':
+        return cls(pool_quotas=p.get('pool_quotas', {}))
+    elif strategy_name == 'pity_reserve':
+        return cls(pity_threshold_pct=p.get('pity_threshold_pct', 80.0))
+    elif strategy_name == 'stop_on_target':
+        return cls(
+            stop_on_featured=p.get('stop_on_featured', True),
+            stop_on_any_target=p.get('stop_on_any_target', False),
+        )
+    elif strategy_name == 'target_hunting':
+        return cls(target_pool_ids=p.get('target_pool_ids', []))
+    elif strategy_name == 'fixed_count':
+        return cls(count=p.get('count', 100))
+    return cls()
+
+
+def strategy_type_to_key(display_name: str) -> str:
+    for key, entry in STRATEGY_REGISTRY.items():
+        if entry['display_name'] == display_name:
+            return key
+    return 'smart'
+
+
+def strategy_key_to_type(key: str) -> str:
+    entry = STRATEGY_REGISTRY.get(key)
+    return entry['display_name'] if entry else '按需追卡'

@@ -13,8 +13,7 @@ from .state import GachaState
 from .action import DrawAction, WaitAction
 from .target_card import TargetCard, TargetCardSet
 from .stop_condition import StopCondition
-from .strategy import Strategy
-from ..service.gacha_service import GachaService
+from .strategy import Strategy, StrategyContext
 
 import fnmatch
 
@@ -87,30 +86,24 @@ class _DrawTargetStrategy(Strategy):
     def __init__(self, target_card_ids: Set[str], pool_id: str):
         self.target_card_ids = target_card_ids
         self.pool_id = pool_id
-        self.acquired: Dict[str, int] = {}
 
     @classmethod
     def description(cls) -> str:
         return "最差影响分析：从目标池抽卡"
 
-    def select_action(self, state, history, current_pools,
-                      future_schedules, target_cards, stop_cond):
-        for pool in current_pools:
-            if pool.id == self.pool_id and state.can_afford(pool.cost):
+    def select_action(self, ctx: StrategyContext):
+        for pool in ctx.current_pools:
+            if pool.id == self.pool_id and ctx.state.can_afford(pool.cost):
                 return DrawAction(pool_id=pool.id)
 
         wait_time = 86400
-        for pool in current_pools:
+        for pool in ctx.current_pools:
             if (pool.available_until is not None
-                    and pool.available_until > state.real_time):
-                wait_time = min(wait_time, pool.available_until - state.real_time)
+                    and pool.available_until > ctx.state.real_time):
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
         if wait_time <= 0:
             wait_time = 3600
         return WaitAction(duration=wait_time)
-
-    def observe(self, iv):
-        if iv.action_type == 'draw' and iv.card_id:
-            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
 
 
 class WorstImpactAnalyzer:
@@ -434,6 +427,8 @@ class WorstImpactAnalyzer:
 
     def _run_single_simulation(self, pool, resource, pity_state,
                                 target_set, strategy, stop_cond):
+        from ..service.gacha_service import GachaService
+
         pity_state_obj = PityState()
         if pity_state:
             for cname, cval in pity_state.items():

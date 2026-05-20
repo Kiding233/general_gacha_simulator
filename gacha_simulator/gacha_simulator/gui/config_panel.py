@@ -1057,15 +1057,17 @@ class ConfigPanel(QWidget):
         self._update_preview()
 
     def _setup_strategy_tab(self, parent):
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY
+
         group = QGroupBox("策略与目标卡")
         layout = QVBoxLayout(group)
 
         strategy_layout = QFormLayout()
         self.strategy_type = _NoWheelComboBox()
-        self.strategy_type.addItems([
-            "按需追卡",
-            "指定池抽卡",
-        ])
+        self._strategy_display_names = [
+            entry['display_name'] for entry in STRATEGY_REGISTRY.values()
+        ]
+        self.strategy_type.addItems(self._strategy_display_names)
         strategy_layout.addRow("策略类型:", self.strategy_type)
 
         self.auto_wait = QCheckBox("无池可抽时自动等待")
@@ -1838,6 +1840,7 @@ class ConfigPanel(QWidget):
             },
             'strategy': {
                 'type': store.strategy_type,
+                'params': dict(store.strategy_params),
                 'auto_wait': store.auto_wait,
             },
             'target_cards': target_cards,
@@ -1940,6 +1943,7 @@ class ConfigPanel(QWidget):
 
         strategy = config.get('strategy', {})
         store.strategy_type = strategy.get('type', '按需追卡')
+        store.strategy_params = strategy.get('params', {})
         store.auto_wait = strategy.get('auto_wait', True)
 
         for tc in config.get('target_cards', []):
@@ -2371,6 +2375,7 @@ class ConfigPanel(QWidget):
         store.pity.counter_init = {pd['name']: pd.get('counter_init', 0) for pd in self._pity_defs}
 
         store.strategy_type = self.strategy_type.currentText()
+        store.strategy_params = {}
         store.auto_wait = self.auto_wait.isChecked()
 
         store.target_cards = []
@@ -2478,8 +2483,8 @@ class ConfigPanel(QWidget):
         if self._pity_defs:
             self.pity_list.setCurrentRow(0)
 
-        strategy_map = {"按需追卡": 0, "指定池抽卡": 1}
-        self.strategy_type.setCurrentIndex(strategy_map.get(store.strategy_type, 0))
+        strategy_idx = self._strategy_display_names.index(store.strategy_type) if store.strategy_type in self._strategy_display_names else 0
+        self.strategy_type.setCurrentIndex(strategy_idx)
         self.auto_wait.setChecked(store.auto_wait)
 
         target_data = [{'card_id': tc.card_id, 'quantity': tc.quantity, 'pools': tc.pool_ids}

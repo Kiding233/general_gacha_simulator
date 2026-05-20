@@ -68,6 +68,10 @@ class SimulationThread(QThread):
             )
             collector.add_extractor('draw_sequence', seq_extractor)
 
+            from ..core.strategy import strategy_type_to_key
+
+            strategy_key = strategy_type_to_key(config_store.strategy_type)
+
             run_batch_parallel(
                 pools=env.pools,
                 schedule_mgr=env.schedule_mgr,
@@ -82,8 +86,8 @@ class SimulationThread(QThread):
                 max_workers=max_workers,
                 seed=seed,
                 progress_callback=lambda done, total: self.progress.emit(done, total),
-                strategy_name='smart',
-                strategy_params={},
+                strategy_name=strategy_key,
+                strategy_params=config_store.strategy_params,
                 on_result=collector.on_result,
             )
 
