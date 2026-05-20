@@ -136,11 +136,12 @@ class WorstImpactAnalyzer:
         )
         return self._checker.is_success
 
-    def _check_pool_success(self, pool_card_counts):
+    def _check_pool_success(self, pool_card_counts, pool_idx):
         if not self._featured_ids:
             return False
         for cid in self._featured_ids:
-            if pool_card_counts.get(cid, 0) < 1:
+            virtual_id = f'{cid}__pool_{pool_idx}'
+            if pool_card_counts.get(virtual_id, 0) < 1:
                 return False
         return True
 
@@ -291,31 +292,37 @@ class WorstImpactAnalyzer:
                     matching.append(pdef.name)
                     if pdef.target_distribution:
                         resolved_per_pity[pdef.name] = self._resolve_targets(
-                            pdef.target_distribution
+                            pdef.target_distribution, pool_idx
                         )
+
+            virtual_featured = {f'{cid}__pool_{pool_idx}' for cid in self._featured_ids}
+            virtual_ssr = {f'{cid}__pool_{pool_idx}' for cid in self._ssr_ids}
 
             pool_specs[pid] = PoolPitySpec(
                 pity_names=matching,
-                featured_ids=self._featured_ids,
-                ssr_ids=self._ssr_ids,
+                featured_ids=virtual_featured,
+                ssr_ids=virtual_ssr,
                 resolved_targets=resolved_per_pity,
             )
 
         return PityEngine(pool_specs, pity_defs, behaviors)
 
-    def _resolve_targets(self, target_dist):
+    def _resolve_targets(self, target_dist, pool_idx=None):
         resolved = {}
         for key, weight in target_dist.items():
             k = key.lower()
             if k in ('limited_ssr', 'featured'):
                 for cid in self._featured_ids:
-                    resolved[cid] = resolved.get(cid, 0) + weight
+                    vid = f'{cid}__pool_{pool_idx}' if pool_idx is not None else cid
+                    resolved[vid] = resolved.get(vid, 0) + weight
             elif k in ('standard_ssr', 'offrate'):
                 for cid in (self._ssr_ids - self._featured_ids):
-                    resolved[cid] = resolved.get(cid, 0) + weight
+                    vid = f'{cid}__pool_{pool_idx}' if pool_idx is not None else cid
+                    resolved[vid] = resolved.get(vid, 0) + weight
             elif k == 'ssr':
                 for cid in self._ssr_ids:
-                    resolved[cid] = resolved.get(cid, 0) + weight
+                    vid = f'{cid}__pool_{pool_idx}' if pool_idx is not None else cid
+                    resolved[vid] = resolved.get(vid, 0) + weight
             else:
                 resolved[key] = resolved.get(key, 0) + weight
         return resolved
@@ -339,11 +346,22 @@ class WorstImpactAnalyzer:
         schedules = []
         for pool_idx in range(self._num_new_pools):
             pid = f'_worst_impact_pool_{pool_idx}'
+            pool_rewards = []
+            for r, prob in self._rewards:
+                rid = r.id
+                if rid in self._featured_ids:
+                    rid = f'{rid}__pool_{pool_idx}'
+                pool_rewards.append((Reward(
+                    id=rid,
+                    name=r.name,
+                    resources_gained=r.resources_gained,
+                    extra_info=r.extra_info,
+                ), prob))
             pool = Pool(
                 id=pid,
                 name=f'新池子#{pool_idx}',
                 cost=self._parsed_cost,
-                rewards=self._rewards,
+                rewards=pool_rewards,
                 available_from=pool_idx * self._pool_duration,
                 available_until=(pool_idx + 1) * self._pool_duration,
             )
@@ -357,14 +375,15 @@ class WorstImpactAnalyzer:
         return pools, schedule_mgr
 
     def _build_target_card_set(self):
-        pool_ids = [f'_worst_impact_pool_{i}' for i in range(self._num_new_pools)]
         targets = []
-        for card_id in self._featured_ids:
-            targets.append(TargetCard(
-                card_id=card_id,
-                pool_ids=pool_ids,
-                quantity_needed=1,
-            ))
+        for pool_idx in range(self._num_new_pools):
+            pid = f'_worst_impact_pool_{pool_idx}'
+            for card_id in self._featured_ids:
+                targets.append(TargetCard(
+                    card_id=f'{card_id}__pool_{pool_idx}',
+                    pool_ids=[pid],
+                    quantity_needed=1,
+                ))
         return TargetCardSet(targets)
 
     def _compute_pool_distribution(self, resource, pity_state,
@@ -404,7 +423,7 @@ class WorstImpactAnalyzer:
             for pool_idx in range(self._num_new_pools):
                 pid = f'_worst_impact_pool_{pool_idx}'
                 pcc = pool_card_counts.get(pid, {})
-                if self._check_pool_success(pcc):
+                if self._check_pool_success(pcc, pool_idx):
                     consecutive += 1
                 else:
                     break
