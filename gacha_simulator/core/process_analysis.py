@@ -247,8 +247,8 @@ def compute_bb(traces: List[SampleTrace],
         return {
             'pattern_table': [],
             'pool_success_rates': {},
-            'never_success_prob': 0.0,
-            'never_fail_prob': 0.0,
+            'all_fail_prob': 0.0,
+            'all_success_prob': 0.0,
             'pool_ids': [],
             'total': 0,
         }
@@ -264,8 +264,8 @@ def compute_bb(traces: List[SampleTrace],
         pid: pool_success_counts[pid] / total for pid in pool_ids
     }
 
-    never_success = sum(1 for t in traces if not any(t.pool_success.values()))
-    never_fail = sum(1 for t in traces if all(t.pool_success.values()))
+    all_fail = sum(1 for t in traces if not any(t.pool_success.values()))
+    all_success = sum(1 for t in traces if all(t.pool_success.values()))
 
     results = []
     cumulative = 0.0
@@ -296,8 +296,8 @@ def compute_bb(traces: List[SampleTrace],
     return {
         'pattern_table': results,
         'pool_success_rates': pool_success_rates,
-        'never_success_prob': never_success / total,
-        'never_fail_prob': never_fail / total,
+        'all_fail_prob': all_fail / total,
+        'all_success_prob': all_success / total,
         'pool_ids': pool_ids,
         'total': total,
     }
