@@ -994,6 +994,102 @@ class Strategy(ABC):
         pass
 ```
 
+**步骤 2.4 `STRATEGY_REGISTRY` 迁移与扩展**：
+
+```python
+# core/strategy.py
+STRATEGY_REGISTRY = {
+    'smart': {
+        'display_name': '按需追卡',
+        'description': '优先兑换→按目标追卡→等待下一个池',
+        'class': SmartStrategy,
+        'params': {},
+    },
+    'pool_quota': {
+        'display_name': '指定池配额',
+        'description': '在指定池子抽指定数量后切换',
+        'class': PoolQuotaStrategy,
+        'params': {
+            'pool_quotas': {
+                'type': 'pool_int_map',
+                'display_name': '各池配额',
+                'default': {},
+            },
+        },
+    },
+    'pity_reserve': {
+        'display_name': '保底预留',
+        'description': '只在大保底概率≥阈值时才抽卡',
+        'class': PityReserveStrategy,
+        'params': {
+            'pity_threshold_pct': {
+                'type': 'float',
+                'display_name': '保底概率阈值(%)',
+                'default': 80.0,
+                'min': 0.0,
+                'max': 100.0,
+            },
+        },
+    },
+    'stop_on_target': {
+        'display_name': '目标即停',
+        'description': '抽到当期up/目标卡就停止',
+        'class': StopOnTargetStrategy,
+        'params': {
+            'stop_on_featured': {
+                'type': 'bool',
+                'display_name': '抽到up即停',
+                'default': True,
+            },
+            'stop_on_any_target': {
+                'type': 'bool',
+                'display_name': '抽到任意目标即停',
+                'default': False,
+            },
+        },
+    },
+    'target_hunting': {
+        'display_name': '指定池追卡',
+        'description': '只从指定池子抽卡',
+        'class': TargetHuntingStrategy,
+        'params': {
+            'target_pool_ids': {
+                'type': 'string_list',
+                'display_name': '目标池ID列表',
+                'default': [],
+            },
+        },
+    },
+    'fixed_count': {
+        'display_name': '固定次数',
+        'description': '抽指定次数后停止',
+        'class': FixedCountStrategy,
+        'params': {
+            'count': {
+                'type': 'int',
+                'display_name': '抽卡次数',
+                'default': 100,
+                'min': 1,
+            },
+        },
+    },
+}
+```
+
+**与当前 `STRATEGY_REGISTRY` 的差异**：
+
+| 策略 | 当前 batch_simulator.py | 重构后 core/strategy.py | 变化 |
+|------|------------------------|------------------------|------|
+| `smart` | ✅ 有 | ✅ 保留 | 类从 core 导入 |
+| `pool_quota` | ✅ 有 | ✅ 迁移 | 从 batch_simulator 迁入 |
+| `pity_reserve` | ✅ 有 | ✅ 迁移 | 从 batch_simulator 迁入 |
+| `stop_on_target` | ✅ 有 | ✅ 迁移 | 从 batch_simulator 迁入 |
+| `target_hunting` | ❌ 无（core/strategy.py 有类但无注册） | ✅ **新增注册** | 之前无法通过注册表使用 |
+| `fixed_count` | ❌ 无（core/strategy.py 有类但无注册） | ✅ **新增注册** | 之前无法通过注册表使用 |
+| `composite` | ❌ 无 | ❌ 不注册 | 组合策略，由代码内部使用 |
+
+**关键改进**：`TargetHuntingStrategy` 和 `FixedCountStrategy` 之前虽然存在于 `core/strategy.py`，但未注册到 `STRATEGY_REGISTRY`，无法被 GUI 面板选择使用。重构后统一注册，所有策略都可选择。`params` 从简单列表升级为带类型、默认值、显示名的结构化定义，支持 Phase 4 的 UI 动态生成。
+
 **步骤 2.5 `GachaService` 构建 `StrategyContext`**：
 
 ```python
@@ -1191,14 +1287,55 @@ def _create_pity_reserve_strategy(target_set, params):
 
 ### Phase 4：ConfigStore 与 UI 联动（优先级：P2）
 
+**目标**：所有 GUI 面板从统一注册表选择策略，消除硬编码
+
 | 步骤 | 内容 | 工作量 |
 |------|------|--------|
 | 4.1 | `ConfigStore` 增加 `strategy_name: str` 和 `strategy_params: Dict` | 小 |
-| 4.2 | 添加旧字段迁移逻辑（`strategy_type` → `strategy_name`） | 小 |
+| 4.2 | 添加旧字段迁移逻辑（`strategy_type` → `strategy_name`，中文→英文 key） | 小 |
 | 4.3 | `config_panel.py` 从 `STRATEGY_REGISTRY` 动态生成策略下拉框 | 中 |
-| 4.4 | 策略参数配置区根据 `params` 定义动态生成控件 | 中 |
+| 4.4 | 策略参数配置区根据 `params` 定义动态生成控件（int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, pool_int_map→自定义控件） | 中 |
 | 4.5 | 移除 5 处硬编码 `strategy_name='smart'`，改用 ConfigStore 值 | 小 |
 | 4.6 | GUI 面板权重获取改为通过 `set_store()` / 信号，而非 `self.window()` | 中 |
+| 4.7 | 分析面板（analysis_panel.py）增加策略选择下拉框 | 中 |
+
+**步骤 4.2 旧字段迁移**：
+
+```python
+OLD_TO_NEW = {
+    "按需追卡": "smart",
+    "指定池抽卡": "target_hunting",
+    "指定池配额": "pool_quota",
+    "保底预留": "pity_reserve",
+    "目标即停": "stop_on_target",
+    "固定次数": "fixed_count",
+}
+```
+
+**步骤 4.3 动态生成策略下拉框**：
+
+当前 `config_panel.py` 硬编码了 2 个选项：
+```python
+self.strategy_type.addItems(["按需追卡", "指定池抽卡"])
+```
+
+重构后从注册表动态生成：
+```python
+from gacha_simulator.core.strategy import STRATEGY_REGISTRY
+
+items = []
+self._strategy_keys = []
+for key, defn in STRATEGY_REGISTRY.items():
+    items.append(defn['display_name'])
+    self._strategy_keys.append(key)
+self.strategy_type.addItems(items)
+```
+
+**步骤 4.7 分析面板策略选择**：
+
+当前 `analysis_panel.py` 没有策略选择功能——它只展示模拟结果，不控制模拟过程。策略选择发生在 `gacha_panel.py`（批量模拟入口）和 `config_panel.py`（策略配置）中。
+
+但用户可能期望在分析面板中也能选择策略并重新运行模拟。这属于**新功能**而非重构，建议在 Phase 5 中实现。Phase 4 的范围是确保所有现有入口（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel）都从 ConfigStore 读取策略配置，而非硬编码。
 
 ---
 
@@ -1287,6 +1424,7 @@ class Strategy(ABC):
                               future_schedules, target_cards, stop_condition,
                               pity_engine=None, pity_state=None,
                               acquired=None, pool_draw_counts=None,
+                              total_draws=0,
                               last_draw_pity_triggered=False):
         ctx = StrategyContext(
             state=state, current_pools=current_pools,
@@ -1296,6 +1434,7 @@ class Strategy(ABC):
             _pity_engine=pity_engine, _pity_state=pity_state,
             acquired=acquired or {},
             pool_draw_counts=pool_draw_counts or {},
+            total_draws=total_draws,
             last_draw_pity_triggered=last_draw_pity_triggered,
         )
         return self.select_action(ctx)
