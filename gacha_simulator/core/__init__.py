@@ -1,5 +1,3 @@
-from .result_types import CompactResult
-from .collector import SimulationCollector, InfoVectorCollector, CompactCollector
 from .pool import Pool, Reward, CostOption, PoolCost, parse_cost_string, cost_to_string
 from .action import Action, DrawAction, WaitAction
 from .state import GachaState
@@ -10,19 +8,8 @@ from .pity import (
     PityState, PityEngine,
     parse_pity_file, build_pity_engine,
 )
-from .strategy import (
-    Strategy, StrategyContext,
-    SmartStrategy, PoolQuotaStrategy, PityReserveStrategy, StopOnTargetStrategy,
-    FixedCountStrategy, TargetHuntingStrategy, CompositeStrategy,
-    STRATEGY_REGISTRY, create_strategy, strategy_type_to_key, strategy_key_to_type,
-)
-from .stop_condition import (
-    StopCondition, FixedActionCountCondition, ResourceThresholdCondition,
-    TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition,
-    AllPoolsEndCondition, LastDrawCardCondition,
-    STOP_CONDITION_REGISTRY, create_stop_condition,
-    stop_condition_type_to_key, stop_condition_key_to_type,
-)
+from .strategy import Strategy, FixedCountStrategy, TargetHuntingStrategy, CompositeStrategy
+from .stop_condition import StopCondition, FixedActionCountCondition, ResourceThresholdCondition, TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition
 from .resource_gain import ResourceGainFunction, LinearResourceGain, PeriodicResourceGain, StepResourceGain, CompositeResourceGain, ScheduleResourceGain
 from .generalized_drop_rate import (
     GeneralizedDropRate, RarityValueAtT, CumulativeResourceEfficiency, PityProgressAtT,
@@ -37,7 +24,7 @@ from .gdr_analysis import (
 from .pool_config import PoolConfig, CardDef, CardCatalog, parse_schedule_file, parse_distribution_file, parse_cards_file, load_config_from_directory
 from .distribution import EmpiricalDistribution, DistributionSummary, JointSamples, WorstCaseAnalysis, BestCaseAnalysis
 from .risk_analysis import RiskAnalyzer
-from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, register_gdr, SuccessChecker, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability
+from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, SuccessChecker, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability
 from .per_pool_analysis import (
     PoolSnapshot, CumulativeSnapshot,
     compute_per_pool_snapshots, compute_cumulative_snapshots,
@@ -54,7 +41,6 @@ from .vulnerability import (
 )
 from .worst_impact import (
     WorstImpactAnalyzer, WorstImpactResult, ConditionalResourceDistribution,
-    DrawTargetStrategy,
 )
 from .streaming import StreamingAnalyzer, StreamingSuccessCounter, SharedResultCollector, DrawSequenceExtractor, extract_aggregate, extract_process
 from .process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
@@ -66,8 +52,6 @@ from .process_analysis import (
 )
 
 __all__ = [
-    'CompactResult',
-    'SimulationCollector', 'InfoVectorCollector', 'CompactCollector',
     'Pool', 'Reward', 'CostOption', 'PoolCost', 'parse_cost_string', 'cost_to_string',
     'Action', 'DrawAction', 'WaitAction',
     'GachaState',
@@ -76,15 +60,8 @@ __all__ = [
     'PityDefParsed', 'PoolPitySpec',
     'PityState', 'PityEngine',
     'parse_pity_file', 'build_pity_engine',
-    'Strategy', 'StrategyContext',
-    'SmartStrategy', 'PoolQuotaStrategy', 'PityReserveStrategy', 'StopOnTargetStrategy',
-    'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
-    'STRATEGY_REGISTRY', 'create_strategy',
-    'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition',
-    'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
-    'AllPoolsEndCondition', 'LastDrawCardCondition',
-    'STOP_CONDITION_REGISTRY', 'create_stop_condition',
-    'stop_condition_type_to_key', 'stop_condition_key_to_type',
+    'Strategy', 'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
+    'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition', 'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
     'ResourceGainFunction', 'LinearResourceGain', 'PeriodicResourceGain', 'StepResourceGain', 'CompositeResourceGain', 'ScheduleResourceGain',
     'GeneralizedDropRate', 'RarityValueAtT', 'CumulativeResourceEfficiency', 'PityProgressAtT',
     'DropRateBetweenT1T2', 'TotalValueAtT', 'TargetCardCountAtT', 'TargetCardPercentageAtT', 'TargetCardEfficiencyAtT',
@@ -95,7 +72,7 @@ __all__ = [
     'PoolConfig', 'CardDef', 'CardCatalog', 'parse_schedule_file', 'parse_distribution_file', 'parse_cards_file', 'load_config_from_directory',
     'EmpiricalDistribution', 'DistributionSummary', 'JointSamples', 'WorstCaseAnalysis', 'BestCaseAnalysis',
     'RiskAnalyzer',
-    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'register_gdr', 'SuccessChecker', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability',
+    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'SuccessChecker', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability',
     'PoolSnapshot', 'CumulativeSnapshot',
     'compute_per_pool_snapshots', 'compute_cumulative_snapshots',
     'compute_per_pool_snapshots_batch', 'compute_cumulative_snapshots_batch',
@@ -105,7 +82,6 @@ __all__ = [
     'VulnerabilityInterval', 'PityStatSnapshot', 'PoolVulnerabilityResult', 'VulnerabilityAnalysisResult',
     'compute_vulnerability_analysis', 'plot_vulnerability', 'plot_vulnerability_ridge',
     'WorstImpactAnalyzer', 'WorstImpactResult', 'ConditionalResourceDistribution',
-    'DrawTargetStrategy',
     'StreamingAnalyzer', 'StreamingSuccessCounter', 'SharedResultCollector', 'DrawSequenceExtractor', 'extract_aggregate', 'extract_process',
     'PoolEvent', 'SampleTrace', 'infer_events', 'compute_pool_gdr_cumulative', 'compute_pool_gdr_single_pool',
     'compute_aa', 'compute_bb', 'compute_ab', 'compute_ba',

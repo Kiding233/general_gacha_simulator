@@ -1,7 +1,5 @@
-from typing import List, Dict, Set, Tuple, Optional, Callable, Any, NamedTuple, Union
+from typing import List, Dict, Set, Tuple, Optional, Callable, Any, NamedTuple
 from dataclasses import dataclass, field
-
-from .result_types import CompactResult
 
 
 @dataclass
@@ -502,25 +500,6 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
 }
 
 
-def register_gdr(definition: GDRDefinition, *, overwrite: bool = False) -> None:
-    existing = UNIFIED_GDR_REGISTRY.get(definition.key)
-    if existing is not None and not overwrite:
-        if existing.display_name != definition.display_name:
-            raise ValueError(
-                f"GDR key '{definition.key}' already registered as "
-                f"'{existing.display_name}', cannot re-register as "
-                f"'{definition.display_name}'. Use overwrite=True to force."
-            )
-        return
-    for k, v in UNIFIED_GDR_REGISTRY.items():
-        if k != definition.key and v.display_name == definition.display_name:
-            raise ValueError(
-                f"GDR display_name '{definition.display_name}' already used "
-                f"by key '{k}'. Choose a different display_name."
-            )
-    UNIFIED_GDR_REGISTRY[definition.key] = definition
-
-
 def _build_legacy_registries():
     gdr_registry = {}
     compact_gdr_registry = {}
@@ -609,7 +588,7 @@ def compute_custom_weighted_gdr(
 
 
 def compute_gdr_from_compact(
-    compact: Union[Dict[str, Any], CompactResult],
+    compact: Dict[str, Any],
     target_specs: Dict[str, int],
     gdr_key: str = 'target_achievement',
     desire_weights: Dict[str, float] = None,

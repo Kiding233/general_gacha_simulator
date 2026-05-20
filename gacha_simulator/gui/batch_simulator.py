@@ -13,11 +13,6 @@ from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import Pool as MPPool
 from dataclasses import dataclass, field as dc_field
 
-from gacha_simulator.core.stop_condition import StopCondition, AllPoolsEndCondition
-from gacha_simulator.core.strategy import (
-    STRATEGY_REGISTRY, create_strategy,
-)
-
 
 @dataclass
 class SimulationEnv:
@@ -168,7 +163,6 @@ _wk_pity_state_init = None
 _wk_card_defs = None
 _wk_strategy_name = 'smart'
 _wk_strategy_params = {}
-_wk_ssr_ids = set()
 
 
 def _wk_init(
@@ -181,11 +175,10 @@ def _wk_init(
     card_defs,
     strategy_name,
     strategy_params,
-    ssr_ids=None,
 ):
     global _wk_pools, _wk_schedule_mgr, _wk_end_time
     global _wk_pity_engine, _wk_resource_gain, _wk_pity_state_init, _wk_card_defs
-    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids
+    global _wk_strategy_name, _wk_strategy_params
     _wk_pools = pools
     _wk_schedule_mgr = schedule_mgr
     _wk_end_time = end_time
@@ -195,7 +188,262 @@ def _wk_init(
     _wk_card_defs = card_defs
     _wk_strategy_name = strategy_name
     _wk_strategy_params = strategy_params
-    _wk_ssr_ids = ssr_ids or set()
+
+
+class _AllPoolsEnd:
+    def __init__(self, end_time):
+        self.end_time = end_time
+
+    def check(self, state, history=None, stats=None):
+        return state.real_time >= self.end_time
+
+    def description(self):
+        return ""
+
+
+class _PoolQuotaStrategy:
+    lookahead = None
+
+    def __init__(self, target_set, pool_quotas=None):
+        self.target_set = target_set
+        self.acquired = {}
+        self.pool_quotas = pool_quotas or {}
+        self.pool_draw_counts = {}
+
+    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
+        from gacha_simulator.core.action import DrawAction, WaitAction
+
+        for t in self.target_set.targets:
+            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in _wk_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in current_pools:
+            if pool.is_exchange or not state.can_afford(pool.cost):
+                continue
+            pid = pool.id
+            quota = self.pool_quotas.get(pid)
+            drawn = self.pool_draw_counts.get(pid, 0)
+            if quota is None or drawn < quota:
+                if self._pool_needs_target(pool.id):
+                    self.pool_draw_counts[pid] = drawn + 1
+                    return DrawAction(pool_id=pid)
+
+        for pool in current_pools:
+            if not pool.is_exchange and state.can_afford(pool.cost):
+                pid = pool.id
+                quota = self.pool_quotas.get(pid)
+                drawn = self.pool_draw_counts.get(pid, 0)
+                if quota is None or drawn < quota:
+                    self.pool_draw_counts[pid] = drawn + 1
+                    return DrawAction(pool_id=pid)
+
+        wait_time = 86400
+        for pool in current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
+                wait_time = min(wait_time, pool.available_until - state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+    def _pool_needs_target(self, pool_id):
+        for t in self.target_set.targets:
+            for pid in t.pool_ids:
+                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
+                    return True
+        return False
+
+    def observe(self, iv):
+        if iv.action_type == 'draw' and iv.card_id:
+            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
+
+
+class _PityReserveStrategy:
+    lookahead = None
+
+    def __init__(self, target_set, pity_threshold_pct=80.0):
+        self.target_set = target_set
+        self.acquired = {}
+        self.pity_threshold_pct = pity_threshold_pct / 100.0
+
+    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
+        from gacha_simulator.core.action import DrawAction, WaitAction
+
+        for t in self.target_set.targets:
+            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in _wk_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in current_pools:
+            if pool.is_exchange or not state.can_afford(pool.cost):
+                continue
+            if not self._pool_needs_target(pool.id):
+                continue
+
+            if _wk_pity_engine:
+                from gacha_simulator.core.pity import PityState
+                ps = PityState()
+                if _wk_pity_state_init and 'counters' in _wk_pity_state_init:
+                    for cname, cval in _wk_pity_state_init['counters'].items():
+                        ps.counters[cname] = cval
+                for iv in history:
+                    if iv.action_type == 'draw' and iv.pool_id == pool.id:
+                        _wk_pity_engine.after_draw(pool.id, ps, iv.card_id)
+                probs = {r.id: p for r, p in pool.rewards}
+                modified = _wk_pity_engine.before_draw(pool.id, ps, probs)
+                ssr_prob = sum(p for cid, p in modified.items() if 'ssr' in cid.lower())
+                if ssr_prob >= self.pity_threshold_pct:
+                    return DrawAction(pool_id=pool.id)
+            else:
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
+                wait_time = min(wait_time, pool.available_until - state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+    def _pool_needs_target(self, pool_id):
+        for t in self.target_set.targets:
+            for pid in t.pool_ids:
+                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
+                    return True
+        return False
+
+    def observe(self, iv):
+        if iv.action_type == 'draw' and iv.card_id:
+            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
+
+
+class _StopOnTargetStrategy:
+    lookahead = None
+
+    def __init__(self, target_set, stop_on_featured=True, stop_on_any_target=False):
+        self.target_set = target_set
+        self.acquired = {}
+        self.stop_on_featured = stop_on_featured
+        self.stop_on_any_target = stop_on_any_target
+        self._stopped = False
+
+    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
+        from gacha_simulator.core.action import DrawAction, WaitAction
+
+        if self._stopped:
+            return WaitAction(duration=0)
+
+        for t in self.target_set.targets:
+            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in _wk_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
+                        return DrawAction(pool_id=pool.id)
+
+        for pool in current_pools:
+            if not pool.is_exchange and self._pool_needs_target(pool.id) and state.can_afford(pool.cost):
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > state.real_time:
+                wait_time = min(wait_time, pool.available_until - state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+    def _pool_needs_target(self, pool_id):
+        for t in self.target_set.targets:
+            for pid in t.pool_ids:
+                if pid == pool_id and self.acquired.get(t.card_id, 0) < t.quantity_needed:
+                    return True
+        return False
+
+    def observe(self, iv):
+        if iv.action_type == 'draw' and iv.card_id:
+            self.acquired[iv.card_id] = self.acquired.get(iv.card_id, 0) + 1
+            if self.stop_on_featured and iv.pity_triggered:
+                self._stopped = True
+            if self.stop_on_any_target and iv.card_id in {t.card_id for t in self.target_set.targets}:
+                self._stopped = True
+
+
+def _create_smart_strategy(target_set, params):
+    from gacha_simulator.core.strategy import SmartStrategy
+    return SmartStrategy(target_set, all_pools=_wk_pools)
+
+def _create_pool_quota_strategy(target_set, params):
+    quotas = params.get('pool_quotas', {})
+    return _PoolQuotaStrategy(target_set, pool_quotas=quotas)
+
+def _create_pity_reserve_strategy(target_set, params):
+    pct = params.get('pity_threshold_pct', 80.0)
+    return _PityReserveStrategy(target_set, pity_threshold_pct=pct)
+
+def _create_stop_on_target_strategy(target_set, params):
+    featured = params.get('stop_on_featured', True)
+    any_target = params.get('stop_on_any_target', False)
+    return _StopOnTargetStrategy(target_set, stop_on_featured=featured, stop_on_any_target=any_target)
+
+
+STRATEGY_REGISTRY = {
+    'smart': {
+        'display_name': '按需追卡',
+        'description': '优先兑换→按目标追卡→等待下一个池',
+        'factory': _create_smart_strategy,
+        'params': {},
+    },
+    'pool_quota': {
+        'display_name': '指定池配额',
+        'description': '在指定池子抽指定数量后切换',
+        'factory': _create_pool_quota_strategy,
+        'params': {
+            'pool_quotas': {
+                'type': 'pool_int_map',
+                'display_name': '各池配额',
+                'default': {},
+            },
+        },
+    },
+    'pity_reserve': {
+        'display_name': '保底预留',
+        'description': '只在大保底概率≥阈值时才抽卡',
+        'factory': _create_pity_reserve_strategy,
+        'params': {
+            'pity_threshold_pct': {
+                'type': 'float',
+                'display_name': '保底概率阈值(%)',
+                'default': 80.0,
+                'min': 0.0,
+                'max': 100.0,
+            },
+        },
+    },
+    'stop_on_target': {
+        'display_name': '目标即停',
+        'description': '抽到当期up/目标卡就停止',
+        'factory': _create_stop_on_target_strategy,
+        'params': {
+            'stop_on_featured': {
+                'type': 'bool',
+                'display_name': '抽到up即停',
+                'default': True,
+            },
+            'stop_on_any_target': {
+                'type': 'bool',
+                'display_name': '抽到任意目标即停',
+                'default': False,
+            },
+        },
+    },
+}
 
 
 # --- 单次模拟执行 ---
@@ -218,8 +466,9 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             targets.append(TargetCard(card_id=card_id, pool_ids=pools, quantity_needed=qty))
 
         target_set = TargetCardSet(targets)
-        strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
-        stop_cond = AllPoolsEndCondition(_wk_end_time)
+        strategy_factory = STRATEGY_REGISTRY.get(_wk_strategy_name, STRATEGY_REGISTRY['smart'])['factory']
+        strategy = strategy_factory(target_set, _wk_strategy_params)
+        stop_cond = _AllPoolsEnd(_wk_end_time)
 
         pity_state = None
         if _wk_pity_state_init:
@@ -235,7 +484,6 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             pity_engine=_wk_pity_engine,
             resource_gain=_wk_resource_gain,
             pity_state=pity_state,
-            ssr_ids=_wk_ssr_ids,
         )
         state = GachaState(resources=dict(initial_resources))
         return service.run_simulation_compact(state)
@@ -262,14 +510,12 @@ def run_batch_parallel(
     strategy_name: str = 'smart',
     strategy_params: Optional[dict] = None,
     on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
-    ssr_ids: Optional[set] = None,
 ) -> List[Optional[Dict[str, Any]]]:
     if max_workers <= 1:
         _wk_init(
             pools, schedule_mgr, end_time, pity_engine,
             resource_gain, pity_state_init, card_defs,
             strategy_name, strategy_params or {},
-            ssr_ids=ssr_ids,
         )
         results = [] if on_result is None else None
         n_failed = 0
@@ -294,14 +540,40 @@ def run_batch_parallel(
 
     chunksize = max(1, num_simulations // (max_workers * 4))
 
-    with MPPool(
-        processes=max_workers,
-        initializer=_wk_init,
-        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}, ssr_ids),
-    ) as mp_pool:
+    try:
+        with MPPool(
+            processes=max_workers,
+            initializer=_wk_init,
+            initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}),
+        ) as mp_pool:
+            results = [] if on_result is None else None
+            n_failed = 0
+            for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
+                if on_result is not None:
+                    if result is not None:
+                        on_result(result)
+                    else:
+                        n_failed += 1
+                else:
+                    results.append(result)
+                if progress_callback:
+                    progress_callback(i + 1, num_simulations)
+            if n_failed > 0:
+                print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
+
+        return results if on_result is None else []
+    except (OSError, PermissionError) as e:
+        print(f"[WARNING] multiprocessing failed ({e}), falling back to single-thread")
+        _wk_init(
+            pools, schedule_mgr, end_time, pity_engine,
+            resource_gain, pity_state_init, card_defs,
+            strategy_name, strategy_params or {},
+        )
         results = [] if on_result is None else None
         n_failed = 0
-        for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
+        for i in range(num_simulations):
+            s = seeds[i]
+            result = _wk_run_single((s, target_specs, initial_resources))
             if on_result is not None:
                 if result is not None:
                     on_result(result)
@@ -313,8 +585,7 @@ def run_batch_parallel(
                 progress_callback(i + 1, num_simulations)
         if n_failed > 0:
             print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
-
-    return results if on_result is None else []
+        return results if on_result is None else []
 
 
 class SimulationEnvBuilder:

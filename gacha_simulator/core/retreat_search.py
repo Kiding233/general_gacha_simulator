@@ -38,8 +38,6 @@ class RetreatSearchEngine:
         max_workers: int = 4,
         max_binary_iterations: int = 20,
         precision_draws: int = 1,
-        strategy_name: str = 'smart',
-        strategy_params: Optional[Dict] = None,
         progress_callback: Optional[Callable[[str, int], None]] = None,
     ):
         self.config_store = config_store
@@ -56,8 +54,6 @@ class RetreatSearchEngine:
         self.max_workers = max_workers
         self.max_binary_iterations = max_binary_iterations
         self.precision_draws = precision_draws
-        self.strategy_name = strategy_name
-        self.strategy_params = strategy_params or {}
         self.progress_callback = progress_callback or (lambda msg, pct: None)
         self._should_stop = False
 
@@ -97,8 +93,8 @@ class RetreatSearchEngine:
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
-            strategy_name=self.strategy_name,
-            strategy_params=self.strategy_params,
+            strategy_name='smart',
+            strategy_params={},
         )
         return compute_success_probability(histories, target_specs, self.gdr_key, self.gdr_threshold,
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)

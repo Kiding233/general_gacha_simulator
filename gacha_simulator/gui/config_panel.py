@@ -1057,40 +1057,21 @@ class ConfigPanel(QWidget):
         self._update_preview()
 
     def _setup_strategy_tab(self, parent):
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY
-        from gacha_simulator.core.stop_condition import STOP_CONDITION_REGISTRY
-
         group = QGroupBox("策略与目标卡")
         layout = QVBoxLayout(group)
 
         strategy_layout = QFormLayout()
         self.strategy_type = _NoWheelComboBox()
-        self._strategy_display_names = [
-            entry['display_name'] for entry in STRATEGY_REGISTRY.values()
-            if not entry.get('internal')
-        ]
-        self.strategy_type.addItems(self._strategy_display_names)
+        self.strategy_type.addItems([
+            "按需追卡",
+            "指定池抽卡",
+        ])
         strategy_layout.addRow("策略类型:", self.strategy_type)
-
-        self.stop_condition_type = _NoWheelComboBox()
-        self._stop_condition_display_names = [
-            entry['display_name'] for entry in STOP_CONDITION_REGISTRY.values()
-        ]
-        self.stop_condition_type.addItems(self._stop_condition_display_names)
-        strategy_layout.addRow("停止条件:", self.stop_condition_type)
 
         self.auto_wait = QCheckBox("无池可抽时自动等待")
         self.auto_wait.setChecked(True)
         strategy_layout.addRow("", self.auto_wait)
         layout.addLayout(strategy_layout)
-
-        self._strategy_params_group = QGroupBox("策略参数")
-        self._strategy_params_layout = QFormLayout(self._strategy_params_group)
-        layout.addWidget(self._strategy_params_group)
-        self._strategy_param_widgets = {}
-
-        self.strategy_type.currentIndexChanged.connect(self._on_strategy_type_changed)
-        self._on_strategy_type_changed(0)
 
         target_label = QLabel("目标卡（卡ID + 需求数量）:")
         layout.addWidget(target_label)
@@ -1127,115 +1108,10 @@ class ConfigPanel(QWidget):
         self.card_id_list.itemDoubleClicked.connect(self._on_card_id_double_clicked)
         layout.addWidget(self.card_id_list)
 
-        self.strategy_type.currentIndexChanged.connect(self._on_strategy_type_changed)
+        self.strategy_type.currentIndexChanged.connect(self._update_preview)
         self.target_table.cellChanged.connect(self._update_preview)
 
         parent.addWidget(group)
-
-    def _on_strategy_type_changed(self, idx):
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
-
-        while self._strategy_params_layout.rowCount() > 0:
-            self._strategy_params_layout.removeRow(0)
-        self._strategy_param_widgets = {}
-
-        display_name = self.strategy_type.currentText()
-        key = strategy_type_to_key(display_name)
-        entry = STRATEGY_REGISTRY.get(key)
-        if not entry or not entry.get('params'):
-            self._strategy_params_group.setVisible(False)
-            if hasattr(self, 'preview_text'):
-                self._update_preview()
-            return
-
-        self._strategy_params_group.setVisible(True)
-        for param_key, param_def in entry['params'].items():
-            ptype = param_def.get('type', 'str')
-            display = param_def.get('display_name', param_key)
-            default = param_def.get('default')
-
-            if ptype == 'int':
-                widget = _NoWheelSpinBox()
-                widget.setRange(param_def.get('min', 0), param_def.get('max', 99999))
-                widget.setValue(int(default) if default is not None else 0)
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-            elif ptype == 'float':
-                widget = _NoWheelDoubleSpinBox()
-                widget.setRange(param_def.get('min', 0.0), param_def.get('max', 99999.0))
-                widget.setDecimals(2)
-                widget.setSingleStep(0.1)
-                widget.setValue(float(default) if default is not None else 0.0)
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-            elif ptype == 'bool':
-                widget = QCheckBox()
-                widget.setChecked(bool(default) if default is not None else False)
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-            elif ptype == 'string_list':
-                widget = QLineEdit()
-                widget.setText(','.join(str(v) for v in default) if default else '')
-                widget.setPlaceholderText("逗号分隔")
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-            elif ptype == 'pool_int_map':
-                widget = QLineEdit()
-                widget.setText(','.join(f'{k}:{v}' for k, v in default.items()) if default else '')
-                widget.setPlaceholderText("pool_id:数量,...")
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-            else:
-                widget = QLineEdit()
-                widget.setText(str(default) if default is not None else '')
-                self._strategy_params_layout.addRow(f"{display}:", widget)
-
-            self._strategy_param_widgets[param_key] = (ptype, widget)
-
-        if hasattr(self, 'preview_text'):
-            self._update_preview()
-
-    def _get_strategy_params_from_widgets(self):
-        params = {}
-        for param_key, (ptype, widget) in self._strategy_param_widgets.items():
-            if ptype == 'int':
-                params[param_key] = widget.value()
-            elif ptype == 'float':
-                params[param_key] = widget.value()
-            elif ptype == 'bool':
-                params[param_key] = widget.isChecked()
-            elif ptype == 'string_list':
-                text = widget.text().strip()
-                params[param_key] = [s.strip() for s in text.split(',') if s.strip()] if text else []
-            elif ptype == 'pool_int_map':
-                text = widget.text().strip()
-                result = {}
-                if text:
-                    for part in text.split(','):
-                        part = part.strip()
-                        if ':' in part:
-                            k, v = part.split(':', 1)
-                            try:
-                                result[k.strip()] = int(v.strip())
-                            except ValueError:
-                                pass
-                params[param_key] = result
-            else:
-                params[param_key] = widget.text().strip()
-        return params
-
-    def _set_strategy_params_to_widgets(self, params):
-        for param_key, (ptype, widget) in self._strategy_param_widgets.items():
-            value = params.get(param_key)
-            if value is None:
-                continue
-            if ptype == 'int':
-                widget.setValue(int(value))
-            elif ptype == 'float':
-                widget.setValue(float(value))
-            elif ptype == 'bool':
-                widget.setChecked(bool(value))
-            elif ptype == 'string_list':
-                widget.setText(','.join(str(v) for v in value) if isinstance(value, list) else str(value))
-            elif ptype == 'pool_int_map':
-                widget.setText(','.join(f'{k}:{v}' for k, v in value.items()) if isinstance(value, dict) else str(value))
-            else:
-                widget.setText(str(value))
 
     def _setup_weight_config(self, parent):
         info_label = QLabel("配置每张卡的权重，用于加权满意度和总出卡价值等广义出率的计算。\n"
@@ -1962,12 +1838,7 @@ class ConfigPanel(QWidget):
             },
             'strategy': {
                 'type': store.strategy_type,
-                'params': dict(store.strategy_params),
                 'auto_wait': store.auto_wait,
-            },
-            'stop_condition': {
-                'type': store.stop_condition_type,
-                'params': dict(store.stop_condition_params),
             },
             'target_cards': target_cards,
             'card_defs': card_defs,
@@ -1982,8 +1853,18 @@ class ConfigPanel(QWidget):
         }
 
     def _get_sim_params(self):
-        if self._store is not None:
-            return self._store.simulation_count, self._store.max_workers, self._store.seed
+        main_window = self.window()
+        gacha_panel = None
+        if hasattr(main_window, 'gacha_panel'):
+            gacha_panel = main_window.gacha_panel
+        elif hasattr(main_window, 'tabs'):
+            for i in range(main_window.tabs.count()):
+                w = main_window.tabs.widget(i)
+                if type(w).__name__ == 'GachaPanel':
+                    gacha_panel = w
+                    break
+        if gacha_panel and hasattr(gacha_panel, 'sim_count'):
+            return gacha_panel.sim_count.value(), gacha_panel.max_workers.value(), gacha_panel.seed.value()
         return 1000, 4, 42
 
     def set_config(self, config):
@@ -2058,25 +1939,8 @@ class ConfigPanel(QWidget):
         )
 
         strategy = config.get('strategy', {})
-        strategy_type_raw = strategy.get('type', '按需追卡')
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key, strategy_key_to_type
-        if strategy_type_raw in STRATEGY_REGISTRY:
-            strategy_type_resolved = strategy_key_to_type(strategy_type_raw)
-        else:
-            strategy_type_resolved = strategy_type_raw
-        store.strategy_type = strategy_type_resolved
-        store.strategy_params = strategy.get('params', {})
+        store.strategy_type = strategy.get('type', '按需追卡')
         store.auto_wait = strategy.get('auto_wait', True)
-
-        stop_cond = config.get('stop_condition', {})
-        stop_type_raw = stop_cond.get('type', '所有池结束')
-        from gacha_simulator.core.stop_condition import STOP_CONDITION_REGISTRY, stop_condition_key_to_type
-        if stop_type_raw in STOP_CONDITION_REGISTRY:
-            stop_type_resolved = stop_condition_key_to_type(stop_type_raw)
-        else:
-            stop_type_resolved = stop_type_raw
-        store.stop_condition_type = stop_type_resolved
-        store.stop_condition_params = stop_cond.get('params', {})
 
         for tc in config.get('target_cards', []):
             from ..core.config_store import TargetCardEntry
@@ -2507,9 +2371,6 @@ class ConfigPanel(QWidget):
         store.pity.counter_init = {pd['name']: pd.get('counter_init', 0) for pd in self._pity_defs}
 
         store.strategy_type = self.strategy_type.currentText()
-        store.strategy_params = self._get_strategy_params_from_widgets()
-        store.stop_condition_type = self.stop_condition_type.currentText()
-        store.stop_condition_params = {}
         store.auto_wait = self.auto_wait.isChecked()
 
         store.target_cards = []
@@ -2617,11 +2478,8 @@ class ConfigPanel(QWidget):
         if self._pity_defs:
             self.pity_list.setCurrentRow(0)
 
-        strategy_idx = self._strategy_display_names.index(store.strategy_type) if store.strategy_type in self._strategy_display_names else 0
-        self.strategy_type.setCurrentIndex(strategy_idx)
-        self._set_strategy_params_to_widgets(store.strategy_params)
-        stop_idx = self._stop_condition_display_names.index(store.stop_condition_type) if store.stop_condition_type in self._stop_condition_display_names else 0
-        self.stop_condition_type.setCurrentIndex(stop_idx)
+        strategy_map = {"按需追卡": 0, "指定池抽卡": 1}
+        self.strategy_type.setCurrentIndex(strategy_map.get(store.strategy_type, 0))
         self.auto_wait.setChecked(store.auto_wait)
 
         target_data = [{'card_id': tc.card_id, 'quantity': tc.quantity, 'pools': tc.pool_ids}

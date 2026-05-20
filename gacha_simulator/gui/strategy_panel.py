@@ -74,7 +74,6 @@ class StrategyWorker(QThread):
             'pity_state_init': env.pity_state_init,
             'card_defs': env.card_defs,
             'initial_resources': env.initial_resources,
-            'ssr_ids': env.ssr_ids,
         }
 
     def _forward_method(self):
@@ -98,9 +97,6 @@ class StrategyWorker(QThread):
             current_specs[card_id] = self.target_qty
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
-            _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],
                 schedule_mgr=self._sim_env['schedule_mgr'],
@@ -114,9 +110,8 @@ class StrategyWorker(QThread):
                 num_simulations=self.num_simulations,
                 max_workers=self.max_workers,
                 seed=0,
-                strategy_name=_skey,
-                strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
+                strategy_name='smart',
+                strategy_params={},
             )
             from gacha_simulator.core.gdr import compute_success_probability
             prob = compute_success_probability(histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -162,9 +157,6 @@ class StrategyWorker(QThread):
         self.progress.emit("后退法: 初始完整集合模拟", 5)
 
         from .batch_simulator import run_batch_parallel
-        from ..core.strategy import strategy_type_to_key
-        _skey = strategy_type_to_key(self.config_store.strategy_type)
-        _sparams = self.config_store.strategy_params
         initial_histories = run_batch_parallel(
             pools=self._sim_env['pools'],
             schedule_mgr=self._sim_env['schedule_mgr'],
@@ -178,9 +170,8 @@ class StrategyWorker(QThread):
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
-            strategy_name=_skey,
-            strategy_params=_sparams,
-            ssr_ids=self._sim_env['ssr_ids'],
+            strategy_name='smart',
+            strategy_params={},
         )
         from gacha_simulator.core.gdr import compute_success_probability
         initial_prob = compute_success_probability(initial_histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -219,9 +210,6 @@ class StrategyWorker(QThread):
             del temp_specs[card_id]
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
-            _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],
                 schedule_mgr=self._sim_env['schedule_mgr'],
@@ -235,9 +223,8 @@ class StrategyWorker(QThread):
                 num_simulations=self.num_simulations,
                 max_workers=self.max_workers,
                 seed=0,
-                strategy_name=_skey,
-                strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
+                strategy_name='smart',
+                strategy_params={},
             )
             from gacha_simulator.core.gdr import compute_success_probability
             temp_prob = compute_success_probability(histories, temp_specs, self.gdr_key, self.gdr_threshold,
