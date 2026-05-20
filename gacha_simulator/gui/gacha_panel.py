@@ -351,6 +351,10 @@ class GachaPanel(QWidget):
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
 
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self.config_store.strategy_type) if hasattr(self, 'config_store') and self.config_store else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
+        self._log(f"使用策略: {_sname}")
         self._log(f"模拟完成，共 {n_results} 次")
 
         if isinstance(result_bundle, dict):

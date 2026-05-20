@@ -594,7 +594,12 @@ class RetreatSearchPanel(QWidget):
         from gacha_simulator.core.retreat_search import RetreatSearchResult
         assert isinstance(result, RetreatSearchResult)
 
-        lines = [f"<b>搜索模式:</b> {result.search_mode}"]
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
+
+        lines = [f"<b>使用策略:</b> {_sname}"]
+        lines.append(f"<b>搜索模式:</b> {result.search_mode}")
         lines.append(f"<b>起始池:</b> {result.from_pool_id}")
         lines.append(f"<b>基准资源:</b> {result.base_resource:.0f}")
         lines.append(f"<b>保底初始:</b> {result.pity_init}")

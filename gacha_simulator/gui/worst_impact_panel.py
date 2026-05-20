@@ -399,7 +399,12 @@ class WorstImpactPanel(QWidget):
 
         self.pity_gauge.set_value(result.pity_coverage)
 
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
+
         lines = [
+            f"使用策略: <b>{_sname}</b>",
             f"保守资源: <b>{result.worst_resource:.0f}</b>",
             f"大保底覆盖: <b>{result.pity_coverage:.2f}</b> 倍",
         ]

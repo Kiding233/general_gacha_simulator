@@ -541,7 +541,11 @@ class ResourceSearchPanel(QWidget):
         r = result.min_resource
         draws = r / result.cost_per_draw if result.cost_per_draw > 0 else 0
         precision_val = result.cost_per_draw * self.precision_spin.value()
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self.config_store.strategy_type) if self.config_store else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
         self.result_label.setText(
+            f"<b>使用策略:</b> {_sname}<br>"
             f"<b>最少所需资源:</b> {r:.0f} &nbsp;|&nbsp; "
             f"<b>约等于:</b> {draws:.1f} 抽 &nbsp;|&nbsp; "
             f"<b>对应成功率:</b> {result.final_success_probability:.2%}<br>"
