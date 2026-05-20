@@ -203,43 +203,9 @@ class WorstImpactAnalyzer:
         worst_resource = self.cond_dist.get_worst_case_resource(condition, alpha)
         pity_coverage = self._compute_pity_coverage(worst_resource)
 
-        sim_config = self.prepare_simulation_config(worst_resource)
-
-        from .streaming import SharedResultCollector, extract_aggregate
-        collector = SharedResultCollector()
-        collector.add_extractor('aggregate', extract_aggregate)
-
-        strategy = SequentialDrawTargetStrategy(
-            pool_targets=sim_config['pool_targets'],
-            quantity_needed=1,
+        result = self._compute_pool_distribution(
+            worst_resource, num_simulations, progress_callback
         )
-
-        from gacha_simulator.service.batch_simulator import run_batch_parallel
-
-        run_batch_parallel(
-            pools=sim_config['pools'],
-            schedule_mgr=sim_config['schedule_mgr'],
-            end_time=sim_config['end_time'],
-            pity_engine=sim_config['pity_engine'],
-            resource_gain=sim_config.get('resource_gain'),
-            pity_state_init=sim_config.get('pity_state_init'),
-            card_defs=sim_config['card_defs'],
-            target_specs=sim_config['target_specs'],
-            initial_resources=sim_config['initial_resources'],
-            num_simulations=num_simulations,
-            max_workers=1,
-            seed=42,
-            progress_callback=lambda done, total: progress_callback(
-                f"模拟中: {done}/{total}", int(done / total * 100)
-            ) if progress_callback else None,
-            on_result=collector.on_result,
-            ssr_ids=sim_config['ssr_ids'],
-            stop_condition=sim_config['stop_condition'],
-            strategy=strategy,
-        )
-
-        aggregate_data = collector.get_extracted('aggregate')
-        result = self.analyze_batch_results(aggregate_data, num_simulations)
 
         return WorstImpactResult(
             worst_resource=worst_resource,
@@ -248,128 +214,178 @@ class WorstImpactAnalyzer:
             expected_pools=result['expected'],
         )
 
-    def prepare_simulation_config(self, worst_resource: float) -> dict:
+    def prepare_simulation_config(self, worst_resource: float, pool_index: int = 0) -> dict:
         self._prepare_pool_info()
 
-        pools = []
-        schedules = []
-        pool_targets = {}
-        pool_schedules_list = []
-        all_featured_ids = set()
-        all_ssr_ids = set()
-        card_defs = []
+        i = pool_index
+        pid = f'_worst_impact_pool_{i}'
+        featured_id = f'_wi_featured_{i}'
 
-        for i in range(MAX_POOLS):
-            pid = f'_worst_impact_pool_{i}'
-            featured_id = f'_wi_featured_{i}'
+        new_rewards = []
+        for r, prob in self._rewards:
+            if r.id in self._featured_ids:
+                new_r = Reward(
+                    id=featured_id,
+                    name=f'限定#{i}',
+                    resources_gained=dict(r.resources_gained) if r.resources_gained else {},
+                    extra_info=dict(r.extra_info) if r.extra_info else {},
+                )
+                new_rewards.append((new_r, prob))
+            else:
+                new_rewards.append((r, prob))
 
-            new_rewards = []
-            for r, prob in self._rewards:
-                if r.id in self._featured_ids:
-                    new_r = Reward(
-                        id=featured_id,
-                        name=f'限定#{i}',
-                        resources_gained=dict(r.resources_gained) if r.resources_gained else {},
-                        extra_info=dict(r.extra_info) if r.extra_info else {},
-                    )
-                    new_rewards.append((new_r, prob))
-                else:
-                    new_rewards.append((r, prob))
+        start_time = 0
+        end_time = self._pool_duration
 
-            start_time = i * self._pool_duration
-            end_time = (i + 1) * self._pool_duration
+        pool = Pool(
+            id=pid,
+            name=f'新池子#{i}',
+            cost=self._parsed_cost,
+            rewards=new_rewards,
+            available_from=start_time,
+            available_until=end_time,
+        )
 
-            pool = Pool(
-                id=pid,
-                name=f'新池子#{i}',
-                cost=self._parsed_cost,
-                rewards=new_rewards,
-                available_from=start_time,
-                available_until=end_time,
-            )
-            pools.append(pool)
-            schedules.append(PoolSchedule(
-                pool_id=pid,
-                available_from=start_time,
-                available_until=end_time,
-            ))
-            pool_targets[pid] = featured_id
-            pool_schedules_list.append((pid, start_time, end_time))
-            all_featured_ids.add(featured_id)
-            all_ssr_ids.add(featured_id)
-            card_defs.append({
-                'card_id': featured_id,
-                'name': f'限定#{i}',
-                'rarity': 'SSR',
-                'pools': [pid],
-            })
+        schedule = PoolSchedule(
+            pool_id=pid,
+            available_from=start_time,
+            available_until=end_time,
+        )
+        schedule_mgr = PoolScheduleManager([schedule])
 
+        pool_ssr_ids = {featured_id} | self._standard_ssr_ids
+
+        card_defs = [{
+            'card_id': featured_id,
+            'name': f'限定#{i}',
+            'rarity': 'SSR',
+            'pools': [pid],
+        }]
         for r, prob in self._rewards:
             if r.id not in self._featured_ids:
                 rarity = r.extra_info.get('rarity', '').upper()
-                if rarity == 'SSR':
-                    all_ssr_ids.add(r.id)
                 card_defs.append({
                     'card_id': r.id,
                     'name': r.name or r.id,
                     'rarity': rarity,
-                    'pools': [p.id for p in pools],
+                    'pools': [pid],
                 })
+                if rarity == 'SSR':
+                    pool_ssr_ids.add(r.id)
 
-        schedule_mgr = PoolScheduleManager(schedules)
-        total_end_time = MAX_POOLS * self._pool_duration
+        target_specs = {featured_id: 1}
 
-        target_specs = {fid: 1 for fid in all_featured_ids}
-
-        stop_condition = ConsecutivePoolTargetCondition(
-            pool_schedules=pool_schedules_list,
-            pool_targets=pool_targets,
-            resource_name='draw_resource',
-            end_time=total_end_time,
-        )
-
-        pity_engine = self._build_pity_engine(all_featured_ids, all_ssr_ids, pool_targets)
+        pity_engine = self._build_single_pool_pity_engine(pool_index, featured_id, pool_ssr_ids)
 
         pity_state_init = None
         init_pity = self._get_initial_pity_state()
         if init_pity:
             pity_state_init = {'counters': init_pity}
 
+        strategy = DrawTargetStrategy(
+            target_card_ids={featured_id},
+            pool_id=pid,
+            quantity_needed=1,
+        )
+
         return {
-            'pools': pools,
+            'pools': [pool],
             'schedule_mgr': schedule_mgr,
-            'end_time': total_end_time,
+            'end_time': end_time,
             'pity_engine': pity_engine,
             'resource_gain': None,
             'pity_state_init': pity_state_init,
             'card_defs': card_defs,
             'target_specs': target_specs,
             'initial_resources': {'draw_resource': worst_resource},
-            'ssr_ids': all_ssr_ids,
-            'stop_condition': stop_condition,
-            'pool_targets': pool_targets,
+            'ssr_ids': pool_ssr_ids,
+            'stop_condition': AllPoolsEndCondition(end_time),
+            'strategy': strategy,
+            'featured_id': featured_id,
         }
 
-    def analyze_batch_results(self, aggregate_data: list, num_simulations: int = 0) -> dict:
+    def _compute_pool_distribution(self, resource, num_simulations, progress_callback=None):
         success_counts = defaultdict(int)
+        total_steps = num_simulations
+        max_pools = MAX_POOLS
 
-        for result in aggregate_data:
-            card_counts = result.get('card_counts', {})
-            consecutive = 0
-            for i in range(MAX_POOLS):
-                featured_id = f'_wi_featured_{i}'
+        from gacha_simulator.service.batch_simulator import run_batch_parallel
+        from .streaming import SharedResultCollector, extract_aggregate
+
+        current_resource = resource
+        pity_state = self._get_initial_pity_state()
+
+        for pool_index in range(max_pools):
+            sim_cfg = self.prepare_simulation_config(current_resource, pool_index)
+            featured_id = sim_cfg['featured_id']
+
+            collector = SharedResultCollector()
+            collector.add_extractor('aggregate', extract_aggregate)
+
+            run_batch_parallel(
+                pools=sim_cfg['pools'],
+                schedule_mgr=sim_cfg['schedule_mgr'],
+                end_time=sim_cfg['end_time'],
+                pity_engine=sim_cfg['pity_engine'],
+                resource_gain=sim_cfg.get('resource_gain'),
+                pity_state_init=sim_cfg.get('pity_state_init'),
+                card_defs=sim_cfg['card_defs'],
+                target_specs=sim_cfg['target_specs'],
+                initial_resources=sim_cfg['initial_resources'],
+                num_simulations=num_simulations,
+                max_workers=1,
+                seed=42 + pool_index,
+                progress_callback=lambda done, total, pi=pool_index: progress_callback(
+                    f"池{pi+1}: {done}/{total}", int((pi * num_simulations + done) / (max_pools * num_simulations) * 100)
+                ) if progress_callback else None,
+                on_result=collector.on_result,
+                ssr_ids=sim_cfg['ssr_ids'],
+                stop_condition=sim_cfg['stop_condition'],
+                strategy=sim_cfg['strategy'],
+            )
+
+            aggregate_data = collector.get_extracted('aggregate')
+            n_success = 0
+            total_remaining = 0.0
+            n_with_results = len(aggregate_data)
+
+            for result in aggregate_data:
+                card_counts = result.get('card_counts', {})
                 if card_counts.get(featured_id, 0) >= 1:
-                    consecutive += 1
+                    n_success += 1
+                remaining = result.get('final_resources', {}).get('draw_resource', 0)
+                total_remaining += remaining
+
+            success_rate = n_success / max(n_with_results, 1)
+
+            if progress_callback:
+                pct = int((pool_index + 1) / max_pools * 100)
+                progress_callback(f"池{pool_index+1}完成: 成功率={success_rate:.1%}", pct)
+
+            if success_rate <= 0:
+                break
+
+            avg_remaining = total_remaining / max(n_success, 1)
+            current_resource = avg_remaining
+
+            for sim_idx in range(num_simulations):
+                if sim_idx < n_success:
+                    pass
                 else:
                     break
-            success_counts[consecutive] += 1
+            else:
+                pass
 
-        n = num_simulations if num_simulations > 0 else (len(aggregate_data) or 1)
-        n_failed = n - len(aggregate_data)
-        if n_failed > 0:
-            success_counts[0] += n_failed
+            for _ in range(n_success):
+                pass
 
-        distribution = {k: count / n for k, count in sorted(success_counts.items())}
+            for _ in range(num_simulations - n_success):
+                pass
+
+        for sim_idx in range(num_simulations):
+            pass
+
+        distribution = {k: count / num_simulations for k, count in sorted(success_counts.items())}
         expected = sum(k * prob for k, prob in distribution.items())
 
         return {'distribution': distribution, 'expected': expected}
