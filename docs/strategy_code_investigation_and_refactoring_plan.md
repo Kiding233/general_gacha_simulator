@@ -1295,9 +1295,9 @@ def _create_pity_reserve_strategy(target_set, params):
 | 4.2 | 添加旧字段迁移逻辑（`strategy_type` → `strategy_name`，中文→英文 key） | 小 |
 | 4.3 | `config_panel.py` 从 `STRATEGY_REGISTRY` 动态生成策略下拉框 | 中 |
 | 4.4 | 策略参数配置区根据 `params` 定义动态生成控件（int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, pool_int_map→自定义控件） | 中 |
-| 4.5 | 移除 5 处硬编码 `strategy_name='smart'`，改用 ConfigStore 值 | 小 |
+| 4.5 | 移除 4 处硬编码 `strategy_name='smart'`（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel），改用 ConfigStore 值 | 小 |
 | 4.6 | GUI 面板权重获取改为通过 `set_store()` / 信号，而非 `self.window()` | 中 |
-| 4.7 | 分析面板（analysis_panel.py）增加策略选择下拉框 | 中 |
+| 4.7 | `worst_impact.py` 保留内部创建专用策略，不从 ConfigStore 读取 | 小 |
 
 **步骤 4.2 旧字段迁移**：
 
@@ -1331,11 +1331,11 @@ for key, defn in STRATEGY_REGISTRY.items():
 self.strategy_type.addItems(items)
 ```
 
-**步骤 4.7 分析面板策略选择**：
+**步骤 4.7 `worst_impact.py` 保留内部创建专用策略**：
 
-当前 `analysis_panel.py` 没有策略选择功能——它只展示模拟结果，不控制模拟过程。策略选择发生在 `gacha_panel.py`（批量模拟入口）和 `config_panel.py`（策略配置）中。
+`worst_impact.py` 构建虚拟池环境（`_worst_impact_pool_0` 等），需要配合这些虚拟池使用专用策略。当前使用 `SmartStrategy(target_set, all_pools=pools)`，重构后改为 `SmartStrategy()`（无构造参数，信息从 `StrategyContext` 获取）。`worst_impact.py` **不从 ConfigStore 读取策略**，因为它需要的是与虚拟池配合的特定策略，而非用户配置的通用策略。
 
-但用户可能期望在分析面板中也能选择策略并重新运行模拟。这属于**新功能**而非重构，建议在 Phase 5 中实现。Phase 4 的范围是确保所有现有入口（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel）都从 ConfigStore 读取策略配置，而非硬编码。
+同理，`worst_impact_panel.py` 也不需要策略选择下拉框——它的策略由分析逻辑内部决定。
 
 ---
 
