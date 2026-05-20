@@ -352,7 +352,7 @@ def main():
     app.setStyle('Fusion')
     app.setApplicationName("Gacha Simulator")
     app.setOrganizationName("Gacha Simulator")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("1.9.0")
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))
     window = MainWindow()
