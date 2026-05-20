@@ -257,7 +257,7 @@ retreat_search.py ─────→ run_batch_parallel() ──→ _wk_run_sing
                           strategy_name='smart'     STRATEGY_REGISTRY       _wk_* 全局变量
 
 worst_impact.py ───────→ 直接创建 GachaService ──→ run_simulation_compact()
-                          SmartStrategy()           直接 new                构造参数
+                          STRATEGY_REGISTRY['smart'] 统一接口    StrategyContext
 ```
 
 **关键发现**：
@@ -1297,7 +1297,7 @@ def _create_pity_reserve_strategy(target_set, params):
 | 4.4 | 策略参数配置区根据 `params` 定义动态生成控件（int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, pool_int_map→自定义控件） | 中 |
 | 4.5 | 移除 4 处硬编码 `strategy_name='smart'`（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel），改用 ConfigStore 值 | 小 |
 | 4.6 | GUI 面板权重获取改为通过 `set_store()` / 信号，而非 `self.window()` | 中 |
-| 4.7 | `worst_impact.py` 保留内部创建专用策略，不从 ConfigStore 读取 | 小 |
+| 4.7 | `worst_impact.py` 使用统一策略调用接口，固定选择特制策略（不从 ConfigStore 读取用户配置） | 小 |
 
 **步骤 4.2 旧字段迁移**：
 
@@ -1331,11 +1331,20 @@ for key, defn in STRATEGY_REGISTRY.items():
 self.strategy_type.addItems(items)
 ```
 
-**步骤 4.7 `worst_impact.py` 保留内部创建专用策略**：
+**步骤 4.7 `worst_impact.py` 使用统一策略调用接口，固定选择特制策略**：
 
-`worst_impact.py` 构建虚拟池环境（`_worst_impact_pool_0` 等），需要配合这些虚拟池使用专用策略。当前使用 `SmartStrategy(target_set, all_pools=pools)`，重构后改为 `SmartStrategy()`（无构造参数，信息从 `StrategyContext` 获取）。`worst_impact.py` **不从 ConfigStore 读取策略**，因为它需要的是与虚拟池配合的特定策略，而非用户配置的通用策略。
+`worst_impact.py` 构建虚拟池环境（`_worst_impact_pool_0` 等），需要配合这些虚拟池使用特定策略。重构后 `worst_impact.py` **仍然使用统一的策略调用接口**——通过 `STRATEGY_REGISTRY` 创建策略实例，通过 `StrategyContext` 传入信息，调用 `select_action(ctx)` ——只是它**固定选择特定策略**（如 `smart`），而非从 `ConfigStore` 读取用户配置的策略。这是因为虚拟池环境需要与之配合的特定策略逻辑，而非用户面向的通用策略选择。
 
-同理，`worst_impact_panel.py` 也不需要策略选择下拉框——它的策略由分析逻辑内部决定。
+```python
+# worst_impact.py 重构后的策略创建方式
+from gacha_simulator.core.strategy import STRATEGY_REGISTRY
+
+def _create_worst_impact_strategy():
+    strategy_def = STRATEGY_REGISTRY['smart']
+    return strategy_def['class']()  # 统一接口，固定选择 smart 策略
+```
+
+同理，`worst_impact_panel.py` 也不需要策略选择下拉框——它的策略由分析逻辑内部决定，但调用方式与其他面板完全一致。
 
 ---
 
@@ -1510,3 +1519,4 @@ class ConfigStore:
 | 2026-05-20 | v4 | 第四次更新：新增"策略信息传入机制"专题分析（第二章），新增风险 R13，重构 Phase 2 设计引入 `StrategyContext`，消除策略自维护状态和 O(N²) 保底重放，更新路线图和测试策略 |
 | 2026-05-20 | v5 | 第五次更新：新增"性能影响分析"（二-B）和"重构范围评估"（二-C）两个专题；修正 Phase 2 保底概率方案从预计算改为惰性计算（`get_pity_probabilities()`）；论证必须从底层（GachaService）开始重构；提出三步原子提交策略 |
 | 2026-05-20 | v6 | 第六次更新：全面审查发现并修正 8 个问题（二-D）——I1: PityReserve compact 模式已失效（新增 R14）、I2: acquired 含 _no_card（新增 acquired_counts）、I3: _StopOnTarget 不可变状态（新增 last_draw_pity_triggered）、I4: _pool_to_targets 预计算丢失（保留不可变缓存）、I5: Phase 1/2 依赖矛盾（修正路线图）、I6: pity_state 引用安全（下划线前缀）、I7: 过渡代码过时（更新）、I8: FixedCountStrategy 用 len(history)（新增 total_draws） |
+| 2026-05-20 | v6.1 | 修正 worst_impact.py 策略调用方式：使用统一策略调用接口（STRATEGY_REGISTRY + StrategyContext + select_action(ctx)），固定选择特制策略而非从 ConfigStore 读取用户配置；更新调用链全景图 |
