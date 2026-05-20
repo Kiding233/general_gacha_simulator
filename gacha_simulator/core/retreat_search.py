@@ -99,6 +99,7 @@ class RetreatSearchEngine:
             seed=0,
             strategy_name=self.strategy_name,
             strategy_params=self.strategy_params,
+            ssr_ids=env.ssr_ids,
         )
         return compute_success_probability(histories, target_specs, self.gdr_key, self.gdr_threshold,
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)

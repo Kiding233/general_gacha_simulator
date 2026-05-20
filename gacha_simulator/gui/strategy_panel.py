@@ -116,6 +116,7 @@ class StrategyWorker(QThread):
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
+                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             prob = compute_success_probability(histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -178,6 +179,7 @@ class StrategyWorker(QThread):
             seed=0,
             strategy_name=_skey,
             strategy_params=_sparams,
+            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         initial_prob = compute_success_probability(initial_histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -233,6 +235,7 @@ class StrategyWorker(QThread):
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
+                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             temp_prob = compute_success_probability(histories, temp_specs, self.gdr_key, self.gdr_threshold,
