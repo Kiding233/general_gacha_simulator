@@ -462,6 +462,14 @@ class StrategyContext:
 
 ---
 
+### 问题 I8：`FixedCountStrategy` 使用 `len(history)` 判断抽卡次数（🟡 中等）（v6 新增）
+
+**发现**：`FixedCountStrategy` 在 `select_action` 中使用 `len(history)` 判断已执行抽卡次数。重构后 `select_action` 签名变为 `select_action(self, ctx)`，不再接收 `history` 参数。
+
+**修正**：`StrategyContext` 增加 `total_draws: int = 0` 字段，`FixedCountStrategy` 改用 `ctx.total_draws`。
+
+---
+
 ### 修正汇总
 
 | 问题 | 严重程度 | 影响的 Phase | 修正措施 |
@@ -473,6 +481,7 @@ class StrategyContext:
 | I5: Phase 1/2 依赖矛盾 | 🟡 中等 | 路线图 | Phase 2 必须在 Phase 1 之后 |
 | I6: pity_state 引用安全 | 🟡 中等 | Phase 2 | 字段改为下划线前缀，只暴露方法 |
 | I7: 过渡代码过时 | 🟢 低 | 第七章 | 更新代码 |
+| I8: FixedCountStrategy 用 len(history) | 🟡 中等 | Phase 2 | `StrategyContext` 增加 `total_draws` |
 
 ---
 
@@ -929,6 +938,7 @@ class StrategyContext:
     _pity_state: Optional[PityState] = field(default=None, repr=False)
     acquired: Dict[str, int] = field(default_factory=dict)
     pool_draw_counts: Dict[str, int] = field(default_factory=dict)
+    total_draws: int = 0
     last_draw_pity_triggered: bool = False
 
     def get_pity_probabilities(self, pool_id: str) -> Dict[str, float]:
@@ -955,6 +965,7 @@ class StrategyContext:
 | `_pity_state` | `GachaService.pity_state` | **新增**，配合 pity_engine 使用，下划线前缀保护 |
 | `acquired` | `SimulationStats.acquired_counts` | **新增**，仅统计非 `_NO_CARD_ID` 的有效卡牌（修正 I2） |
 | `pool_draw_counts` | `SimulationStats.pool_draw_counts` | **新增**，由 `GachaService` 维护并传入 |
+| `total_draws` | `SimulationStats.total_draws` | **新增**（修正 I8），当前模拟已执行的总抽卡次数，替代 `len(history)` |
 | `last_draw_pity_triggered` | `GachaService` 上一次抽卡结果 | **新增**（修正 I3），供 `_StopOnTargetStrategy` 使用 |
 
 **性能设计要点**：
@@ -1010,6 +1021,7 @@ for iteration in range(max_iterations):
         _pity_state=pity_state,
         acquired=stats.acquired_counts,
         pool_draw_counts=stats.pool_draw_counts,
+        total_draws=stats.total_draws,
         last_draw_pity_triggered=last_pity_triggered,
     )
 
@@ -1358,4 +1370,4 @@ class ConfigStore:
 | 2026-05-20 | v3 | 第三次更新：扩展为项目整体重构方案，新增 12 个风险点、5 个 Phase、CompactResult Schema 设计、Collector 模式设计 |
 | 2026-05-20 | v4 | 第四次更新：新增"策略信息传入机制"专题分析（第二章），新增风险 R13，重构 Phase 2 设计引入 `StrategyContext`，消除策略自维护状态和 O(N²) 保底重放，更新路线图和测试策略 |
 | 2026-05-20 | v5 | 第五次更新：新增"性能影响分析"（二-B）和"重构范围评估"（二-C）两个专题；修正 Phase 2 保底概率方案从预计算改为惰性计算（`get_pity_probabilities()`）；论证必须从底层（GachaService）开始重构；提出三步原子提交策略 |
-| 2026-05-20 | v6 | 第六次更新：全面审查发现并修正 7 个问题（二-D）——I1: PityReserve compact 模式已失效（新增 R14）、I2: acquired 含 _no_card（新增 acquired_counts）、I3: _StopOnTarget 不可变状态（新增 last_draw_pity_triggered）、I4: _pool_to_targets 预计算丢失（保留不可变缓存）、I5: Phase 1/2 依赖矛盾（修正路线图）、I6: pity_state 引用安全（下划线前缀）、I7: 过渡代码过时（更新） |
+| 2026-05-20 | v6 | 第六次更新：全面审查发现并修正 8 个问题（二-D）——I1: PityReserve compact 模式已失效（新增 R14）、I2: acquired 含 _no_card（新增 acquired_counts）、I3: _StopOnTarget 不可变状态（新增 last_draw_pity_triggered）、I4: _pool_to_targets 预计算丢失（保留不可变缓存）、I5: Phase 1/2 依赖矛盾（修正路线图）、I6: pity_state 引用安全（下划线前缀）、I7: 过渡代码过时（更新）、I8: FixedCountStrategy 用 len(history)（新增 total_draws） |
