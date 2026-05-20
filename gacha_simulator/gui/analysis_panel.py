@@ -313,7 +313,7 @@ class AnalysisWorker(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(str, int)
 
-    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None):
+    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_selections=None, best_case_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None):
         super().__init__()
         self.results = results
         self.ctx = ctx
@@ -329,6 +329,8 @@ class AnalysisWorker(QThread):
         self.best_primary_gdr = best_primary_gdr
         self.gdr_dist_selections = gdr_dist_selections or {}
         self.cumulative_by_pool_selections = cumulative_by_pool_selections or set()
+        self.worst_case_selections = worst_case_selections or set()
+        self.best_case_selections = best_case_selections or set()
         self.draw_sequences = draw_sequences or []
         self.heatmap_data = heatmap_data or {}
         self.cumulative_snapshots = cumulative_snapshots or {}
@@ -566,13 +568,15 @@ class AnalysisWorker(QThread):
                 for name, dist in gdr_dists.items():
                     if name == primary_key or dist.n < 2:
                         continue
+                    display = _key_to_display.get(name, name)
+                    if self.worst_case_selections and display not in self.worst_case_selections:
+                        continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
                     cond = joint.conditional_second(lambda f: f <= var_val)
                     if cond.n < 2:
                         continue
                     uc_all = AnalysisPanel._unique_count(dist.samples)
                     uc_cond = AnalysisPanel._unique_count(cond.samples)
-                    display = _key_to_display.get(name, name)
                     fig2, ax2 = plt.subplots(figsize=(10, 6))
                     hpa = AnalysisPanel._hist_params(dist.samples, 'black', 0.3, f'{display}(全部)')
                     ax2.hist(dist.samples, **hpa)
@@ -664,11 +668,13 @@ class AnalysisWorker(QThread):
                 for name, dist in gdr_dists.items():
                     if name == primary_key or dist.n < 2:
                         continue
+                    display = _key_to_display.get(name, name)
+                    if self.best_case_selections and display not in self.best_case_selections:
+                        continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
                     cond = joint.conditional_second(lambda f: f >= upper_val)
                     if cond.n < 2:
                         continue
-                    display = _key_to_display.get(name, name)
                     uc_all = AnalysisPanel._unique_count(dist.samples)
                     uc_cond = AnalysisPanel._unique_count(cond.samples)
                     fig2, ax2 = plt.subplots(figsize=(10, 6))
@@ -1423,6 +1429,21 @@ class AnalysisPanel(QWidget):
                         self.primary_gdr_combo.setCurrentIndex(_i_star)
                         item_w.add_config_row("主指标:", self.primary_gdr_combo)
 
+                        wc_widget = QWidget()
+                        wc_layout = QVBoxLayout(wc_widget)
+                        wc_layout.setContentsMargins(0, 0, 0, 0)
+                        wc_layout.setSpacing(2)
+                        wc_hint = QLabel("选择绘制哪些GDR的条件分布图:")
+                        wc_hint.setStyleSheet("font-size: 11px; color: #555;")
+                        wc_layout.addWidget(wc_hint)
+                        self._worst_case_checks = {}
+                        for gdr_name in _gdr_names:
+                            cb = QCheckBox(gdr_name)
+                            cb.setStyleSheet("font-size: 11px;")
+                            wc_layout.addWidget(cb)
+                            self._worst_case_checks[gdr_name] = cb
+                        item_w.add_config_widget(wc_widget)
+
                     if key == 'risk_best_case':
                         self.best_primary_gdr_combo = _NoWheelComboBox()
                         self.best_primary_gdr_combo.setMaxVisibleItems(30)
@@ -1430,6 +1451,21 @@ class AnalysisPanel(QWidget):
                         _i_star2 = _gdr_names.index('简单目标达成率') if '简单目标达成率' in _gdr_names else 0
                         self.best_primary_gdr_combo.setCurrentIndex(_i_star2)
                         item_w.add_config_row("主指标:", self.best_primary_gdr_combo)
+
+                        bc_widget = QWidget()
+                        bc_layout = QVBoxLayout(bc_widget)
+                        bc_layout.setContentsMargins(0, 0, 0, 0)
+                        bc_layout.setSpacing(2)
+                        bc_hint = QLabel("选择绘制哪些GDR的条件分布图:")
+                        bc_hint.setStyleSheet("font-size: 11px; color: #555;")
+                        bc_layout.addWidget(bc_hint)
+                        self._best_case_checks = {}
+                        for gdr_name in _gdr_names:
+                            cb = QCheckBox(gdr_name)
+                            cb.setStyleSheet("font-size: 11px;")
+                            bc_layout.addWidget(cb)
+                            self._best_case_checks[gdr_name] = cb
+                        item_w.add_config_widget(bc_widget)
 
                     if key == 'conditional_dist':
                         self.cond_gdr_combo = _NoWheelComboBox()
@@ -1670,6 +1706,12 @@ class AnalysisPanel(QWidget):
     def _get_cumulative_by_pool_selections(self):
         return {name for name, cb in self._cumulative_by_pool_checks.items() if cb.isChecked()}
 
+    def _get_worst_case_selections(self):
+        return {name for name, cb in self._worst_case_checks.items() if cb.isChecked()}
+
+    def _get_best_case_selections(self):
+        return {name for name, cb in self._best_case_checks.items() if cb.isChecked()}
+
     def _get_conditions_for_key(self, key):
         cond = {'alpha': self.alpha_spin.value()}
         if key == 'transition_analysis':
@@ -1680,8 +1722,10 @@ class AnalysisPanel(QWidget):
             cond['cond_threshold'] = self.threshold_spin.value()
         if key in ('risk_worst_case', 'risk_worst_case_chart'):
             cond['primary_gdr'] = self.primary_gdr_combo.currentText()
+            cond['worst_case_selections'] = frozenset(self._get_worst_case_selections())
         if key in ('risk_best_case', 'risk_best_case_chart'):
             cond['primary_gdr'] = self.best_primary_gdr_combo.currentText()
+            cond['best_case_selections'] = frozenset(self._get_best_case_selections())
         if key.startswith('gdr_dist_') or key == 'gdr_dist':
             sel = self._get_gdr_dist_selections()
             cond['gdr_dist_selections'] = frozenset((k, frozenset(v)) for k, v in sel.items())
@@ -1729,6 +1773,8 @@ class AnalysisPanel(QWidget):
                 best_primary_gdr=self.best_primary_gdr_combo.currentText(),
                 gdr_dist_selections=self._get_gdr_dist_selections(),
                 cumulative_by_pool_selections=self._get_cumulative_by_pool_selections(),
+                worst_case_selections=self._get_worst_case_selections(),
+                best_case_selections=self._get_best_case_selections(),
                 draw_sequences=self._draw_sequences,
                 heatmap_data=self._heatmap_data,
                 cumulative_snapshots=self._cumulative_snapshots,

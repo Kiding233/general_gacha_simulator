@@ -261,10 +261,12 @@ class RetreatSearchPanel(QWidget):
         ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+        import uuid
+        tmp_dir = tempfile.gettempdir()
+        tmp_path = os.path.join(tmp_dir, f"retreat_pareto_{uuid.uuid4().hex}.png")
+        fig.savefig(tmp_path, dpi=200, bbox_inches='tight')
         plt.close(fig)
-        return tmp.name
+        return tmp_path
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -275,15 +277,22 @@ class RetreatSearchPanel(QWidget):
         left_layout = QVBoxLayout(left_panel)
 
         source_group = QGroupBox("起始状态（来自脆弱性分析）")
-        source_form = QFormLayout(source_group)
+        source_layout = QVBoxLayout(source_group)
+        source_layout.setSpacing(4)
+        source_layout.setContentsMargins(6, 6, 6, 6)
 
+        pool_layout = QHBoxLayout()
+        pool_layout.addWidget(QLabel("起始池:"))
         self.pool_combo = QComboBox()
         self.pool_combo.currentIndexChanged.connect(self._on_pool_changed)
-        source_form.addRow("起始池:", self.pool_combo)
+        pool_layout.addWidget(self.pool_combo)
+        source_layout.addLayout(pool_layout)
 
         res_group = QGroupBox("资源剩余值")
         res_grid = QGridLayout(res_group)
-        res_grid.setSpacing(4)
+        res_grid.setSpacing(6)
+        res_grid.setContentsMargins(10, 10, 10, 10)
+        res_grid.setVerticalSpacing(6)
         self.res_btn_group = QButtonGroup(self)
         self.res_vi_lower = QRadioButton("VI下限 (--)")
         self.res_vi_mean = QRadioButton("VI均值 (--)")
@@ -307,23 +316,29 @@ class RetreatSearchPanel(QWidget):
         manual_layout.addWidget(self.res_manual_input)
         res_grid.addLayout(manual_layout, 2, 0, 1, 3)
         self.res_manual.setChecked(True)
-        source_form.addRow(res_group)
+        source_layout.addWidget(res_group)
+        source_layout.setStretchFactor(res_group, 1)
 
         pity_group = QGroupBox("保底水位")
         pity_layout = QVBoxLayout(pity_group)
+        pity_layout.setContentsMargins(4, 4, 4, 4)
+        pity_layout.setSpacing(2)
         self.pity_table = QTableWidget()
         self.pity_table.setColumnCount(6)
         self.pity_table.setHorizontalHeaderLabels(["计数器", "均值", "中位", "25%", "75%", "初始值"])
         self.pity_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.pity_table.verticalHeader().setVisible(False)
-        self.pity_table.setMaximumHeight(150)
+        self.pity_table.setMaximumHeight(80)
         pity_layout.addWidget(self.pity_table)
-        source_form.addRow(pity_group)
+        source_layout.addWidget(pity_group)
 
         left_layout.addWidget(source_group)
+        left_layout.setStretchFactor(source_group, 1)
 
         weight_group = QGroupBox("目标卡权重（错失代价）")
         weight_layout = QVBoxLayout(weight_group)
+        weight_layout.setSpacing(2)
+        weight_layout.setContentsMargins(4, 4, 4, 4)
         weight_info = QLabel("权重越小越先被移除（越不重要）")
         weight_info.setWordWrap(True)
         weight_layout.addWidget(weight_info)
@@ -335,15 +350,22 @@ class RetreatSearchPanel(QWidget):
         wh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.weight_table.setColumnWidth(1, 90)
         self.weight_table.verticalHeader().setVisible(False)
-        self.weight_table.setMinimumHeight(80)
-        self.weight_table.setMaximumHeight(200)
+        self.weight_table.setMinimumHeight(50)
+        self.weight_table.setMaximumHeight(90)
         self.weight_table.cellChanged.connect(self._on_weight_changed)
         weight_layout.addWidget(self.weight_table)
         left_layout.addWidget(weight_group)
+        left_layout.setStretchFactor(weight_group, 0)
 
         search_group = QGroupBox("搜索配置")
-        search_form = QFormLayout(search_group)
+        search_layout = QVBoxLayout(search_group)
+        search_layout.setSpacing(2)
+        search_layout.setContentsMargins(4, 4, 4, 4)
 
+        mode_group = QGroupBox("搜索模式")
+        mode_layout = QHBoxLayout(mode_group)
+        mode_layout.setSpacing(8)
+        mode_layout.setContentsMargins(4, 4, 4, 4)
         self.mode_resource = QRadioButton("最少额外资源")
         self.mode_target = QRadioButton("最多目标卡")
         self.mode_pareto = QRadioButton("Pareto前沿")
@@ -351,44 +373,65 @@ class RetreatSearchPanel(QWidget):
         for btn in [self.mode_resource, self.mode_target, self.mode_pareto]:
             self.mode_btn_group.addButton(btn)
         self.mode_pareto.setChecked(True)
-        mode_layout = QVBoxLayout()
         mode_layout.addWidget(self.mode_resource)
         mode_layout.addWidget(self.mode_target)
         mode_layout.addWidget(self.mode_pareto)
-        search_form.addRow("搜索模式:", mode_layout)
+        mode_layout.addStretch()
+        search_layout.addWidget(mode_group)
 
+        threshold_layout = QHBoxLayout()
+        threshold_layout.setSpacing(4)
+        threshold_layout.addWidget(QLabel("成功率阈值:"))
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(0.01, 1.0)
         self.threshold_spin.setSingleStep(0.01)
         self.threshold_spin.setValue(0.95)
         self.threshold_spin.setDecimals(2)
-        search_form.addRow("成功率阈值:", self.threshold_spin)
+        threshold_layout.addWidget(self.threshold_spin)
+        search_layout.addLayout(threshold_layout)
 
+        sim_layout = QHBoxLayout()
+        sim_layout.setSpacing(4)
+        sim_layout.addWidget(QLabel("每步模拟次数:"))
         self.sim_spin = QSpinBox()
         self.sim_spin.setRange(50, 10000)
         self.sim_spin.setSingleStep(100)
         self.sim_spin.setValue(1000)
-        search_form.addRow("每步模拟次数:", self.sim_spin)
+        sim_layout.addWidget(self.sim_spin)
+        search_layout.addLayout(sim_layout)
 
+        worker_layout = QHBoxLayout()
+        worker_layout.setSpacing(4)
+        worker_layout.addWidget(QLabel("并行数:"))
         self.worker_spin = QSpinBox()
         self.worker_spin.setRange(1, os.cpu_count() or 16)
         self.worker_spin.setValue(max(1, (os.cpu_count() or 8) - 2))
-        search_form.addRow("并行数:", self.worker_spin)
+        worker_layout.addWidget(self.worker_spin)
+        search_layout.addLayout(worker_layout)
 
+        gdr_layout = QHBoxLayout()
+        gdr_layout.setSpacing(4)
+        gdr_layout.addWidget(QLabel("GDR指标:"))
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
         populate_gdr_combo(self.gdr_combo)
         self.gdr_combo.setCurrentIndex(1)
-        search_form.addRow("GDR指标:", self.gdr_combo)
+        gdr_layout.addWidget(self.gdr_combo)
+        search_layout.addLayout(gdr_layout)
 
+        gdr_threshold_layout = QHBoxLayout()
+        gdr_threshold_layout.setSpacing(4)
+        gdr_threshold_layout.addWidget(QLabel("GDR阈值:"))
         self.gdr_threshold_spin = QDoubleSpinBox()
         self.gdr_threshold_spin.setRange(0.0, 9999999.0)
         self.gdr_threshold_spin.setSingleStep(0.1)
         self.gdr_threshold_spin.setValue(1.0)
         self.gdr_threshold_spin.setDecimals(2)
-        search_form.addRow("GDR阈值:", self.gdr_threshold_spin)
+        gdr_threshold_layout.addWidget(self.gdr_threshold_spin)
+        search_layout.addLayout(gdr_threshold_layout)
 
         left_layout.addWidget(search_group)
+        left_layout.setStretchFactor(search_group, 0)
 
         btn_layout = QHBoxLayout()
         self.run_btn = QPushButton("开始搜索")
@@ -424,10 +467,14 @@ class RetreatSearchPanel(QWidget):
 
         chart_group = QGroupBox("Pareto前沿图")
         chart_layout = QVBoxLayout(chart_group)
+        chart_scroll = QScrollArea()
+        chart_scroll.setWidgetResizable(True)
+        chart_scroll.setStyleSheet("QScrollArea { background: white; border: none; }")
         self.chart_label = QLabel()
         self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chart_label.setMinimumHeight(200)
-        chart_layout.addWidget(self.chart_label)
+        chart_scroll.setWidget(self.chart_label)
+        chart_layout.addWidget(chart_scroll)
         right_layout.addWidget(chart_group)
 
         detail_group = QGroupBox("详细结果")
@@ -563,14 +610,13 @@ class RetreatSearchPanel(QWidget):
             self._chart_path = chart_path
             pixmap = QPixmap(chart_path)
             if not pixmap.isNull():
-                # 按比例缩放以适应标签宽度，保持宽高比
                 max_w = self.chart_label.width() - 20
-                max_h = 400
                 scaled = pixmap.scaled(
-                    max_w, max_h,
+                    max_w, pixmap.height(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
+                self.chart_label.setFixedSize(scaled.size())
                 self.chart_label.setPixmap(scaled)
             else:
                 self.chart_label.setText("图表生成失败")
