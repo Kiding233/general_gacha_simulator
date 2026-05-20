@@ -109,6 +109,33 @@ class AllPoolsEndCondition(StopCondition):
         return "所有池结束"
 
 
+class ConsecutivePoolTargetCondition(StopCondition):
+    def __init__(self, pool_schedules: list, pool_targets: dict,
+                 resource_name: str = 'draw_resource', end_time: float = None):
+        self.pool_schedules = sorted(pool_schedules, key=lambda x: x[2])
+        self.pool_targets = pool_targets
+        self.resource_name = resource_name
+        self.end_time = end_time
+
+    def check(self, state: 'GachaState', history: List['InfoVector'],
+              stats: Optional['SimulationStats'] = None) -> bool:
+        if state.resources.get(self.resource_name, 0) <= 0:
+            return True
+        if self.end_time is not None and state.real_time >= self.end_time:
+            return True
+        if stats:
+            for pool_id, _start, end in self.pool_schedules:
+                if state.real_time < end:
+                    break
+                target_card = self.pool_targets.get(pool_id)
+                if target_card and stats.card_counts.get(target_card, 0) < 1:
+                    return True
+        return False
+
+    def description(self) -> str:
+        return "资源耗尽或连续池目标未达成"
+
+
 class CompositeStopCondition(StopCondition):
     def __init__(self, conditions: list, mode: str = 'any'):
         self.conditions = conditions
@@ -177,6 +204,18 @@ STOP_CONDITION_REGISTRY = {
         'params': {
             'max_time': {'type': 'float', 'default': 86400.0, 'label': '最大时间(秒)'},
         },
+    },
+    'consecutive_pool_target': {
+        'display_name': '连续池目标',
+        'description': '资源耗尽或连续池目标未达成时停止',
+        'class': ConsecutivePoolTargetCondition,
+        'params': {
+            'pool_schedules': {'type': 'list', 'default': [], 'label': '池时间表'},
+            'pool_targets': {'type': 'dict', 'default': {}, 'label': '池目标卡'},
+            'resource_name': {'type': 'str', 'default': 'draw_resource', 'label': '资源名'},
+            'end_time': {'type': 'float', 'default': 0.0, 'label': '最大时间(秒)'},
+        },
+        'internal': True,
     },
 }
 

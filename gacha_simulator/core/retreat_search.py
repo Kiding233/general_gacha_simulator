@@ -72,7 +72,7 @@ class RetreatSearchEngine:
             initial_resources={'draw_resource': initial_resource_value},
             pity_counter_init=self.pity_counter_init,
         )
-        from gacha_simulator.gui.batch_simulator import SimulationEnvBuilder
+        from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
         env = SimulationEnvBuilder.from_config_store(truncated_store)
         return env
 
@@ -80,7 +80,7 @@ class RetreatSearchEngine:
         # 如果没有剩余池子，那么没有任务已完成，成功率 100%
         if not env.pools:
             return 1.0
-        from gacha_simulator.gui.batch_simulator import run_batch_parallel
+        from gacha_simulator.service.batch_simulator import run_batch_parallel
         from gacha_simulator.core.gdr import compute_success_probability
         ir = dict(env.initial_resources)
         ir['draw_resource'] = resource_value
