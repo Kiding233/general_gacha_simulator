@@ -21,6 +21,7 @@ if _parent not in sys.path:
 
 from gacha_simulator.core.config_store import ConfigStore
 from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
+from gacha_simulator.core.strategy import strategy_type_to_key
 
 
 class StrategyWorker(QThread):
@@ -98,7 +99,6 @@ class StrategyWorker(QThread):
             current_specs[card_id] = self.target_qty
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
             _skey = strategy_type_to_key(self.config_store.strategy_type)
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
@@ -116,7 +116,6 @@ class StrategyWorker(QThread):
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             prob = compute_success_probability(histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -162,7 +161,6 @@ class StrategyWorker(QThread):
         self.progress.emit("后退法: 初始完整集合模拟", 5)
 
         from .batch_simulator import run_batch_parallel
-        from ..core.strategy import strategy_type_to_key
         _skey = strategy_type_to_key(self.config_store.strategy_type)
         _sparams = self.config_store.strategy_params
         initial_histories = run_batch_parallel(
@@ -180,7 +178,6 @@ class StrategyWorker(QThread):
             seed=0,
             strategy_name=_skey,
             strategy_params=_sparams,
-            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         initial_prob = compute_success_probability(initial_histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -219,7 +216,6 @@ class StrategyWorker(QThread):
             del temp_specs[card_id]
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
             _skey = strategy_type_to_key(self.config_store.strategy_type)
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
@@ -237,7 +233,6 @@ class StrategyWorker(QThread):
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             temp_prob = compute_success_probability(histories, temp_specs, self.gdr_key, self.gdr_threshold,

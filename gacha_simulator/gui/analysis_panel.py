@@ -267,48 +267,6 @@ class ResultUnit(QFrame):
         return self._image_path
 
 
-def _compute_transition_flags(draw_sequences, sorted_pools, criteria, ctx, ssr_ids, target_specs):
-    target_ids_trans = set(ctx.target_specs.keys())
-    total_needed = sum(target_specs.values()) or 1
-    success_flags_per_sim = []
-
-    for seq in draw_sequences:
-        card_ids = seq.get('draw_card_ids', [])
-        pool_ids_seq = seq.get('draw_pool_ids', [])
-        times = seq.get('draw_times', [])
-        flags = []
-        for pool_id, end_time in sorted_pools:
-            if criteria == 'any_ssr':
-                success = False
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if cid in ssr_ids:
-                        success = True
-                        break
-                flags.append(success)
-            elif criteria == 'per_pool_target':
-                success = False
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if i < len(pool_ids_seq) and pool_ids_seq[i] == pool_id and cid in target_ids_trans:
-                        success = True
-                        break
-                flags.append(success)
-            else:
-                obtained = 0
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if cid in target_ids_trans:
-                        obtained += 1
-                flags.append(obtained >= total_needed)
-        success_flags_per_sim.append(flags)
-
-    return success_flags_per_sim
-
-
 class AnalysisWorker(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(str, int)
@@ -1245,10 +1203,42 @@ class AnalysisWorker(QThread):
                 success_flags_per_sim = self.transition_flags
                 n_sims = len(success_flags_per_sim)
             else:
-                success_flags_per_sim = _compute_transition_flags(
-                    self.draw_sequences, sorted_pools, criteria,
-                    ctx, ssr_ids, target_specs,
-                )
+                success_flags_per_sim = []
+                target_ids_trans = set(ctx.target_specs.keys())
+                for seq in self.draw_sequences:
+                    card_ids = seq.get('draw_card_ids', [])
+                    pool_ids_seq = seq.get('draw_pool_ids', [])
+                    times = seq.get('draw_times', [])
+                    flags = []
+                    for pool_id, end_time in sorted_pools:
+                        if criteria == 'any_ssr':
+                            success = False
+                            for i, cid in enumerate(card_ids):
+                                if i < len(times) and times[i] > end_time:
+                                    break
+                                if cid in ssr_ids:
+                                    success = True
+                                    break
+                            flags.append(success)
+                        elif criteria == 'per_pool_target':
+                            success = False
+                            for i, cid in enumerate(card_ids):
+                                if i < len(times) and times[i] > end_time:
+                                    break
+                                if i < len(pool_ids_seq) and pool_ids_seq[i] == pool_id and cid in target_ids_trans:
+                                    success = True
+                                    break
+                            flags.append(success)
+                        else:
+                            obtained = 0
+                            total_needed = sum(target_specs.values())
+                            for i, cid in enumerate(card_ids):
+                                if i < len(times) and times[i] > end_time:
+                                    break
+                                if cid in target_ids_trans:
+                                    obtained += 1
+                            flags.append(obtained >= total_needed)
+                    success_flags_per_sim.append(flags)
                 n_sims = len(success_flags_per_sim)
 
             trans = []
