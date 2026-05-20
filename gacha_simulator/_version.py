@@ -1,6 +1,6 @@
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
-VERSION_DISPLAY = "v1.8.0"
+VERSION_DISPLAY = "v1.9.0"
 
 VERSION_HISTORY = [
     ("1.0.0", "2026-05-07", "PROUD — 初始版本发布：核心模拟引擎、GUI、配置系统"),
@@ -23,4 +23,5 @@ VERSION_HISTORY = [
     ("1.6.0", "2026-05-16", "DEFAULT — GDR 注册表统一（UNIFIED_GDR_REGISTRY）、SuccessChecker 统一成功判断、修复 5 个数值不一致 bug、消除 6 处硬编码、面板下拉列表统一"),
     ("1.7.0", "2026-05-17", "DEFAULT — 流式模拟架构重构：SharedResultCollector 边模拟边提取边丢弃，内存与 N 无关；逐抽真实资源替代线性插值/均摊近似；修复 total_gained 丢失卡片奖励、gdr_dists key 映射、空数据守卫等 9 项 bug；删除死代码 _compact_to_iv_list"),
     ("1.8.0", "2026-05-17", "DEFAULT — 过程分析功能：infer_events 轨迹推断（5种事件类型）、compute_aa/bb/ab/ba 四种交叉统计分析、4种事件模式+3种成败模式、ProcessAnalysisPanel UI 面板（4个Tab）、compact 新增 draw_pity_names/draw_pity_counter_max"),
+    ("1.9.0", "2026-05-20", "DEFAULT — 策略代码5阶段重构：CompactResult dataclass 替代裸 dict、SimulationCollector 统一两种模拟模式、StrategyContext + STRATEGY_REGISTRY 统一6种策略、STOP_CONDITION_REGISTRY 统一6种停止条件、策略比较面板、保底概率缓存优化、compact 元数据（策略名/版本号/时间戳）、ssr_ids 消除脆弱匹配"),
 ]

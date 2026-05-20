@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from gacha_simulator.gui import MainWindow
 
+from gacha_simulator._version import __version__
+
 _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.png')
 
 
@@ -17,7 +19,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Gacha Simulator")
     app.setOrganizationName("Gacha Simulator")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion(__version__)
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))
     window = MainWindow()
