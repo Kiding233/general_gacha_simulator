@@ -29,15 +29,22 @@ class StrategyContext:
     pool_draw_counts: Dict[str, int] = field(default_factory=dict)
     total_draws: int = 0
     last_draw_pity_triggered: bool = False
+    ssr_ids: Set[str] = field(default_factory=set)
+    _pity_cache: Dict[str, Dict[str, float]] = field(default_factory=dict, repr=False)
 
     def get_pity_probabilities(self, pool_id: str) -> Dict[str, float]:
         if self._pity_engine is None:
             return {}
+        cached = self._pity_cache.get(pool_id)
+        if cached is not None:
+            return cached
         pool = next((p for p in self.current_pools if p.id == pool_id), None)
         if pool is None or pool.is_exchange:
             return {}
         probs = {r.id: p for r, p in pool.rewards}
-        return self._pity_engine.before_draw(pool_id, self._pity_state, probs)
+        result = self._pity_engine.before_draw(pool_id, self._pity_state, probs)
+        self._pity_cache[pool_id] = result
+        return result
 
 
 class Strategy(ABC):
@@ -205,7 +212,7 @@ class PityReserveStrategy(Strategy):
 
             pool_probs = ctx.get_pity_probabilities(pool.id)
             if pool_probs:
-                ssr_prob = sum(p for cid, p in pool_probs.items() if 'ssr' in cid.lower())
+                ssr_prob = sum(p for cid, p in pool_probs.items() if cid in ctx.ssr_ids)
                 if ssr_prob >= self.pity_threshold_pct:
                     return DrawAction(pool_id=pool.id)
             else:

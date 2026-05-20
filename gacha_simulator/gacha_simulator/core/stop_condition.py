@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, Optional, List, Dict, Any
 
 if TYPE_CHECKING:
     from .state import GachaState
@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 class StopCondition(ABC):
     @abstractmethod
-    def check(self, state: 'GachaState', history: List['InfoVector'], 
+    def check(self, state: 'GachaState', history: List['InfoVector'],
               stats: Optional['SimulationStats'] = None) -> bool:
         pass
 
@@ -97,6 +97,18 @@ class TimeLimitCondition(StopCondition):
         return f"现实时间达到 {self.max_time} 秒"
 
 
+class AllPoolsEndCondition(StopCondition):
+    def __init__(self, end_time: float):
+        self.end_time = end_time
+
+    def check(self, state: 'GachaState', history: List['InfoVector'],
+              stats: Optional['SimulationStats'] = None) -> bool:
+        return state.real_time >= self.end_time
+
+    def description(self) -> str:
+        return "所有池结束"
+
+
 class CompositeStopCondition(StopCondition):
     def __init__(self, conditions: list, mode: str = 'any'):
         self.conditions = conditions
@@ -112,3 +124,84 @@ class CompositeStopCondition(StopCondition):
     def description(self) -> str:
         ops = ' 或 ' if self.mode == 'any' else ' 且 '
         return ops.join(c.description() for c in self.conditions)
+
+
+STOP_CONDITION_REGISTRY = {
+    'all_pools_end': {
+        'display_name': '所有池结束',
+        'description': '所有池子到期后停止',
+        'class': AllPoolsEndCondition,
+        'params': {
+            'end_time': {'type': 'float', 'default': 0.0, 'label': '结束时间(秒)'},
+        },
+    },
+    'fixed_action_count': {
+        'display_name': '固定次数',
+        'description': '抽满指定次数后停止',
+        'class': FixedActionCountCondition,
+        'params': {
+            'max_actions': {'type': 'int', 'default': 100, 'label': '最大操作数'},
+        },
+    },
+    'resource_threshold': {
+        'display_name': '资源阈值',
+        'description': '资源达到阈值时停止',
+        'class': ResourceThresholdCondition,
+        'params': {
+            'resource': {'type': 'str', 'default': 'draw_resource', 'label': '资源名'},
+            'threshold': {'type': 'float', 'default': 0.0, 'label': '阈值'},
+            'operator': {'type': 'str', 'default': '<=', 'label': '比较运算符'},
+        },
+    },
+    'target_acquired': {
+        'display_name': '目标获得',
+        'description': '获得指定目标卡后停止',
+        'class': TargetAcquiredCondition,
+        'params': {
+            'target_id': {'type': 'str', 'default': '', 'label': '目标卡ID'},
+            'quantity': {'type': 'int', 'default': 1, 'label': '数量'},
+        },
+    },
+    'last_draw_card': {
+        'display_name': '抽到即停',
+        'description': '最后一次抽到指定卡时停止',
+        'class': LastDrawCardCondition,
+        'params': {
+            'card_id': {'type': 'str', 'default': '', 'label': '卡牌ID'},
+        },
+    },
+    'time_limit': {
+        'display_name': '时间限制',
+        'description': '模拟时间达到限制后停止',
+        'class': TimeLimitCondition,
+        'params': {
+            'max_time': {'type': 'float', 'default': 86400.0, 'label': '最大时间(秒)'},
+        },
+    },
+}
+
+
+def create_stop_condition(name: str, params: Optional[Dict[str, Any]] = None) -> StopCondition:
+    entry = STOP_CONDITION_REGISTRY.get(name)
+    if entry is None:
+        raise ValueError(f"Unknown stop condition: {name!r}. "
+                         f"Available: {list(STOP_CONDITION_REGISTRY.keys())}")
+    cls = entry['class']
+    resolved = dict(params) if params else {}
+    param_defs = entry.get('params', {})
+    for pname, pdef in param_defs.items():
+        if pname not in resolved:
+            resolved[pname] = pdef['default']
+    return cls(**resolved)
+
+
+def stop_condition_type_to_key(display_name: str) -> str:
+    for key, entry in STOP_CONDITION_REGISTRY.items():
+        if entry['display_name'] == display_name:
+            return key
+    return 'all_pools_end'
+
+
+def stop_condition_key_to_type(key: str) -> str:
+    entry = STOP_CONDITION_REGISTRY.get(key)
+    return entry['display_name'] if entry else '所有池结束'

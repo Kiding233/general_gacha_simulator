@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any, Union
+import time
 import uuid
 from ..core import (
     GachaState, Pool, Action, DrawAction, WaitAction,
@@ -65,6 +66,7 @@ class GachaService:
         resource_gain: Optional[ResourceGainFunction] = None,
         pity_engine: Optional[PityEngine] = None,
         pity_state: Optional[PityState] = None,
+        ssr_ids: Optional[set] = None,
     ):
         self.pools = {p.id: p for p in pools}
         self.strategy = strategy
@@ -74,6 +76,7 @@ class GachaService:
         self.resource_gain = resource_gain
         self.pity_engine = pity_engine
         self.pity_state = pity_state or PityState()
+        self.ssr_ids = ssr_ids or set()
         self.session_id = str(uuid.uuid4())
         self._pools_list = list(self.pools.values())
 
@@ -143,6 +146,7 @@ class GachaService:
                 pool_draw_counts=dict(stats.pool_draw_counts),
                 total_draws=stats.total_draws,
                 last_draw_pity_triggered=stats.last_draw_pity_triggered,
+                ssr_ids=self.ssr_ids,
             )
 
             action = _strategy.select_action(ctx)
@@ -160,9 +164,13 @@ class GachaService:
                 probabilities = {r.id: p for r, p in pool.rewards}
                 original_probs = probabilities.copy() if _pity_engine else None
                 if _pity_engine:
-                    probabilities = _pity_engine.before_draw(
-                        pool.id, pity_state, probabilities
-                    )
+                    cached_probs = ctx._pity_cache.get(pool.id)
+                    if cached_probs is not None:
+                        probabilities = cached_probs
+                    else:
+                        probabilities = _pity_engine.before_draw(
+                            pool.id, pity_state, probabilities
+                        )
                     pool._apply_probabilities(probabilities)
 
                 reward = pool.draw()
@@ -283,6 +291,8 @@ class GachaService:
             result.pity_triggers = stats.pity_triggers
             result.final_resources = dict(resources)
             result.final_time = real_time
+            result.strategy_name = type(self.strategy).__name__
+            result.generated_at = time.time()
             return result
 
         return collector.get_result()

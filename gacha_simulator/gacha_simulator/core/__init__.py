@@ -16,7 +16,13 @@ from .strategy import (
     FixedCountStrategy, TargetHuntingStrategy, CompositeStrategy,
     STRATEGY_REGISTRY, create_strategy, strategy_type_to_key, strategy_key_to_type,
 )
-from .stop_condition import StopCondition, FixedActionCountCondition, ResourceThresholdCondition, TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition
+from .stop_condition import (
+    StopCondition, FixedActionCountCondition, ResourceThresholdCondition,
+    TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition,
+    AllPoolsEndCondition, LastDrawCardCondition,
+    STOP_CONDITION_REGISTRY, create_stop_condition,
+    stop_condition_type_to_key, stop_condition_key_to_type,
+)
 from .resource_gain import ResourceGainFunction, LinearResourceGain, PeriodicResourceGain, StepResourceGain, CompositeResourceGain, ScheduleResourceGain
 from .generalized_drop_rate import (
     GeneralizedDropRate, RarityValueAtT, CumulativeResourceEfficiency, PityProgressAtT,
@@ -73,7 +79,11 @@ __all__ = [
     'SmartStrategy', 'PoolQuotaStrategy', 'PityReserveStrategy', 'StopOnTargetStrategy',
     'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
     'STRATEGY_REGISTRY', 'create_strategy',
-    'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition', 'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
+    'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition',
+    'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
+    'AllPoolsEndCondition', 'LastDrawCardCondition',
+    'STOP_CONDITION_REGISTRY', 'create_stop_condition',
+    'stop_condition_type_to_key', 'stop_condition_key_to_type',
     'ResourceGainFunction', 'LinearResourceGain', 'PeriodicResourceGain', 'StepResourceGain', 'CompositeResourceGain', 'ScheduleResourceGain',
     'GeneralizedDropRate', 'RarityValueAtT', 'CumulativeResourceEfficiency', 'PityProgressAtT',
     'DropRateBetweenT1T2', 'TotalValueAtT', 'TargetCardCountAtT', 'TargetCardPercentageAtT', 'TargetCardEfficiencyAtT',

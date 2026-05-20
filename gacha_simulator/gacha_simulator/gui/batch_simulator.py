@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import Pool as MPPool
 from dataclasses import dataclass, field as dc_field
 
-from gacha_simulator.core.stop_condition import StopCondition
+from gacha_simulator.core.stop_condition import StopCondition, AllPoolsEndCondition
 from gacha_simulator.core.strategy import (
     STRATEGY_REGISTRY, create_strategy,
 )
@@ -168,6 +168,7 @@ _wk_pity_state_init = None
 _wk_card_defs = None
 _wk_strategy_name = 'smart'
 _wk_strategy_params = {}
+_wk_ssr_ids = set()
 
 
 def _wk_init(
@@ -180,10 +181,11 @@ def _wk_init(
     card_defs,
     strategy_name,
     strategy_params,
+    ssr_ids=None,
 ):
     global _wk_pools, _wk_schedule_mgr, _wk_end_time
     global _wk_pity_engine, _wk_resource_gain, _wk_pity_state_init, _wk_card_defs
-    global _wk_strategy_name, _wk_strategy_params
+    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids
     _wk_pools = pools
     _wk_schedule_mgr = schedule_mgr
     _wk_end_time = end_time
@@ -193,17 +195,7 @@ def _wk_init(
     _wk_card_defs = card_defs
     _wk_strategy_name = strategy_name
     _wk_strategy_params = strategy_params
-
-
-class _AllPoolsEnd(StopCondition):
-    def __init__(self, end_time):
-        self.end_time = end_time
-
-    def check(self, state, history=None, stats=None):
-        return state.real_time >= self.end_time
-
-    def description(self):
-        return ""
+    _wk_ssr_ids = ssr_ids or set()
 
 
 # --- 单次模拟执行 ---
@@ -227,7 +219,7 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
 
         target_set = TargetCardSet(targets)
         strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
-        stop_cond = _AllPoolsEnd(_wk_end_time)
+        stop_cond = AllPoolsEndCondition(_wk_end_time)
 
         pity_state = None
         if _wk_pity_state_init:
@@ -243,6 +235,7 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             pity_engine=_wk_pity_engine,
             resource_gain=_wk_resource_gain,
             pity_state=pity_state,
+            ssr_ids=_wk_ssr_ids,
         )
         state = GachaState(resources=dict(initial_resources))
         return service.run_simulation_compact(state)
@@ -269,12 +262,14 @@ def run_batch_parallel(
     strategy_name: str = 'smart',
     strategy_params: Optional[dict] = None,
     on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ssr_ids: Optional[set] = None,
 ) -> List[Optional[Dict[str, Any]]]:
     if max_workers <= 1:
         _wk_init(
             pools, schedule_mgr, end_time, pity_engine,
             resource_gain, pity_state_init, card_defs,
             strategy_name, strategy_params or {},
+            ssr_ids=ssr_ids,
         )
         results = [] if on_result is None else None
         n_failed = 0
@@ -302,7 +297,7 @@ def run_batch_parallel(
     with MPPool(
         processes=max_workers,
         initializer=_wk_init,
-        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}),
+        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}, ssr_ids),
     ) as mp_pool:
         results = [] if on_result is None else None
         n_failed = 0

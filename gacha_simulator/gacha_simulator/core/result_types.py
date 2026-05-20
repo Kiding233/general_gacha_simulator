@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import dataclasses
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+_RESULT_VERSION = 1
 
 
 @dataclass
@@ -30,6 +34,9 @@ class CompactResult:
     final_pity_state: Dict[str, Any] = field(default_factory=dict)
     pool_end_resources: Dict[str, Dict[str, float]] = field(default_factory=dict)
     pool_end_pity_states: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    strategy_name: str = ''
+    result_version: int = _RESULT_VERSION
+    generated_at: float = 0.0
 
     def get(self, key: str, default: Any = None) -> Any:
         if hasattr(self, key):

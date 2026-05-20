@@ -91,6 +91,8 @@ class ConfigStore:
     target_cards: List[TargetCardEntry] = field(default_factory=list)
     strategy_type: str = '按需追卡'
     strategy_params: Dict[str, Any] = field(default_factory=dict)
+    stop_condition_type: str = '所有池结束'
+    stop_condition_params: Dict[str, Any] = field(default_factory=dict)
     auto_wait: bool = True
     card_weights: Dict[str, CardWeightEntry] = field(default_factory=dict)
 
@@ -105,5 +107,7 @@ class ConfigStore:
         self.target_cards.clear()
         self.strategy_type = '按需追卡'
         self.strategy_params.clear()
+        self.stop_condition_type = '所有池结束'
+        self.stop_condition_params.clear()
         self.auto_wait = True
         self.card_weights.clear()

@@ -1058,6 +1058,7 @@ class ConfigPanel(QWidget):
 
     def _setup_strategy_tab(self, parent):
         from gacha_simulator.core.strategy import STRATEGY_REGISTRY
+        from gacha_simulator.core.stop_condition import STOP_CONDITION_REGISTRY
 
         group = QGroupBox("策略与目标卡")
         layout = QVBoxLayout(group)
@@ -1069,6 +1070,13 @@ class ConfigPanel(QWidget):
         ]
         self.strategy_type.addItems(self._strategy_display_names)
         strategy_layout.addRow("策略类型:", self.strategy_type)
+
+        self.stop_condition_type = _NoWheelComboBox()
+        self._stop_condition_display_names = [
+            entry['display_name'] for entry in STOP_CONDITION_REGISTRY.values()
+        ]
+        self.stop_condition_type.addItems(self._stop_condition_display_names)
+        strategy_layout.addRow("停止条件:", self.stop_condition_type)
 
         self.auto_wait = QCheckBox("无池可抽时自动等待")
         self.auto_wait.setChecked(True)
@@ -1843,6 +1851,10 @@ class ConfigPanel(QWidget):
                 'params': dict(store.strategy_params),
                 'auto_wait': store.auto_wait,
             },
+            'stop_condition': {
+                'type': store.stop_condition_type,
+                'params': dict(store.stop_condition_params),
+            },
             'target_cards': target_cards,
             'card_defs': card_defs,
             'resource_defs': resource_defs,
@@ -1945,6 +1957,10 @@ class ConfigPanel(QWidget):
         store.strategy_type = strategy.get('type', '按需追卡')
         store.strategy_params = strategy.get('params', {})
         store.auto_wait = strategy.get('auto_wait', True)
+
+        stop_cond = config.get('stop_condition', {})
+        store.stop_condition_type = stop_cond.get('type', '所有池结束')
+        store.stop_condition_params = stop_cond.get('params', {})
 
         for tc in config.get('target_cards', []):
             from ..core.config_store import TargetCardEntry
@@ -2376,6 +2392,8 @@ class ConfigPanel(QWidget):
 
         store.strategy_type = self.strategy_type.currentText()
         store.strategy_params = {}
+        store.stop_condition_type = self.stop_condition_type.currentText()
+        store.stop_condition_params = {}
         store.auto_wait = self.auto_wait.isChecked()
 
         store.target_cards = []
@@ -2485,6 +2503,8 @@ class ConfigPanel(QWidget):
 
         strategy_idx = self._strategy_display_names.index(store.strategy_type) if store.strategy_type in self._strategy_display_names else 0
         self.strategy_type.setCurrentIndex(strategy_idx)
+        stop_idx = self._stop_condition_display_names.index(store.stop_condition_type) if store.stop_condition_type in self._stop_condition_display_names else 0
+        self.stop_condition_type.setCurrentIndex(stop_idx)
         self.auto_wait.setChecked(store.auto_wait)
 
         target_data = [{'card_id': tc.card_id, 'quantity': tc.quantity, 'pools': tc.pool_ids}

@@ -12,7 +12,7 @@ from .pity import (
 from .state import GachaState
 from .action import DrawAction, WaitAction
 from .target_card import TargetCard, TargetCardSet
-from .stop_condition import StopCondition
+from .stop_condition import StopCondition, AllPoolsEndCondition
 from .strategy import Strategy, StrategyContext
 
 import fnmatch
@@ -67,17 +67,6 @@ class WorstImpactResult:
             if self.get_p_ge(k) >= threshold:
                 return k
         return 0
-
-
-class _TargetPoolEnd(StopCondition):
-    def __init__(self, end_time: float):
-        self.end_time = end_time
-
-    def check(self, state, history, stats=None):
-        return state.real_time >= self.end_time
-
-    def description(self):
-        return ""
 
 
 class _DrawTargetStrategy(Strategy):
@@ -399,7 +388,7 @@ class WorstImpactAnalyzer:
                 pool = self._create_new_pool(pool_index)
                 target_set = self._build_target_card_set(pool.id)
                 strategy = _DrawTargetStrategy(self._featured_ids, pool.id)
-                stop_cond = _TargetPoolEnd(pool.available_until)
+                stop_cond = AllPoolsEndCondition(pool.available_until)
 
                 result = self._run_single_simulation(
                     pool, current_resource, current_pity,

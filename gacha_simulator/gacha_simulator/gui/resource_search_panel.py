@@ -69,6 +69,7 @@ class ResourceSearchWorker(QThread):
             'pity_state_init': env.pity_state_init,
             'card_defs': env.card_defs,
             'initial_resources': env.initial_resources,
+            'ssr_ids': env.ssr_ids,
         }
         self._actual_cost_per_draw = self._extract_cost_per_draw(env.pools)
         self._display_cost_per_draw = self.cost_per_draw_override if self.cost_per_draw_override else self._actual_cost_per_draw
@@ -125,6 +126,7 @@ class ResourceSearchWorker(QThread):
             seed=0,
             strategy_name=strategy_type_to_key(self.config_store.strategy_type),
             strategy_params=self.config_store.strategy_params,
+            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         return compute_success_probability(histories, self.target_specs, self.gdr_key, self.gdr_threshold,

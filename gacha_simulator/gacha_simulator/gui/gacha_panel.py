@@ -89,6 +89,7 @@ class SimulationThread(QThread):
                 strategy_name=strategy_key,
                 strategy_params=config_store.strategy_params,
                 on_result=collector.on_result,
+                ssr_ids=env.ssr_ids,
             )
 
             result_bundle = {
