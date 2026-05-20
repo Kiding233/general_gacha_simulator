@@ -54,6 +54,7 @@ from .vulnerability import (
 )
 from .worst_impact import (
     WorstImpactAnalyzer, WorstImpactResult, ConditionalResourceDistribution,
+    DrawTargetStrategy,
 )
 from .streaming import StreamingAnalyzer, StreamingSuccessCounter, SharedResultCollector, DrawSequenceExtractor, extract_aggregate, extract_process
 from .process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
@@ -104,6 +105,7 @@ __all__ = [
     'VulnerabilityInterval', 'PityStatSnapshot', 'PoolVulnerabilityResult', 'VulnerabilityAnalysisResult',
     'compute_vulnerability_analysis', 'plot_vulnerability', 'plot_vulnerability_ridge',
     'WorstImpactAnalyzer', 'WorstImpactResult', 'ConditionalResourceDistribution',
+    'DrawTargetStrategy',
     'StreamingAnalyzer', 'StreamingSuccessCounter', 'SharedResultCollector', 'DrawSequenceExtractor', 'extract_aggregate', 'extract_process',
     'PoolEvent', 'SampleTrace', 'infer_events', 'compute_pool_gdr_cumulative', 'compute_pool_gdr_single_pool',
     'compute_aa', 'compute_bb', 'compute_ab', 'compute_ba',

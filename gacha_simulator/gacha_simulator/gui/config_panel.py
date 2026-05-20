@@ -1067,6 +1067,7 @@ class ConfigPanel(QWidget):
         self.strategy_type = _NoWheelComboBox()
         self._strategy_display_names = [
             entry['display_name'] for entry in STRATEGY_REGISTRY.values()
+            if not entry.get('internal')
         ]
         self.strategy_type.addItems(self._strategy_display_names)
         strategy_layout.addRow("策略类型:", self.strategy_type)

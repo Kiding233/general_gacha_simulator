@@ -13,7 +13,7 @@ from .state import GachaState
 from .action import DrawAction, WaitAction
 from .target_card import TargetCard, TargetCardSet
 from .stop_condition import StopCondition, AllPoolsEndCondition
-from .strategy import Strategy, StrategyContext
+from .strategy import Strategy, StrategyContext, STRATEGY_REGISTRY
 
 import fnmatch
 
@@ -69,7 +69,7 @@ class WorstImpactResult:
         return 0
 
 
-class _DrawTargetStrategy(Strategy):
+class DrawTargetStrategy(Strategy):
     lookahead = None
 
     def __init__(self, target_card_ids: Set[str], pool_id: str):
@@ -93,6 +93,9 @@ class _DrawTargetStrategy(Strategy):
         if wait_time <= 0:
             wait_time = 3600
         return WaitAction(duration=wait_time)
+
+
+STRATEGY_REGISTRY['draw_target']['class'] = DrawTargetStrategy
 
 
 class WorstImpactAnalyzer:
@@ -387,7 +390,7 @@ class WorstImpactAnalyzer:
             while current_resource > 0 and pool_index < max_pools:
                 pool = self._create_new_pool(pool_index)
                 target_set = self._build_target_card_set(pool.id)
-                strategy = _DrawTargetStrategy(self._featured_ids, pool.id)
+                strategy = STRATEGY_REGISTRY['draw_target']['class'](self._featured_ids, pool.id)
                 stop_cond = AllPoolsEndCondition(pool.available_until)
 
                 result = self._run_single_simulation(

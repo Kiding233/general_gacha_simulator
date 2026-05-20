@@ -402,6 +402,24 @@ STRATEGY_REGISTRY = {
             },
         },
     },
+    'draw_target': {
+        'display_name': '目标池抽卡',
+        'description': '最差影响分析专用：从目标池抽卡',
+        'class': None,
+        'params': {
+            'target_card_ids': {
+                'type': 'string_list',
+                'display_name': '目标卡ID列表',
+                'default': [],
+            },
+            'pool_id': {
+                'type': 'str',
+                'display_name': '目标池ID',
+                'default': '',
+            },
+        },
+        'internal': True,
+    },
 }
 
 

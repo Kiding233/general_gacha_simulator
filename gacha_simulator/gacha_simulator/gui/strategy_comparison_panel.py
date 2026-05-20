@@ -66,6 +66,9 @@ class ComparisonWorker(QThread):
             for tc in self.config_store.target_cards:
                 target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
 
+            current_strategy_key = strategy_type_to_key(self.config_store.strategy_type)
+            current_strategy_params = dict(self.config_store.strategy_params) if self.config_store.strategy_params else {}
+
             results = {}
             total = len(self.strategy_keys)
             for i, skey in enumerate(self.strategy_keys):
@@ -74,6 +77,11 @@ class ComparisonWorker(QThread):
                 entry = STRATEGY_REGISTRY.get(skey)
                 display_name = entry['display_name'] if entry else skey
                 self.progress.emit(f"运行策略: {display_name}", int((i / max(total, 1)) * 95) + 2)
+
+                if skey == current_strategy_key:
+                    sparams = current_strategy_params
+                else:
+                    sparams = {}
 
                 histories = run_batch_parallel(
                     pools=sim_env['pools'],
@@ -89,7 +97,7 @@ class ComparisonWorker(QThread):
                     max_workers=self.max_workers,
                     seed=0,
                     strategy_name=skey,
-                    strategy_params={},
+                    strategy_params=sparams,
                     ssr_ids=sim_env['ssr_ids'],
                 )
 
@@ -192,6 +200,8 @@ class StrategyComparisonPanel(QWidget):
 
         self._strategy_checks = {}
         for key, entry in STRATEGY_REGISTRY.items():
+            if entry.get('internal'):
+                continue
             cb = QCheckBox(f"{entry['display_name']} - {entry['description']}")
             cb.setChecked(key in ('smart', 'pool_quota'))
             self._strategy_checks[key] = cb

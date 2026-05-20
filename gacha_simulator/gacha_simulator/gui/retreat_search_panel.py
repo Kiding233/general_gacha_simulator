@@ -486,6 +486,10 @@ class RetreatSearchPanel(QWidget):
         gdr_key = self.gdr_combo.currentData() or 'all_targets'
 
         from gacha_simulator.core.retreat_search import RetreatSearchEngine
+        from gacha_simulator.core.strategy import strategy_type_to_key
+
+        strategy_key = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
+        strategy_params = dict(self._store.strategy_params) if self._store else {}
 
         def _progress_callback(msg, pct):
             self._worker.progress.emit(msg, pct)
@@ -503,6 +507,8 @@ class RetreatSearchPanel(QWidget):
             gdr_threshold=self.gdr_threshold_spin.value(),
             num_simulations=self.sim_spin.value(),
             max_workers=self.worker_spin.value(),
+            strategy_name=strategy_key,
+            strategy_params=strategy_params,
             progress_callback=_progress_callback,
         )
 
