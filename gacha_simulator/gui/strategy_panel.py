@@ -21,7 +21,7 @@ if _parent not in sys.path:
 
 from gacha_simulator.core.config_store import ConfigStore
 from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
-from gacha_simulator.core.strategy import strategy_type_to_key
+from gacha_simulator.core.strategy import strategy_type_to_key, STRATEGY_REGISTRY
 
 
 class StrategyWorker(QThread):
