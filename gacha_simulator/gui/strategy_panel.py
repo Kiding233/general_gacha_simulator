@@ -617,7 +617,7 @@ class StrategyPanel(QWidget):
         self.status_update.emit("分析完成")
 
     def _display_forward_result(self, result):
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self.config_store.strategy_type)) else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self._store.strategy_type)) else 'smart'
         self.result_label.setText(f"""
 <p><b>使用策略:</b> {_sname}</p>
 <p><b>最终目标卡集合:</b> {', '.join(sorted(result.final_target_set)) if result.final_target_set else '(空)'}</p>
@@ -634,7 +634,7 @@ class StrategyPanel(QWidget):
         self._draw_strategy_chart(result, 'forward')
 
     def _display_backward_result(self, result):
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self.config_store.strategy_type)) else 'smart'
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self._store.strategy_type)) else 'smart'
         self.result_label.setText(f"""
 <p><b>使用策略:</b> {_sname}</p>
 <p><b>最终目标卡集合:</b> {', '.join(sorted(result.final_target_set)) if result.final_target_set else '(空)'}</p>
