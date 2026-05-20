@@ -1,6 +1,6 @@
 # 项目计划汇总
 
-## 已完成的计划（11 个）
+## 已完成的计划（12 个）
 
 | # | 日期 | 计划 | 说明 |
 |---|------|------|------|
@@ -15,6 +15,7 @@
 | 9 | 05-16 | GDR 与成功率判断统一管理 | 合并两套注册表为 UNIFIED_GDR_REGISTRY、创建 SuccessChecker 统一成功判断、修复 5 个数值不一致 bug、消除 6 处硬编码、5 个面板下拉列表统一 |
 | 10 | 05-17 | 流式模拟架构重构 | SharedResultCollector 边模拟边提取边丢弃、内存与 N 无关；逐抽真实资源替代线性插值/均摊近似；修复 9 项 bug（total_gained 丢失、gdr_dists key 映射、空数据守卫、SSR 识别、per-pool 资源丢失等）；删除死代码 _compact_to_iv_list |
 | 11 | 05-17 | 过程分析功能（核心） | infer_events 双路径轨迹推断（5种抽卡池事件）、compute_aa/bb/ab/ba 四种交叉统计分析、5种事件模式（含自定义模式+零样本枚举）+4种成败模式（含自定义模式）、ProcessAnalysisPanel UI 面板（5个Tab）、compact 新增 draw_pity_names/draw_pity_counter_max、修复10+个级联Bug |
+| 12 | 05-20 | 策略代码重构（5阶段） | CompactResult + Collector 模式 + StrategyContext + 统一策略体系 + ConfigStore + 停止条件注册表 + 策略比较面板 + 保底概率缓存 + compact 元数据 + ssr_ids |
 
 ## 进行中的计划（1 个）
 
@@ -39,7 +40,7 @@
 | success_distribution UI展示 | 🟡 中 | AB 分析中已计算但未展示 |
 | BB 可视化增强 | 🟢 低 | 柱状图、热力图、条件概率矩阵 |
 
-## 未执行的待办计划（4 个）
+## 未执行的待办计划（3 个）
 
 ### P3：Bootstrap 稳定性分析
 
@@ -68,16 +69,22 @@
   - EVT 尾部拟合：GPD 拟合改善 VaR/CVaR 精度
 - **依赖**：流式重构（P1，已完成）的 `on_result` 回调
 
-### P5：策略比较面板
+### P6：策略代码重构遗留项
 
-- **设计文档**：`specs/2026-05-13-strategy-comparison-design.md`（需确认是否存在）
-- **实施计划**：`plans/2026-05-13-strategy-comparison.md` + `plans/2026-05-13-strategy-comparison-panel.md`
-- **状态**：未开始，基础设施已完成（策略注册表 + 4 种策略）
-- **目标**：选择多种策略并行模拟，对比 GDR/资源消耗/成功率
-- **核心内容**：
-  - `StrategyComparisonPanel`：策略选择 + 参数配置 + 对比图表
-  - 多策略并行模拟 + 结果对比表格/图表
-- **依赖**：无（基础设施已就绪）
+- **设计文档**：`strategy_code_investigation_and_refactoring_plan.md`（v8）
+- **状态**：未开始
+- **目标**：完成策略重构中 6 项未实施步骤
+- **未实现项**：
+
+| 步骤 | 内容 | 优先级 | 说明 |
+|------|------|--------|------|
+| 0.1 | 删除根目录 `worst_impact.py` | 🟢 低 | 统一使用 `core/worst_impact.py` |
+| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 🟡 中 | GDR 统一判定 |
+| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 🟡 中 | GDR 统一判定 |
+| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数，带冲突检测 | 🟡 中 | GDR 统一管理 |
+| 4.2 | 旧字段迁移逻辑（`strategy_type` → `strategy_name`） | 🟢 低 | 当前通过 `strategy_type_to_key()` 转换，功能等价 |
+| 4.4 | 策略参数动态控件（int→QSpinBox, float→QDoubleSpinBox 等） | 🟡 中 | 当前 `strategy_params` 始终为 `{}`，策略使用默认参数 |
+| 4.6 | GUI 面板权重获取改为 `set_store()` / 信号，而非 `self.window()` | 🟢 低 | 功能正常，仅代码风格优化 |
 
 ## 已知问题
 
@@ -87,14 +94,14 @@
 ## 建议执行顺序
 
 ```
-P2 (过程分析续) → P3 (Bootstrap) → P4 (自适应+EVT) → P5 (策略比较)
+P2 (过程分析续) → P6 (重构遗留) → P3 (Bootstrap) → P4 (自适应+EVT)
 ```
 
 **依赖关系**：
 - P2 先行：新增事件类型影响 `process_data` 格式，P3 需要适配
+- P6 独立：可随时执行，与 P2 无依赖
 - P3 在 P4 之前：Bootstrap 先实现通用框架，EVT 作为尾部优化集成
 - P4 Task 3 (EVT)：在 Bootstrap 框架上扩展 Bootstrap-EVT 混合方法（对尾部分位数，Bootstrap 不可靠，需 EVT 参数化外推）
-- P5 独立：可随时执行，P3 完成后获得 CI 加持
 
 **关键兼容性**：Bootstrap 与 P4 的三个方法都兼容——
 - 自适应停止：兼容（当前基于 RSE，无偏）
@@ -116,3 +123,4 @@ P2 (过程分析续) → P3 (Bootstrap) → P4 (自适应+EVT) → P5 (策略比
 - 2026-05-14-retreat-search-phase2.md（部分完成）
 - 2026-05-16-gdr-unification.md
 - 2026-05-16-streaming-refactor.md
+- strategy_code_investigation_and_refactoring_plan.md（v8，6项遗留归入 P6）

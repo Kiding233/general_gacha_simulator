@@ -1,6 +1,6 @@
 # Gacha Simulator 项目交接文档
 
-> 当前版本：v1.8.0 | 最后更新：2026-05-18
+> 当前版本：v1.9.0 | 最后更新：2026-05-20
 
 ---
 
@@ -44,10 +44,12 @@ gacha_simulator/
 │   ├── state.py               #   GachaState：模拟状态（资源、时间、计数器）
 │   ├── action.py              #   Action/DrawAction/WaitAction：操作类型
 │   ├── info_vector.py         #   InfoVector：每步操作记录
+│   ├── result_types.py        #   CompactResult：紧凑结果 dataclass（替代裸 dict）
+│   ├── collector.py           #   SimulationCollector/InfoVectorCollector/CompactCollector
 │   ├── pool.py                #   Pool/Reward：卡池定义与抽选
 │   ├── schedule.py            #   PoolSchedule/PoolScheduleManager：时间调度
-│   ├── strategy.py            #   Strategy 抽象基类 + FixedCount/TargetHunting/Composite
-│   ├── stop_condition.py      #   StopCondition 抽象基类 + FixedActionCount/ResourceThreshold
+│   ├── strategy.py            #   Strategy 抽象基类 + 6种策略 + STRATEGY_REGISTRY + StrategyContext
+│   ├── stop_condition.py      #   StopCondition 抽象基类 + 6种条件 + STOP_CONDITION_REGISTRY
 │   ├── pity.py                #   PityEngine/PityState：保底机制引擎
 │   ├── resource_gain.py       #   ResourceGain：资源获取计算
 │   ├── target_card.py         #   TargetCard/TargetCardSet：目标卡管理
@@ -81,6 +83,7 @@ gacha_simulator/
 │   ├── retreat_search_panel.py # RetreatSearchPanel：退路搜索
 │   ├── worst_impact_panel.py  #   WorstImpactPanel：最差影响分析
 │   ├── process_analysis_panel.py # ProcessAnalysisPanel：过程分析（5个Tab）
+│   ├── strategy_comparison_panel.py # StrategyComparisonPanel：策略比较
 │   └── about_dialog.py        #   关于对话框
 │
 ├── service/                   # 业务逻辑层
@@ -124,7 +127,7 @@ docs/
                                                                     ↓
 GachaService(pools, strategy, stop_cond, ...) ← _wk_init() 注入子进程全局变量
                                                                     ↓
-GachaService.run_simulation_compact(initial_state) → compact dict
+GachaService.run_simulation(initial_state, collector=CompactCollector()) → CompactResult
                                                                     ↓
 SharedResultCollector.on_result(compact) → 提取聚合数据
                                                                     ↓
@@ -143,35 +146,15 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 
 | 模式 | 方法 | 输出 | 用途 |
 |------|------|------|------|
-| **完整模式** | `run_simulation()` | `List[InfoVector]` | 需要逐抽详细记录时使用（如过程分析） |
-| **紧凑模式** | `run_simulation_compact()` | `Dict[str, Any]`（compact dict） | 绝大多数场景使用，内存高效 |
+| **完整模式** | `run_simulation(collector=InfoVectorCollector())` | `List[InfoVector]` | 需要逐抽详细记录时使用（如过程分析） |
+| **紧凑模式** | `run_simulation(collector=CompactCollector())` 或 `run_simulation_compact()` | `CompactResult` | 绝大多数场景使用，内存高效 |
 
-compact dict 包含的字段：
+`CompactResult` 是 dataclass，替代了原来的裸 `Dict[str, Any]`，提供 `.get()` / `__getitem__` / `__contains__` 向后兼容接口，以及 `.to_dict()` / `.from_dict()` 序列化方法。
 
-```python
-{
-    'card_counts': Dict[str, int],           # 每种卡抽到数量
-    'pool_draw_counts': Dict[str, int],      # 每池抽卡数
-    'pool_card_counts': Dict[str, Dict],     # 每池每卡数量
-    'pool_pity_counts': Dict[str, int],      # 每池保底触发数
-    'pool_counter_max': Dict[str, int],      # 每池保底计数器最大值
-    'total_draws': int,
-    'total_waits': int,
-    'pity_triggers': int,
-    'total_consumed': Dict[str, float],
-    'total_gained': Dict[str, float],
-    'final_resources': Dict[str, float],
-    'draw_card_ids': List[str],              # 逐抽记录（用于过程分析）
-    'draw_pool_ids': List[str],
-    'draw_pity': List[bool],
-    'draw_pity_names': List[Optional[str]],
-    'draw_pity_counter_max': List[int],
-    'draw_resources_consumed': List[Dict],
-    'draw_resources_gained': List[Dict],
-    'pool_end_resources': Dict[str, Dict],
-    'pool_end_pity_states': Dict[str, Dict],
-}
-```
+新增元数据字段：
+- `strategy_name: str` — 使用的策略类名
+- `result_version: int` — 结果格式版本号（当前为 1）
+- `generated_at: float` — 结果生成时间戳
 
 ### 3.3 GDR（广义出率）系统
 
@@ -199,7 +182,7 @@ compact dict 包含的字段：
 
 ### 3.4 策略系统
 
-`STRATEGY_REGISTRY`（在 `batch_simulator.py` 中）注册了 4 种策略：
+`STRATEGY_REGISTRY`（在 `core/strategy.py` 中）注册了 6 种策略：
 
 | key | 显示名 | 逻辑 |
 |-----|--------|------|
@@ -207,10 +190,36 @@ compact dict 包含的字段：
 | `pool_quota` | 指定池配额 | 每池指定抽卡上限 |
 | `pity_reserve` | 保底预留 | 只在保底概率≥阈值时抽 |
 | `stop_on_target` | 目标即停 | 抽到up/目标卡就停止 |
+| `target_hunting` | 指定池追卡 | 在指定池中追目标卡 |
+| `fixed_count` | 固定次数 | 固定抽卡次数后等待 |
 
-每种策略都实现了 `select_action(state, history, current_pools, ...)` 和 `observe(iv)` 接口。
+所有策略统一实现 `select_action(self, ctx: StrategyContext) -> Action` 接口。
 
-### 3.5 保底机制
+`StrategyContext` dataclass 包含：
+- `state` / `current_pools` / `all_pools` / `future_schedules` / `target_cards` / `stop_condition`
+- `_pity_engine` / `_pity_state`：保底引擎和状态（用于 `get_pity_probabilities()`）
+- `acquired` / `pool_draw_counts` / `total_draws` / `last_draw_pity_triggered`：模拟统计
+- `ssr_ids: Set[str]`：SSR 卡 ID 集合
+- `_pity_cache: Dict[str, Dict[str, float]]`：保底概率缓存
+
+工厂函数：`create_strategy(name, params)` / `strategy_type_to_key(display_name)` / `strategy_key_to_type(key)`
+
+### 3.5 停止条件系统
+
+`STOP_CONDITION_REGISTRY`（在 `core/stop_condition.py` 中）注册了 6 种停止条件：
+
+| key | 显示名 | 逻辑 |
+|-----|--------|------|
+| `all_pools_end` | 所有池结束 | 所有池子到期后停止 |
+| `fixed_action_count` | 固定次数 | 抽满指定次数后停止 |
+| `resource_threshold` | 资源阈值 | 资源达到阈值时停止 |
+| `target_acquired` | 目标获得 | 获得指定目标卡后停止 |
+| `last_draw_card` | 抽到即停 | 最后一次抽到指定卡时停止 |
+| `time_limit` | 时间限制 | 模拟时间达到限制后停止 |
+
+工厂函数：`create_stop_condition(name, params)` / `stop_condition_type_to_key(display_name)` / `stop_condition_key_to_type(key)`
+
+### 3.6 保底机制
 
 `PityEngine` 管理多种保底机制，支持：
 - **软保底**（soft pity）：从 `start_at` 抽开始概率线性/指数上升，到 `end_at` 抽达到 100%
@@ -219,7 +228,7 @@ compact dict 包含的字段：
 - `reset_condition`：`any_ssr`（任何SSR重置）或 `featured`（仅限定SSR重置）
 - `pools` 字段支持通配符匹配（如 `character_*`）
 
-### 3.6 过程分析系统
+### 3.7 过程分析系统
 
 **事件推断**（`process_trace.py`）：从 compact dict 的逐抽记录推断每个池的事件类型：
 - `pity_hit`：保底出（目标卡 + 保底触发）
@@ -234,7 +243,7 @@ compact dict 包含的字段：
 - AB：事件模式 × 成败模式交叉分布
 - BA：成败模式 × 事件模式交叉分布
 
-### 3.7 流式架构
+### 3.8 流式架构
 
 `SharedResultCollector` 实现了边模拟边提取边丢弃：
 - 注册多个 `extractor`（如 `aggregate`、`process_data`）
@@ -261,6 +270,7 @@ compact dict 包含的字段：
 | 6 | RetreatSearchPanel | 退路搜索 |
 | 7 | WorstImpactPanel | 最差影响分析 |
 | 8 | ProcessAnalysisPanel | 过程分析（5个子Tab） |
+| 9 | StrategyComparisonPanel | 策略比较 |
 
 ### 4.2 Worker 线程模式
 
@@ -287,8 +297,9 @@ class XxxWorker(QThread):
 1. `SimulationEnv`：将 `ConfigStore` 转换为模拟所需的所有对象
 2. `SimulationEnvBuilder.from_config_store()`：环境构建工厂
 3. `run_batch_parallel()`：并行模拟入口，支持 `on_result` 回调（流式）和批量返回
-4. `STRATEGY_REGISTRY`：策略注册表
-5. `_wk_init()` / `_wk_run_single()`：multiprocessing Worker 的初始化和执行函数
+4. `_wk_init()` / `_wk_run_single()`：multiprocessing Worker 的初始化和执行函数
+
+注意：`STRATEGY_REGISTRY` 已迁移到 `core/strategy.py`，策略不再定义在 `batch_simulator.py` 中。
 
 ### 4.4 图表渲染
 
@@ -358,12 +369,14 @@ draw_resource | 100 | 0 | 21
 | 1.6.0 | 05-16 | DEFAULT | GDR 注册表统一、SuccessChecker、修复5个数值不一致bug |
 | 1.7.0 | 05-17 | DEFAULT | 流式模拟架构重构：SharedResultCollector，内存与N无关 |
 | 1.8.0 | 05-17 | DEFAULT | 过程分析功能：事件推断、交叉统计、ProcessAnalysisPanel |
+| 1.9.0 | 05-20 | DEFAULT | 策略代码重构：CompactResult + Collector模式 + StrategyContext + 6种策略统一 + 停止条件注册表 + 策略比较面板 + 保底概率缓存 + compact元数据 |
 
 ### 重大架构变更
 
 1. **v1.2.0 代码重构**：消除 GUI 层重复的模拟环境构建代码，统一到 `SimulationEnvBuilder`
 2. **v1.6.0 GDR 统一**：合并两套注册表为 `UNIFIED_GDR_REGISTRY`，创建 `SuccessChecker`
 3. **v1.7.0 流式重构**：`SharedResultCollector` 替代保存全部 compact dict 的方式，内存从 O(N) 降为 O(1)
+4. **v1.9.0 策略重构**：`CompactResult` 替代裸 dict；`SimulationCollector` 统一两种模拟模式；`StrategyContext` + `STRATEGY_REGISTRY` 统一 6 种策略；`STOP_CONDITION_REGISTRY` 统一 6 种停止条件；策略比较面板
 
 ---
 
@@ -402,18 +415,31 @@ draw_resource | 100 | 0 | 21
 
 ### P5：策略比较面板
 
-状态：基础设施已完成（策略注册表 + 4种策略），面板未实现
+状态：✅ 已完成（v1.9.0）
+
+### P6：策略代码重构遗留项
+
+状态：6项未实施
+
+| 步骤 | 内容 | 优先级 |
+|------|------|--------|
+| 0.1 | 删除根目录 `worst_impact.py` | 🟢低 |
+| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 🟡中 |
+| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 🟡中 |
+| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数 | 🟡中 |
+| 4.4 | 策略参数动态控件 | 🟡中 |
+| 4.6 | GUI 面板权重获取改为 `set_store()` / 信号 | 🟢低 |
 
 ### 建议执行顺序
 
 ```
-P2 (过程分析续) → P3 (Bootstrap) → P4 (自适应+EVT) → P5 (策略比较)
+P2 (过程分析续) → P6 (重构遗留) → P3 (Bootstrap) → P4 (自适应+EVT)
 ```
 
 依赖关系：
 - P2 先行：新增事件类型影响 `process_data` 格式
+- P6 独立：可随时执行
 - P3 在 P4 之前：Bootstrap 先实现通用框架，EVT 作为尾部优化集成
-- P5 独立：可随时执行
 
 ---
 
@@ -435,12 +461,13 @@ P2 (过程分析续) → P3 (Bootstrap) → P4 (自适应+EVT) → P5 (策略比
 - 速度：避免大量小对象创建和 GC
 - 逐抽记录仍保留在 compact dict 的 `draw_card_ids` 等列表字段中，供过程分析使用
 
-### 9.2 为什么策略定义在 batch_simulator.py 而非 core/strategy.py？
+### 9.2 为什么策略定义从 batch_simulator.py 迁移到 core/strategy.py？
 
-`core/strategy.py` 定义了抽象基类，但实际使用的 4 种策略定义在 `batch_simulator.py` 中。原因：
-- 策略需要访问全局变量 `_wk_pools`（子进程内），与 multiprocessing 紧耦合
-- 策略的 `observe()` 方法需要更新 `acquired` 字典，与模拟循环交互
-- 如果需要添加新策略，在 `batch_simulator.py` 的 `STRATEGY_REGISTRY` 中注册即可
+v1.9.0 重构后，6 种策略统一定义在 `core/strategy.py` 中，使用 `StrategyContext` 替代了 6 参数签名 + `observe()` 模式：
+- `StrategyContext` dataclass 封装了策略需要的所有信息（状态、池、保底、统计等）
+- `select_action(ctx)` 统一接口，消除了 `observe()` 和 `self.acquired` 自维护
+- `STRATEGY_REGISTRY` + `create_strategy()` 工厂函数，GUI 层通过 ConfigStore 选择策略
+- `worst_impact.py` 使用统一接口但固定选择特制策略 `_DrawTargetStrategy`
 
 ### 9.3 为什么 GDR 有两套计算路径？
 
@@ -467,9 +494,15 @@ P2 (过程分析续) → P3 (Bootstrap) → P4 (自适应+EVT) → P5 (策略比
 
 ### 添加新的策略
 
-1. 在 `gui/batch_simulator.py` 中实现策略类（`select_action` + `observe`）
-2. 在 `STRATEGY_REGISTRY` 中注册
+1. 在 `core/strategy.py` 中实现策略类（继承 `Strategy`，实现 `select_action(ctx: StrategyContext)`）
+2. 在 `STRATEGY_REGISTRY` 中注册（key、display_name、description、class、params）
 3. 策略面板的下拉列表会自动包含
+
+### 添加新的停止条件
+
+1. 在 `core/stop_condition.py` 中实现停止条件类（继承 `StopCondition`，实现 `check()` 和 `description()`）
+2. 在 `STOP_CONDITION_REGISTRY` 中注册
+3. 配置面板的停止条件下拉列表会自动包含
 
 ### 添加新的分析面板
 
@@ -509,6 +542,7 @@ python gacha_simulator/run.py
 | 文档 | 路径 | 内容 |
 |------|------|------|
 | 项目计划汇总 | `docs/superpowers/PLAN_SUMMARY.md` | 所有计划的状态、依赖、兼容性 |
+| 策略重构计划 | `docs/strategy_code_investigation_and_refactoring_plan.md` | v8，5阶段重构（含6项遗留） |
 | 过程分析计划 | `docs/superpowers/plans/2026-05-15-process-analysis.md` | v8，含 Task 9 条件 GDR 分布 |
 | 过程分析设计 | `docs/superpowers/specs/2026-05-15-process-analysis-design.md` | v6 |
 | Bootstrap 计划 | `docs/superpowers/plans/2026-05-18-bootstrap-stability-analysis.md` | 完整设计 |

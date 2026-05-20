@@ -805,10 +805,10 @@ if hasattr(main_window, 'config_panel'):
 
 | 步骤 | 内容 | 工作量 | 状态 |
 |------|------|--------|------|
-| 0.1 | 删除根目录 `worst_impact.py`，统一使用 `core/worst_impact.py` | 小 | 待实施 |
+| 0.1 | 删除根目录 `worst_impact.py`，统一使用 `core/worst_impact.py` | 小 | ❌ 未实施 |
 | 0.2 | 合并两个 `docs/` 目录，保留项目根目录 | 小 | ✅ 已完成 |
-| 0.3 | 定义 `CompactResult` dataclass 替代裸 dict | 中 | 待实施 |
-| 0.4 | `_AllPoolsEnd` 继承 `StopCondition` 基类 | 小 | 待实施 |
+| 0.3 | 定义 `CompactResult` dataclass 替代裸 dict | 中 | ✅ 已完成 |
+| 0.4 | `_AllPoolsEnd` 继承 `StopCondition` 基类 | 小 | ✅ 已完成（已迁移为 `AllPoolsEndCondition`） |
 
 **步骤 0.3 详细设计**：
 
@@ -863,12 +863,12 @@ class CompactResult:
 
 **目标**：消除 `run_simulation` 与 `run_simulation_compact` 的代码重复
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 1.1 | 定义 `SimulationCollector` 抽象基类 | 小 |
-| 1.2 | 实现 `InfoVectorCollector` 和 `CompactCollector` | 中 |
-| 1.3 | 重构 `GachaService.run_simulation` 使用 Collector 模式 | 中 |
-| 1.4 | 删除旧的 `run_simulation_compact`，用 `run_simulation(collector=CompactCollector())` 替代 | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 1.1 | 定义 `SimulationCollector` 抽象基类 | 小 | ✅ 已完成 |
+| 1.2 | 实现 `InfoVectorCollector` 和 `CompactCollector` | 中 | ✅ 已完成 |
+| 1.3 | 重构 `GachaService.run_simulation` 使用 Collector 模式 | 中 | ✅ 已完成 |
+| 1.4 | 删除旧的 `run_simulation_compact`，用 `run_simulation(collector=CompactCollector())` 替代 | 小 | ✅ 已完成（保留为 wrapper） |
 
 **步骤 1.1-1.2 详细设计**：
 
@@ -908,18 +908,18 @@ class CompactCollector(SimulationCollector):
 
 **目标**：消除两套策略体系，引入 `StrategyContext` 统一信息传入，消除全局变量依赖和策略自维护状态
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 2.1 | 定义 `StrategyContext` dataclass | 小 |
-| 2.2 | 修改 `Strategy.select_action` 签名为 `select_action(self, ctx: StrategyContext) -> Action` | 中 |
-| 2.3 | 将 `_PoolQuotaStrategy`、`_PityReserveStrategy`、`_StopOnTargetStrategy` 迁移到 `core/strategy.py`，继承 `Strategy` | 中 |
-| 2.4 | 将 `STRATEGY_REGISTRY` 迁移到 `core/strategy.py` | 小 |
-| 2.5 | 修改 `GachaService` 在每次循环中构建 `StrategyContext` 并传入 | 中 |
-| 2.6 | 消除策略的 `self.acquired` 和 `self.pool_draw_counts` 自维护 | 中 |
-| 2.7 | 消除 `_PityReserveStrategy` 的 O(N²) 保底重放 | 小 |
-| 2.8 | 消除 batch 策略对全局变量的依赖 | 中 |
-| 2.9 | 删除 `observe()` 方法和 `hasattr(strategy, 'acquired')` 检查 | 小 |
-| 2.10 | `batch_simulator.py` 的工厂函数改为从 `core.strategy` 导入 | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 2.1 | 定义 `StrategyContext` dataclass | 小 | ✅ 已完成 |
+| 2.2 | 修改 `Strategy.select_action` 签名为 `select_action(self, ctx: StrategyContext) -> Action` | 中 | ✅ 已完成 |
+| 2.3 | 将 `_PoolQuotaStrategy`、`_PityReserveStrategy`、`_StopOnTargetStrategy` 迁移到 `core/strategy.py`，继承 `Strategy` | 中 | ✅ 已完成 |
+| 2.4 | 将 `STRATEGY_REGISTRY` 迁移到 `core/strategy.py` | 小 | ✅ 已完成 |
+| 2.5 | 修改 `GachaService` 在每次循环中构建 `StrategyContext` 并传入 | 中 | ✅ 已完成 |
+| 2.6 | 消除策略的 `self.acquired` 和 `self.pool_draw_counts` 自维护 | 中 | ✅ 已完成 |
+| 2.7 | 消除 `_PityReserveStrategy` 的 O(N²) 保底重放 | 小 | ✅ 已完成 |
+| 2.8 | 消除 batch 策略对全局变量的依赖 | 中 | ⚠️ 部分完成（策略不再直接依赖全局变量，但 worker 机制仍使用 `_wk_*`） |
+| 2.9 | 删除 `observe()` 方法和 `hasattr(strategy, 'acquired')` 检查 | 小 | ✅ 已完成 |
+| 2.10 | `batch_simulator.py` 的工厂函数改为从 `core.strategy` 导入 | 小 | ✅ 已完成 |
 
 **步骤 2.1 `StrategyContext` 详细设计**：
 
@@ -1276,12 +1276,12 @@ def _create_pity_reserve_strategy(target_set, params):
 
 **目标**：所有 GDR 判定统一使用 `SuccessChecker`
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 小 |
-| 3.2 | `streaming.py` 的 `extract_process()` 使用 `SuccessChecker` | 小 |
-| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 小 |
-| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数，带冲突检测 | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 小 | ❌ 未实施 |
+| 3.2 | `streaming.py` 的 `extract_process()` 使用 `SuccessChecker` | 小 | ✅ 已完成 |
+| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 小 | ❌ 未实施 |
+| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数，带冲突检测 | 小 | ❌ 未实施 |
 
 ---
 
@@ -1289,15 +1289,15 @@ def _create_pity_reserve_strategy(target_set, params):
 
 **目标**：所有 GUI 面板从统一注册表选择策略，消除硬编码
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 4.1 | `ConfigStore` 增加 `strategy_name: str` 和 `strategy_params: Dict` | 小 |
-| 4.2 | 添加旧字段迁移逻辑（`strategy_type` → `strategy_name`，中文→英文 key） | 小 |
-| 4.3 | `config_panel.py` 从 `STRATEGY_REGISTRY` 动态生成策略下拉框 | 中 |
-| 4.4 | 策略参数配置区根据 `params` 定义动态生成控件（int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, pool_int_map→自定义控件） | 中 |
-| 4.5 | 移除 4 处硬编码 `strategy_name='smart'`（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel），改用 ConfigStore 值 | 小 |
-| 4.6 | GUI 面板权重获取改为通过 `set_store()` / 信号，而非 `self.window()` | 中 |
-| 4.7 | `worst_impact.py` 使用统一策略调用接口，固定选择特制策略（不从 ConfigStore 读取用户配置） | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 4.1 | `ConfigStore` 增加 `strategy_name: str` 和 `strategy_params: Dict` | 小 | ✅ 已完成（字段名保持 `strategy_type`，新增 `strategy_params`） |
+| 4.2 | 添加旧字段迁移逻辑（`strategy_type` → `strategy_name`，中文→英文 key） | 小 | ❌ 未实施（保持 `strategy_type` 中文显示名，通过 `strategy_type_to_key()` 转换） |
+| 4.3 | `config_panel.py` 从 `STRATEGY_REGISTRY` 动态生成策略下拉框 | 中 | ✅ 已完成 |
+| 4.4 | 策略参数配置区根据 `params` 定义动态生成控件（int→QSpinBox, float→QDoubleSpinBox, bool→QCheckBox, pool_int_map→自定义控件） | 中 | ❌ 未实施（`strategy_params` 始终为 `{}`） |
+| 4.5 | 移除 4 处硬编码 `strategy_name='smart'`（gacha_panel、strategy_panel、resource_search_panel、retreat_search_panel），改用 ConfigStore 值 | 小 | ✅ 已完成 |
+| 4.6 | GUI 面板权重获取改为通过 `set_store()` / 信号，而非 `self.window()` | 中 | ❌ 未实施（仍使用 `self.window()` 模式） |
+| 4.7 | `worst_impact.py` 使用统一策略调用接口，固定选择特制策略（不从 ConfigStore 读取用户配置） | 小 | ✅ 已完成 |
 
 **步骤 4.2 旧字段迁移**：
 
@@ -1350,13 +1350,13 @@ def _create_worst_impact_strategy():
 
 ### Phase 5：高级功能（优先级：P3）
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 5.1 | 实现策略比较面板（已有计划文档） | 中 |
-| 5.2 | 停止条件注册表 | 中 |
-| 5.3 | 保底概率缓存优化：`GachaService` 中 `before_draw` 调用结果缓存，避免重复计算 | 小 |
-| 5.4 | compact dict 元数据：记录策略名、版本号、生成时间 | 小 |
-| 5.5 | `StrategyContext` 增加 `ssr_ids: Set[str]`，消除 `'ssr' in cid.lower()` 脆弱匹配 | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 5.1 | 实现策略比较面板（已有计划文档） | 中 | ✅ 已完成 |
+| 5.2 | 停止条件注册表 | 中 | ✅ 已完成 |
+| 5.3 | 保底概率缓存优化：`GachaService` 中 `before_draw` 调用结果缓存，避免重复计算 | 小 | ✅ 已完成 |
+| 5.4 | compact dict 元数据：记录策略名、版本号、生成时间 | 小 | ✅ 已完成 |
+| 5.5 | `StrategyContext` 增加 `ssr_ids: Set[str]`，消除 `'ssr' in cid.lower()` 脆弱匹配 | 小 | ✅ 已完成 |
 
 ---
 
@@ -1521,3 +1521,4 @@ class ConfigStore:
 | 2026-05-20 | v6 | 第六次更新：全面审查发现并修正 8 个问题（二-D）——I1: PityReserve compact 模式已失效（新增 R14）、I2: acquired 含 _no_card（新增 acquired_counts）、I3: _StopOnTarget 不可变状态（新增 last_draw_pity_triggered）、I4: _pool_to_targets 预计算丢失（保留不可变缓存）、I5: Phase 1/2 依赖矛盾（修正路线图）、I6: pity_state 引用安全（下划线前缀）、I7: 过渡代码过时（更新）、I8: FixedCountStrategy 用 len(history)（新增 total_draws） |
 | 2026-05-20 | v6.1 | 修正 worst_impact.py 策略调用方式：使用统一策略调用接口（STRATEGY_REGISTRY + StrategyContext + select_action(ctx)），固定选择特制策略而非从 ConfigStore 读取用户配置；更新调用链全景图 |
 | 2026-05-20 | v7 | Phase 5 全部完成：5.4 compact 元数据（strategy_name/result_version/generated_at）、5.3 保底概率缓存（StrategyContext._pity_cache）、5.2 停止条件注册表（STOP_CONDITION_REGISTRY + create_stop_condition + AllPoolsEndCondition + ConfigStore.stop_condition_type/params）、5.1 策略比较面板（StrategyComparisonPanel）、5.5 ssr_ids（Phase 2 已完成） |
+| 2026-05-20 | v8 | 全面审查实施状态，标记所有步骤完成/未完成；发现 6 项未实施：0.1 根目录 worst_impact.py 未删除、3.1/3.3/3.4 GDR 统一未完成、4.2 旧字段迁移未实施、4.4 策略参数动态控件未实施、4.6 GUI 面板 self.window() 未替换；2.8 全局变量部分完成（策略不再依赖但 worker 机制仍使用） |
