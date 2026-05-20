@@ -77,8 +77,11 @@ class RetreatSearchEngine:
         return env
 
     def _simulate_with_resource(self, env, target_specs, resource_value):
-        # 如果没有剩余池子，那么没有任务已完成，成功率 100%
         if not env.pools:
+            return 1.0
+        available_ids = {c['card_id'] for c in env.card_defs}
+        filtered_specs = {k: v for k, v in target_specs.items() if k in available_ids}
+        if not filtered_specs:
             return 1.0
         from gacha_simulator.service.batch_simulator import run_batch_parallel
         from gacha_simulator.core.gdr import compute_success_probability
@@ -92,7 +95,7 @@ class RetreatSearchEngine:
             resource_gain=env.resource_gain,
             pity_state_init=env.pity_state_init,
             card_defs=env.card_defs,
-            target_specs=target_specs,
+            target_specs=filtered_specs,
             initial_resources=ir,
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
@@ -101,7 +104,7 @@ class RetreatSearchEngine:
             strategy_params=self.strategy_params,
             ssr_ids=env.ssr_ids,
         )
-        return compute_success_probability(histories, target_specs, self.gdr_key, self.gdr_threshold,
+        return compute_success_probability(histories, filtered_specs, self.gdr_key, self.gdr_threshold,
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)
 
     def _extract_cost_per_draw(self, env):

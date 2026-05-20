@@ -165,6 +165,7 @@ _wk_strategy_name = 'smart'
 _wk_strategy_params = {}
 _wk_ssr_ids = set()
 _wk_stop_condition = None
+_wk_strategy = None
 
 
 def _wk_init(
@@ -179,10 +180,11 @@ def _wk_init(
     strategy_params,
     ssr_ids=None,
     stop_condition=None,
+    strategy=None,
 ):
     global _wk_pools, _wk_schedule_mgr, _wk_end_time
     global _wk_pity_engine, _wk_resource_gain, _wk_pity_state_init, _wk_card_defs
-    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids, _wk_stop_condition
+    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids, _wk_stop_condition, _wk_strategy
     _wk_pools = pools
     _wk_schedule_mgr = schedule_mgr
     _wk_end_time = end_time
@@ -194,6 +196,7 @@ def _wk_init(
     _wk_strategy_params = strategy_params
     _wk_ssr_ids = ssr_ids or set()
     _wk_stop_condition = stop_condition
+    _wk_strategy = strategy
 
 
 # --- 单次模拟执行 ---
@@ -218,7 +221,10 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             targets.append(TargetCard(card_id=card_id, pool_ids=pools, quantity_needed=qty))
 
         target_set = TargetCardSet(targets)
-        strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
+        if _wk_strategy is not None:
+            strategy = _wk_strategy
+        else:
+            strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
         if _wk_stop_condition is not None:
             stop_cond = _wk_stop_condition
         else:
@@ -267,12 +273,13 @@ def run_batch_parallel(
     on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
     ssr_ids: Optional[set] = None,
     stop_condition=None,
+    strategy=None,
 ) -> List[Optional[Dict[str, Any]]]:
     _init_args = (
         pools, schedule_mgr, end_time, pity_engine,
         resource_gain, pity_state_init, card_defs,
         strategy_name, strategy_params or {}, ssr_ids,
-        stop_condition,
+        stop_condition, strategy,
     )
 
     if max_workers <= 1:
