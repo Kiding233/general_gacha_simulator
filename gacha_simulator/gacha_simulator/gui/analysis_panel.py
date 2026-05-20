@@ -269,7 +269,7 @@ class ResultUnit(QFrame):
 
 def _compute_transition_flags(draw_sequences, sorted_pools, criteria, ctx, ssr_ids, target_specs):
     target_ids_trans = set(ctx.target_specs.keys())
-    total_needed = sum(target_specs.values())
+    total_needed = sum(target_specs.values()) or 1
     success_flags_per_sim = []
 
     for seq in draw_sequences:
