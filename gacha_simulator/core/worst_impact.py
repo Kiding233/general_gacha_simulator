@@ -11,7 +11,7 @@ from .pity import (
 )
 from .state import GachaState
 from .target_card import TargetCard, TargetCardSet
-from .stop_condition import StopCondition, ResourceThresholdCondition, TimeLimitCondition, CompositeStopCondition
+from .stop_condition import StopCondition, ResourceThresholdCondition, TimeLimitCondition, CompositeStopCondition, PoolFailedCondition
 from .schedule import PoolSchedule, PoolScheduleManager
 from .strategy import SmartStrategy
 from ..service.gacha_service import GachaService
@@ -391,9 +391,23 @@ class WorstImpactAnalyzer:
         pools, schedule_mgr = self._build_sequential_pools()
         target_set = self._build_target_card_set()
         end_time = self._num_new_pools * self._pool_duration
+
+        pool_end_times = []
+        featured_ids_map = {}
+        for pool_idx in range(self._num_new_pools):
+            pid = f'_worst_impact_pool_{pool_idx}'
+            pool_obj = pools[pool_idx]
+            pool_end_times.append((pid, pool_obj.available_until))
+            featured_ids_map[pid] = {
+                f'{cid}__pool_{pool_idx}' for cid in self._featured_ids
+            }
+
+        pool_failed_cond = PoolFailedCondition(pool_end_times, featured_ids_map)
+
         stop_cond = CompositeStopCondition([
             ResourceThresholdCondition('draw_resource', 0, '<='),
             TimeLimitCondition(end_time),
+            pool_failed_cond,
         ], mode='any')
 
         success_counts = defaultdict(int)

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, Optional, List, Dict, Set, Tuple
 
 if TYPE_CHECKING:
     from .state import GachaState
@@ -112,3 +112,29 @@ class CompositeStopCondition(StopCondition):
     def description(self) -> str:
         ops = ' 或 ' if self.mode == 'any' else ' 且 '
         return ops.join(c.description() for c in self.conditions)
+
+
+class PoolFailedCondition(StopCondition):
+    def __init__(self, pool_end_times: List[Tuple[str, float]],
+                 featured_ids_map: Dict[str, Set[str]]):
+        self.pool_end_times = sorted(pool_end_times, key=lambda x: x[1])
+        self.featured_ids_map = featured_ids_map
+        self._last_failed_pool_end: Optional[float] = None
+
+    def check(self, state: 'GachaState', history: List['InfoVector'],
+              stats: Optional['SimulationStats'] = None) -> bool:
+        current_time = state.real_time
+        card_counts = stats.card_counts if stats else {}
+        for pool_id, end_time in self.pool_end_times:
+            if current_time <= end_time:
+                break
+            featured = self.featured_ids_map.get(pool_id, set())
+            if not featured:
+                continue
+            success = all(card_counts.get(fid, 0) >= 1 for fid in featured)
+            if not success:
+                return True
+        return False
+
+    def description(self) -> str:
+        return "某池子结束但未获得目标卡"
