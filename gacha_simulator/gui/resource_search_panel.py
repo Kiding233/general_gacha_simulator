@@ -278,6 +278,9 @@ class ResourceSearchPanel(QWidget):
         self._refresh_target_display()
         self._update_cost_per_draw_default()
 
+    def set_config_panel(self, config_panel):
+        self._config_panel = config_panel
+
     def _update_cost_per_draw_default(self):
         if not self._store or not self._store.pools:
             return
@@ -485,11 +488,10 @@ class ResourceSearchPanel(QWidget):
         desire_weights = None
         miss_cost_weights = None
         card_value_weights = None
-        main_window = self.window()
-        if hasattr(main_window, 'config_panel'):
-            desire_weights = main_window.config_panel.get_desire_weights()
-            miss_cost_weights = main_window.config_panel.get_miss_cost_weights()
-            card_value_weights = main_window.config_panel.get_card_value_weights()
+        if hasattr(self, '_config_panel') and self._config_panel:
+            desire_weights = self._config_panel.get_desire_weights()
+            miss_cost_weights = self._config_panel.get_miss_cost_weights()
+            card_value_weights = self._config_panel.get_card_value_weights()
 
         self._worker = ResourceSearchWorker(
             target_specs=target_specs,

@@ -318,6 +318,9 @@ class StrategyPanel(QWidget):
         self._store = store
         self._load_weights()
 
+    def set_config_panel(self, config_panel):
+        self._config_panel = config_panel
+
     def _load_weights(self):
         if self._store and self._store.target_cards:
             for tc in self._store.target_cards:
@@ -561,9 +564,8 @@ class StrategyPanel(QWidget):
         desire_weights, miss_cost_weights = self._get_weights()
 
         card_value_weights = None
-        main_window = self.window()
-        if hasattr(main_window, 'config_panel'):
-            card_value_weights = main_window.config_panel.get_card_value_weights()
+        if hasattr(self, '_config_panel') and self._config_panel:
+            card_value_weights = self._config_panel.get_card_value_weights()
 
         gdr_key = self.gdr_combo.currentData() or 'target_achievement'
 

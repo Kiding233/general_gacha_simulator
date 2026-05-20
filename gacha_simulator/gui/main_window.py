@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
 
         self.worst_impact_panel = WorstImpactPanel()
         self.worst_impact_panel.set_store(self._store)
+        self.worst_impact_panel.set_config_panel(self.config_panel)
 
         self.process_analysis_panel = ProcessAnalysisPanel()
 
@@ -91,9 +92,13 @@ class MainWindow(QMainWindow):
 
         self.config_panel.set_store(self._store)
         self.strategy_panel.set_store(self._store)
+        self.strategy_panel.set_config_panel(self.config_panel)
         self.resource_search_panel.set_store(self._store)
+        self.resource_search_panel.set_config_panel(self.config_panel)
         self.retreat_panel.set_store(self._store)
+        self.retreat_panel.set_config_panel(self.config_panel)
         self.retreat_search_panel.set_store(self._store)
+        self.retreat_search_panel.set_config_panel(self.config_panel)
         self.strategy_comparison_panel.set_store(self._store)
 
         self.tabs.addTab(self.config_panel, "配置")
