@@ -1143,7 +1143,8 @@ class ConfigPanel(QWidget):
         entry = STRATEGY_REGISTRY.get(key)
         if not entry or not entry.get('params'):
             self._strategy_params_group.setVisible(False)
-            self._update_preview()
+            if hasattr(self, 'preview_text'):
+                self._update_preview()
             return
 
         self._strategy_params_group.setVisible(True)
@@ -1185,7 +1186,8 @@ class ConfigPanel(QWidget):
 
             self._strategy_param_widgets[param_key] = (ptype, widget)
 
-        self._update_preview()
+        if hasattr(self, 'preview_text'):
+            self._update_preview()
 
     def _get_strategy_params_from_widgets(self):
         params = {}
