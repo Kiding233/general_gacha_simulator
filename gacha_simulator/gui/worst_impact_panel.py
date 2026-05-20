@@ -219,7 +219,8 @@ class WorstImpactPanel(QWidget):
         self.gdr_combo.setMaxVisibleItems(30)
         populate_gdr_combo(self.gdr_combo)
         self.gdr_combo.setCurrentIndex(1)
-        config_form.addRow("GDR指标:", self.gdr_combo)
+        self.gdr_combo.currentIndexChanged.connect(self._on_gdr_changed)
+        config_form.addRow("广义出率:", self.gdr_combo)
 
         self.gdr_threshold_spin = QDoubleSpinBox()
         self.gdr_threshold_spin.setRange(-9999999.0, 9999999.0)
@@ -282,33 +283,51 @@ class WorstImpactPanel(QWidget):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(4, 4, 4, 4)
 
-        gauge_group = QGroupBox("大保底覆盖")
-        gauge_layout = QVBoxLayout(gauge_group)
-        self.pity_gauge = PityCoverageGauge()
-        gauge_layout.addWidget(self.pity_gauge)
-        right_layout.addWidget(gauge_group)
+        summary_group = QGroupBox("结果摘要")
+        summary_layout = QVBoxLayout(summary_group)
+        self.summary_label = QLabel("尚未运行分析")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setStyleSheet(
+            "padding: 6px; background: #f5f5f5; border-radius: 4px; font-size: 13px;"
+        )
+        summary_layout.addWidget(self.summary_label)
+        right_layout.addWidget(summary_group)
 
-        self.result_label = QLabel("尚未运行分析")
-        self.result_label.setWordWrap(True)
-        self.result_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px;")
-        right_layout.addWidget(self.result_label)
+        cov_box = QGroupBox("大保底资源覆盖")
+        cov_layout = QVBoxLayout(cov_box)
+        cov_layout.setContentsMargins(4, 8, 4, 4)
+        self.coverage_gauge = PityCoverageGauge()
+        cov_layout.addWidget(self.coverage_gauge)
+        right_layout.addWidget(cov_box, 1)
 
-        self.chart_label = QLabel()
-        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.chart_label.setMinimumHeight(200)
-        right_layout.addWidget(self.chart_label)
+        dist_box = QGroupBox("新池子数分布")
+        dist_layout = QVBoxLayout(dist_box)
+        dist_layout.setContentsMargins(2, 6, 2, 2)
+        self.chart_label_dist = QLabel()
+        self.chart_label_dist.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chart_label_dist.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.chart_label_dist.setMinimumHeight(200)
+        dist_layout.addWidget(self.chart_label_dist)
+        right_layout.addWidget(dist_box, 2)
 
+        table_group = QGroupBox("详细数据")
+        table_layout = QVBoxLayout(table_group)
+        table_layout.setContentsMargins(2, 6, 2, 2)
         self.detail_table = QTableWidget()
         self.detail_table.setColumnCount(5)
-        self.detail_table.setHorizontalHeaderLabels(["k", "P(X=k)", "P(X>=k)", "累计概率", "说明"])
+        self.detail_table.setHorizontalHeaderLabels(
+            ["k", "P(X=k)", "P(X>=k)", "累计概率", "说明"]
+        )
+        self.detail_table.setMaximumHeight(200)
         header = self.detail_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.detail_table.verticalHeader().setVisible(False)
-        right_layout.addWidget(self.detail_table)
-
-        right_layout.addStretch()
+        table_layout.addWidget(self.detail_table)
+        right_layout.addWidget(table_group, 1)
 
         splitter.addWidget(left)
         splitter.addWidget(right)
@@ -321,6 +340,11 @@ class WorstImpactPanel(QWidget):
         if dlg.exec() == PoolDistributionDialog.DialogCode.Accepted:
             self._custom_distribution = dlg.get_distribution()
             self._update_dist_summary()
+
+    def _on_gdr_changed(self, index):
+        key = self.gdr_combo.currentData()
+        default = get_default_threshold(key)
+        self.gdr_threshold_spin.setValue(default)
 
     def _on_run(self):
         if not self._simulation_results:
@@ -338,9 +362,7 @@ class WorstImpactPanel(QWidget):
         else:
             condition = 'all'
 
-        gdr_key = self.gdr_combo.currentData()
-        if not gdr_key:
-            gdr_key = self.gdr_combo.currentText()
+        gdr_key = self.gdr_combo.currentData() or 'all_targets'
         gdr_threshold = self.gdr_threshold_spin.value()
 
         custom_pool = {
@@ -392,41 +414,21 @@ class WorstImpactPanel(QWidget):
 
     def _on_finished(self, result):
         self.run_btn.setEnabled(True)
-        self.status_label.setText("分析完成")
-        self.status_update.emit("最差后期影响分析完成")
+        if not result:
+            return
 
-        self.pity_gauge.set_value(result.pity_coverage)
+        self.coverage_gauge.set_value(result.pity_coverage)
 
         lines = [
-            f"保守资源: <b>{result.worst_resource:.0f}</b>",
-            f"大保底覆盖: <b>{result.pity_coverage:.2f}</b> 倍",
+            f"<b>保守资源:</b> {result.worst_resource:.0f}",
+            f"<b>大保底覆盖:</b> {result.pity_coverage:.2f} 倍",
         ]
         if result.pool_distribution:
-            lines.append(f"期望新池子数: <b>{result.expected_pools:.2f}</b>")
-        self.result_label.setText('<br>'.join(lines))
+            lines.append(f"<b>期望新池子数:</b> {result.expected_pools:.2f}")
+        self.summary_label.setText('<br>'.join(lines))
 
         if result.pool_distribution:
-            chart_path = self._plot_chart(result)
-            if chart_path:
-                pixmap = QPixmap(chart_path)
-                if not pixmap.isNull():
-                    max_w = self.chart_label.width() - 20
-                    max_h = 400
-                    scaled = pixmap.scaled(
-                        max_w, max_h,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    self.chart_label.setPixmap(scaled)
-                else:
-                    self.chart_label.setText("图表加载失败")
-            else:
-                self.chart_label.setText("图表生成失败")
-        else:
-            self.chart_label.setText("无分布数据")
-
-        self.detail_table.setRowCount(len(result.pool_distribution) if result.pool_distribution else 0)
-        if result.pool_distribution:
+            self.detail_table.setRowCount(len(result.pool_distribution))
             cumulative = 0.0
             for i, (k, prob) in enumerate(sorted(result.pool_distribution.items())):
                 self.detail_table.setItem(i, 0, QTableWidgetItem(str(k)))
@@ -435,11 +437,16 @@ class WorstImpactPanel(QWidget):
                 self.detail_table.setItem(i, 2, QTableWidgetItem(f"{p_ge:.2%}"))
                 cumulative += prob
                 self.detail_table.setItem(i, 3, QTableWidgetItem(f"{cumulative:.2%}"))
-                self.detail_table.setItem(i, 4, QTableWidgetItem(f"成功{k}个新池子" if k > 0 else "未成功"))
+                self.detail_table.setItem(i, 4, QTableWidgetItem(
+                    f"成功{k}个新池子" if k > 0 else "未成功"
+                ))
 
-    def _plot_chart(self, result):
+        self._plot_distribution(result)
+        self.status_update.emit("最差后期影响分析完成")
+
+    def _plot_distribution(self, result):
         if not result.pool_distribution:
-            return None
+            return
 
         import matplotlib
         matplotlib.use('Agg')
@@ -447,7 +454,9 @@ class WorstImpactPanel(QWidget):
         from ..visualization.font_config import configure_chinese_font
         configure_chinese_font()
 
-        fig, ax = plt.subplots(figsize=(8, 5))
+        dist_w = max(self.chart_label_dist.width(), 400) / 100
+        dist_h = max(self.chart_label_dist.height(), 250) / 100
+        fig, ax = plt.subplots(figsize=(dist_w, dist_h))
         ks = sorted(result.pool_distribution.keys())
         probs = [result.pool_distribution[k] for k in ks]
         bars = ax.bar(ks, probs, color='coral')
@@ -468,7 +477,25 @@ class WorstImpactPanel(QWidget):
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
         plt.close(fig)
-        return tmp.name
+        pixmap = QPixmap(tmp.name)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.chart_label_dist.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.chart_label_dist.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        pixmap = self.chart_label_dist.pixmap()
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.chart_label_dist.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.chart_label_dist.setPixmap(scaled)
 
     def _on_error(self, err):
         self.run_btn.setEnabled(True)
