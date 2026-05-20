@@ -1,8 +1,8 @@
 # 策略代码调查与重构方案报告
 
-> 调查日期：2026-05-20（第五次更新版）
+> 调查日期：2026-05-20（第六次更新版）
 > 基于代码版本：v1.8.0
-> 变更说明：本次更新新增"性能影响分析"和"重构范围评估"两个专题，论证从底层（GachaService）开始重构的必要性，修正 Phase 2 中保底概率预计算的性能问题。
+> 变更说明：本次更新对计划进行全面审查，发现并修正 7 个问题：compact 模式下 history 为空导致 PityReserve 已失效、acquired 语义差异、_StopOnTargetStrategy 不可变状态缺失、_pool_to_targets 预计算丢失、Phase 依赖矛盾、pity_state 引用安全、过渡代码过时。
 
 ---
 
@@ -324,6 +324,155 @@ GachaService（底层）→ Strategy 基类 → 具体策略 → batch_simulator
 1. Phase 1 中不急于删除 `run_simulation()`，而是先实现 Collector 模式
 2. 验证 `CompactCollector` 输出与 `run_simulation_compact()` 完全一致后，再替换
 3. `InfoVectorCollector` 保留用于调试和可视化场景（如单次模拟的详细步骤展示）
+
+---
+
+## 二-D、计划审查与修正（v6 新增）
+
+> 对 v1-v5 的计划进行全面审查，对照实际代码验证假设，发现并修正以下 7 个问题。
+
+### 问题 I1：`run_simulation_compact` 传入空 history，PityReserve 策略已失效（🔴 严重）
+
+**发现**：[gacha_service.py:252](file:///workspace/gacha_simulator/gacha_simulator/service/gacha_service.py#L252) 中：
+```python
+action = _strategy(state, [], current_pools, future_schedules, _target_cards, _stop)
+```
+`run_simulation_compact` 传入 `history=[]`（空列表），而 `_PityReserveStrategy` 的保底重放依赖遍历 history。这意味着 **PityReserve 策略在 compact 模式下根本无法正确计算保底概率**——它每次都从初始保底状态开始计算，相当于忽略所有历史抽卡。
+
+**影响**：当前批量模拟中使用 PityReserve 策略时，保底概率判定是错误的。这不是重构引入的问题，而是现有 bug。
+
+**修正**：Phase 2 的 `StrategyContext.get_pity_probabilities()` 方案直接解决了此问题——它使用 `GachaService` 维护的 `pity_state`（实时更新），而非重放 history。此 bug 的存在反而增强了 Phase 2 的必要性。
+
+**新增风险 R14**：PityReserve 策略在 compact 模式下保底概率计算错误。
+
+---
+
+### 问题 I2：`acquired` 与 `card_counts` 语义不同（🔴 严重）
+
+**发现**：
+- 策略的 `self.acquired` 只在 `reward.id != _NO_CARD_ID` 时更新（[gacha_service.py:146-147](file:///workspace/gacha_simulator/gacha_simulator/service/gacha_service.py#L146)）
+- `SimulationStats.card_counts` 在 `on_draw()` 中无条件更新，包含 `_NO_CARD_ID`（[gacha_service.py:36-37](file:///workspace/gacha_simulator/gacha_simulator/service/gacha_service.py#L36)）
+
+v5 计划中 `ctx.acquired = stats.card_counts` 会包含 `_no_card` 条目，导致策略误判目标完成度。
+
+**修正**：
+1. `SimulationStats.on_draw()` 中增加 `_NO_CARD_ID` 过滤，或
+2. `StrategyContext` 中增加 `acquired` 的过滤逻辑，或
+3. 新增 `SimulationStats.acquired_counts` 字段，仅统计非 `_NO_CARD_ID` 的卡
+
+推荐方案 3：在 `SimulationStats` 中新增 `acquired_counts` 字段，与 `card_counts` 分离。`card_counts` 保留完整统计（含 `_no_card`），`acquired_counts` 仅统计有效卡牌。
+
+---
+
+### 问题 I3：`_StopOnTargetStrategy` 有不可替代的内部状态（🟡 中等）
+
+**发现**：`_StopOnTargetStrategy` 有 `self._stopped` 状态，在 `observe()` 中根据 `iv.pity_triggered` 设置。这个状态**无法从 `ctx.acquired` 推导**——它取决于"最后一次抽卡是否触发了保底"，这是一个事件而非计数。
+
+v5 计划说"策略变为无状态"，但 `_StopOnTargetStrategy` 需要保留这个状态。
+
+**修正**：`StrategyContext` 需要增加一个字段来传递此信息：
+
+```python
+@dataclass
+class StrategyContext:
+    ...
+    last_draw_pity_triggered: bool = False
+```
+
+`GachaService` 在每次抽卡后更新此字段。`_StopOnTargetStrategy` 从 `ctx.last_draw_pity_triggered` 读取，不再需要 `self._stopped` 和 `observe()`。
+
+---
+
+### 问题 I4：`SmartStrategy._pool_to_targets` 预计算丢失（🟡 中等）
+
+**发现**：当前 `SmartStrategy.__init__` 在构造时预计算 `_pool_to_targets` 映射（pool_id → targets 列表），使得 `_pool_needs_target()` 查找为 O(1)。
+
+v5 计划将 `SmartStrategy` 改为无构造参数，每次 `select_action` 都从 `ctx.target_cards` 重新遍历构建映射，这是 O(T×P) 的性能回退（T=目标数，P=每个目标的池数）。
+
+**修正**：策略可以保留**不可变的预计算缓存**（从 `target_cards` 推导的映射），只要不维护**可变运行时状态**（如 `acquired`）。具体方案：
+
+```python
+class SmartStrategy(Strategy):
+    def __init__(self):
+        self._pool_to_targets: Dict[str, list] = {}
+        self._last_target_cards_id: int = 0
+
+    def _ensure_pool_to_targets(self, ctx: StrategyContext):
+        tc_id = id(ctx.target_cards)
+        if tc_id != self._last_target_cards_id:
+            self._pool_to_targets.clear()
+            for t in ctx.target_cards.targets:
+                for pid in t.pool_ids:
+                    if pid not in self._pool_to_targets:
+                        self._pool_to_targets[pid] = []
+                    self._pool_to_targets[pid].append(t)
+            self._last_target_cards_id = tc_id
+```
+
+这样策略仍然是"逻辑上无状态"的——所有决策信息从 `ctx` 获取，缓存只是性能优化，可随时丢弃重建。
+
+---
+
+### 问题 I5：Phase 1 和 Phase 2 依赖关系矛盾（🟡 中等）
+
+**发现**：计划第五章"重构实施路线图"中说"Phase 1 和 Phase 2 可并行"，但同一段又说"Phase 2 的 StrategyContext 设计依赖 Phase 1 的 SimulationStats 统一"。这两句矛盾。
+
+**分析**：实际上 Phase 2 确实依赖 Phase 1：
+- `StrategyContext.acquired` 来自 `SimulationStats`，而 `SimulationStats` 在 Phase 1 的 Collector 模式中被统一管理
+- 如果先做 Phase 2（不改 GachaService 内部），`acquired` 仍需从 `SimulationStats` 传入，但 `SimulationStats` 在 `run_simulation` 和 `run_simulation_compact` 中的使用方式不同
+
+**修正**：Phase 2 必须在 Phase 1 之后。更新路线图。
+
+---
+
+### 问题 I6：`pity_state` 引用传入的变异风险（🟡 中等）
+
+**发现**：v5 方案将 `pity_state` 以引用传入 `StrategyContext`，策略可以通过 `ctx.get_pity_probabilities()` 调用 `before_draw()`。但 `before_draw()` 虽然不修改 `pity_state`，它是一个"读+计算"操作，不是纯函数——如果未来 `before_draw()` 实现变化引入副作用，策略可能意外修改保底状态。
+
+更严重的是，策略持有 `pity_engine` 和 `pity_state` 的引用，理论上可以调用 `after_draw()` 修改状态。
+
+**修正**：将 `get_pity_probabilities()` 的实现改为只暴露计算结果，不暴露引擎引用：
+
+```python
+@dataclass
+class StrategyContext:
+    ...
+    _pity_engine: Optional[PityEngine] = field(default=None, repr=False)
+    _pity_state: Optional[PityState] = field(default=None, repr=False)
+
+    def get_pity_probabilities(self, pool_id: str) -> Dict[str, float]:
+        if self._pity_engine is None:
+            return {}
+        pool = next((p for p in self.current_pools if p.id == pool_id), None)
+        if pool is None or pool.is_exchange:
+            return {}
+        probs = {r.id: p for r, p in pool.rewards}
+        return self._pity_engine.before_draw(pool_id, self._pity_state, probs)
+```
+
+使用下划线前缀表示"内部实现细节，策略不应直接访问"。虽然 Python 无法强制私有化，但这比暴露 `pity_engine` 和 `pity_state` 公共字段更安全。
+
+---
+
+### 问题 I7：过渡代码 `select_action_legacy` 过时（🟢 低）
+
+**发现**：第七章 7.2 节的 `select_action_legacy` 仍使用 v4 的 `pity_probabilities={}` 字段，但 v5 已改为 `pity_engine`/`pity_state`。
+
+**修正**：更新过渡代码。
+
+---
+
+### 修正汇总
+
+| 问题 | 严重程度 | 影响的 Phase | 修正措施 |
+|------|---------|-------------|---------|
+| I1: PityReserve compact 模式已失效 | 🔴 严重 | Phase 2 | `get_pity_probabilities()` 直接解决；新增 R14 |
+| I2: acquired 含 _no_card | 🔴 严重 | Phase 2 | `SimulationStats` 新增 `acquired_counts` |
+| I3: _StopOnTarget 不可变状态 | 🟡 中等 | Phase 2 | `StrategyContext` 增加 `last_draw_pity_triggered` |
+| I4: _pool_to_targets 预计算丢失 | 🟡 中等 | Phase 2 | 策略保留不可变缓存，按需重建 |
+| I5: Phase 1/2 依赖矛盾 | 🟡 中等 | 路线图 | Phase 2 必须在 Phase 1 之后 |
+| I6: pity_state 引用安全 | 🟡 中等 | Phase 2 | 字段改为下划线前缀，只暴露方法 |
+| I7: 过渡代码过时 | 🟢 低 | 第七章 | 更新代码 |
 
 ---
 
@@ -776,19 +925,20 @@ class StrategyContext:
     future_schedules: List[PoolSchedule]
     target_cards: TargetCardSet
     stop_condition: StopCondition
-    pity_engine: Optional[PityEngine] = None
-    pity_state: Optional[PityState] = None
+    _pity_engine: Optional[PityEngine] = field(default=None, repr=False)
+    _pity_state: Optional[PityState] = field(default=None, repr=False)
     acquired: Dict[str, int] = field(default_factory=dict)
     pool_draw_counts: Dict[str, int] = field(default_factory=dict)
+    last_draw_pity_triggered: bool = False
 
     def get_pity_probabilities(self, pool_id: str) -> Dict[str, float]:
-        if self.pity_engine is None:
+        if self._pity_engine is None:
             return {}
         pool = next((p for p in self.current_pools if p.id == pool_id), None)
         if pool is None or pool.is_exchange:
             return {}
         probs = {r.id: p for r, p in pool.rewards}
-        return self.pity_engine.before_draw(pool_id, self.pity_state, probs)
+        return self._pity_engine.before_draw(pool_id, self._pity_state, probs)
 ```
 
 **字段说明**：
@@ -801,15 +951,17 @@ class StrategyContext:
 | `future_schedules` | `ScheduleManager` | 保留，未来策略可能使用 |
 | `target_cards` | `GachaService.target_cards` | 保留，消除构造时 `target_set` 重复 |
 | `stop_condition` | `GachaService.stop_condition` | 保留，未来策略可能使用 |
-| `pity_engine` | `GachaService.pity_engine` | **新增**，惰性计算保底概率，替代 v4 的预计算方案 |
-| `pity_state` | `GachaService.pity_state` | **新增**，配合 pity_engine 使用 |
-| `acquired` | `SimulationStats.card_counts` | **新增**，由 `GachaService` 维护并传入，消除策略自维护 |
-| `pool_draw_counts` | `SimulationStats.pool_draw_counts` | **新增**，由 `GachaService` 维护并传入，消除策略自维护 |
+| `_pity_engine` | `GachaService.pity_engine` | **新增**，惰性计算保底概率，下划线前缀防止策略直接调用 `after_draw()` |
+| `_pity_state` | `GachaService.pity_state` | **新增**，配合 pity_engine 使用，下划线前缀保护 |
+| `acquired` | `SimulationStats.acquired_counts` | **新增**，仅统计非 `_NO_CARD_ID` 的有效卡牌（修正 I2） |
+| `pool_draw_counts` | `SimulationStats.pool_draw_counts` | **新增**，由 `GachaService` 维护并传入 |
+| `last_draw_pity_triggered` | `GachaService` 上一次抽卡结果 | **新增**（修正 I3），供 `_StopOnTargetStrategy` 使用 |
 
 **性能设计要点**：
-- `pity_engine` 和 `pity_state` 以引用传入，不预计算保底概率
+- `_pity_engine` 和 `_pity_state` 以引用传入，不预计算保底概率
 - `get_pity_probabilities()` 是惰性方法，只有 `PityReserveStrategy` 调用时才计算
 - 其余策略零额外开销，`StrategyContext` 构建成本仅为字段赋值
+- 下划线前缀防止策略直接修改保底状态（修正 I6）
 
 **步骤 2.2 新 `select_action` 签名**：
 
@@ -854,17 +1006,18 @@ for iteration in range(max_iterations):
         future_schedules=future_schedules,
         target_cards=_target_cards,
         stop_condition=_stop,
-        pity_engine=_pity_engine,
-        pity_state=pity_state,
-        acquired=stats.card_counts,
+        _pity_engine=_pity_engine,
+        _pity_state=pity_state,
+        acquired=stats.acquired_counts,
         pool_draw_counts=stats.pool_draw_counts,
+        last_draw_pity_triggered=last_pity_triggered,
     )
 
     action = _strategy(ctx)
     ...
 ```
 
-**注意**：`pity_engine` 和 `pity_state` 以引用传入 `StrategyContext`，不预计算保底概率。只有策略调用 `ctx.get_pity_probabilities()` 时才触发 `before_draw()` 计算。`GachaService` 中实际抽卡时的 `before_draw()` 调用不受影响——两次调用之间 `pity_state` 未改变，结果相同。
+**注意**：`_pity_engine` 和 `_pity_state` 以引用传入 `StrategyContext`，不预计算保底概率。只有策略调用 `ctx.get_pity_probabilities()` 时才触发 `before_draw()` 计算。`GachaService` 中实际抽卡时的 `before_draw()` 调用不受影响——两次调用之间 `pity_state` 未改变，结果相同。`stats.acquired_counts` 仅统计非 `_NO_CARD_ID` 的有效卡牌（修正 I2）。`last_draw_pity_triggered` 在每次抽卡后更新（修正 I3）。
 
 **步骤 2.6-2.7 策略迁移示例**：
 
@@ -874,15 +1027,28 @@ class SmartStrategy(Strategy):
     lookahead = None
 
     def __init__(self):
-        pass
+        self._pool_to_targets: Dict[str, list] = {}
+        self._last_target_cards_id: int = 0
 
     @classmethod
     def description(cls) -> str:
         return "按需追卡：优先兑换→按目标追卡→等待下一个池"
 
+    def _ensure_pool_to_targets(self, ctx: StrategyContext):
+        tc_id = id(ctx.target_cards)
+        if tc_id != self._last_target_cards_id:
+            self._pool_to_targets.clear()
+            for t in ctx.target_cards.targets:
+                for pid in t.pool_ids:
+                    if pid not in self._pool_to_targets:
+                        self._pool_to_targets[pid] = []
+                    self._pool_to_targets[pid].append(t)
+            self._last_target_cards_id = tc_id
+
     def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
-        for t in ctx.target_cards.targets:
-            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+        self._ensure_pool_to_targets(ctx)
+        for t in self._pool_to_targets.get(pool_id, []):
+            if ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
                 return True
         return False
 
@@ -960,10 +1126,12 @@ class PityReserveStrategy(Strategy):
 ```
 
 **关键变化**：
-- `SmartStrategy` 不再需要 `target_set` 和 `all_pools` 构造参数——所有信息从 `ctx` 获取
-- `PityReserveStrategy` 不再需要 O(N²) 重放——保底概率从 `ctx.pity_probabilities` 直接读取
-- 不再需要 `self.acquired`——已获卡计数从 `ctx.acquired` 获取
+- `SmartStrategy` 不再需要 `target_set` 和 `all_pools` 构造参数——所有决策信息从 `ctx` 获取
+- `SmartStrategy` 保留 `_pool_to_targets` 不可变缓存（修正 I4），按需重建，不影响逻辑无状态性
+- `PityReserveStrategy` 不再需要 O(N²) 重放——保底概率从 `ctx.get_pity_probabilities()` 直接读取
+- 不再需要 `self.acquired`——已获卡计数从 `ctx.acquired` 获取（`stats.acquired_counts`，修正 I2）
 - 不再需要 `observe()` 方法——`GachaService` 通过 `SimulationStats` 维护所有计数
+- `_StopOnTargetStrategy` 从 `ctx.last_draw_pity_triggered` 获取保底触发事件（修正 I3）
 
 **步骤 2.8 消除全局变量**：
 
@@ -1037,24 +1205,21 @@ def _create_pity_reserve_strategy(target_set, params):
 ## 五、重构实施路线图
 
 ```
-Phase 0 (消除冗余 + Schema)     ──→  Phase 1 (统一模拟核心)
-    │                                    │
-    │                                    ↓
-    └──→  Phase 2 (统一策略体系 + StrategyContext)  ←──  Phase 1 完成
-              │
-              ↓
-         Phase 3 (统一 GDR 判定)
-              │
-              ↓
-         Phase 4 (ConfigStore + UI 联动)
-              │
-              ↓
-         Phase 5 (高级功能)
+Phase 0 (消除冗余 + Schema) ──→  Phase 1 (统一模拟核心) ──→  Phase 2 (统一策略体系 + StrategyContext)
+                                                                      │
+                                                                      ↓
+                                                                 Phase 3 (统一 GDR 判定)
+                                                                      │
+                                                                      ↓
+                                                                 Phase 4 (ConfigStore + UI 联动)
+                                                                      │
+                                                                      ↓
+                                                                 Phase 5 (高级功能)
 ```
 
 **关键依赖关系**：
-- Phase 1 和 Phase 2 可并行，但都依赖 Phase 0 的 `CompactResult`
-- Phase 2 的 `StrategyContext` 设计依赖 Phase 1 的 `SimulationStats` 统一（`acquired` 和 `pool_draw_counts` 的来源）
+- Phase 1 必须在 Phase 2 之前（修正 I5）：`StrategyContext.acquired` 来自 `SimulationStats.acquired_counts`，而 `SimulationStats` 在 Phase 1 的 Collector 模式中被统一管理
+- Phase 0 是 Phase 1 和 Phase 2 的共同前置依赖
 - Phase 3 依赖 Phase 2（策略迁移后 GDR 判定位置才稳定）
 - Phase 4 依赖 Phase 2（ConfigStore 需要统一的策略注册表）
 - Phase 5 依赖 Phase 2 + Phase 4
@@ -1078,6 +1243,7 @@ Phase 0 (消除冗余 + Schema)     ──→  Phase 1 (统一模拟核心)
 | R11: GUI 面板耦合 MainWindow | 🟡 中 | Phase 4 | 信号/参数注入 |
 | R12: ConfigStore 不完整 | 🟡 中 | Phase 4 | 增加 strategy_params |
 | R13: 策略信息传入错位 | 🔴 高 | Phase 2 | `StrategyContext` 统一信息传入 |
+| R14: PityReserve compact 模式保底概率错误 | 🔴 高 | Phase 2 | `get_pity_probabilities()` 使用实时 pity_state（修正 I1） |
 
 ---
 
@@ -1106,13 +1272,19 @@ class Strategy(ABC):
         pass
 
     def select_action_legacy(self, state, history, current_pools,
-                              future_schedules, target_cards, stop_condition):
+                              future_schedules, target_cards, stop_condition,
+                              pity_engine=None, pity_state=None,
+                              acquired=None, pool_draw_counts=None,
+                              last_draw_pity_triggered=False):
         ctx = StrategyContext(
             state=state, current_pools=current_pools,
-            all_pools=current_pools,  # 旧版无 all_pools，降级为 current_pools
+            all_pools=current_pools,
             future_schedules=future_schedules,
             target_cards=target_cards, stop_condition=stop_condition,
-            pity_probabilities={}, acquired={}, pool_draw_counts={},
+            _pity_engine=pity_engine, _pity_state=pity_state,
+            acquired=acquired or {},
+            pool_draw_counts=pool_draw_counts or {},
+            last_draw_pity_triggered=last_draw_pity_triggered,
         )
         return self.select_action(ctx)
 ```
@@ -1152,6 +1324,9 @@ class ConfigStore:
 | `test_strategy_registry_complete` | 注册表 key 与工厂函数对应 | P2 |
 | `test_smart_strategy_no_state` | SmartStrategy 无 self.acquired，从 ctx 读取 | P2 |
 | `test_pity_reserve_no_history_replay` | PityReserveStrategy 不再遍历 history | P2 |
+| `test_pity_reserve_compact_mode_correct` | PityReserve 在 compact 模式下保底概率正确（验证 R14 修复） | P2 |
+| `test_acquired_excludes_no_card` | ctx.acquired 不含 `_no_card` 条目（验证 I2 修正） | P2 |
+| `test_stop_on_target_uses_ctx` | _StopOnTargetStrategy 从 ctx.last_draw_pity_triggered 读取（验证 I3 修正） | P2 |
 | `test_config_store_migration` | 旧 strategy_type → 新 strategy_name | P4 |
 | `test_pool_end_pity_states_chain` | 链式模拟保底状态传递正确性 | P0 |
 
@@ -1183,3 +1358,4 @@ class ConfigStore:
 | 2026-05-20 | v3 | 第三次更新：扩展为项目整体重构方案，新增 12 个风险点、5 个 Phase、CompactResult Schema 设计、Collector 模式设计 |
 | 2026-05-20 | v4 | 第四次更新：新增"策略信息传入机制"专题分析（第二章），新增风险 R13，重构 Phase 2 设计引入 `StrategyContext`，消除策略自维护状态和 O(N²) 保底重放，更新路线图和测试策略 |
 | 2026-05-20 | v5 | 第五次更新：新增"性能影响分析"（二-B）和"重构范围评估"（二-C）两个专题；修正 Phase 2 保底概率方案从预计算改为惰性计算（`get_pity_probabilities()`）；论证必须从底层（GachaService）开始重构；提出三步原子提交策略 |
+| 2026-05-20 | v6 | 第六次更新：全面审查发现并修正 7 个问题（二-D）——I1: PityReserve compact 模式已失效（新增 R14）、I2: acquired 含 _no_card（新增 acquired_counts）、I3: _StopOnTarget 不可变状态（新增 last_draw_pity_triggered）、I4: _pool_to_targets 预计算丢失（保留不可变缓存）、I5: Phase 1/2 依赖矛盾（修正路线图）、I6: pity_state 引用安全（下划线前缀）、I7: 过渡代码过时（更新） |
