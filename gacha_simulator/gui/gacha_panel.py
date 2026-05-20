@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""抽卡面板 - 批量模拟"""
 
 import traceback
 from PyQt6.QtWidgets import (
@@ -17,16 +16,20 @@ if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
 
-
-
 class SimulationThread(QThread):
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
-    def __init__(self, config, parent=None):
+    def __init__(self, config_store, parent=None):
         super().__init__(parent)
-        self.config = config
+        self.config_store = config_store
+        self._simulation_count = 1000
+        self._max_workers = 1
+        self._seed = 42
+
+    def stop(self):
+        pass
 
     def run(self):
         try:
@@ -35,7 +38,7 @@ class SimulationThread(QThread):
 
             from .batch_simulator import SimulationEnvBuilder, SimulationEnv
 
-            config_store = self._build_config_store()
+            config_store = self.config_store
             env = SimulationEnvBuilder.from_config_store(config_store)
 
             target_ids = env.target_ids
@@ -45,9 +48,9 @@ class SimulationThread(QThread):
             self._pool_end_times = env.pool_end_times
             self._gdr_context = env.gdr_context
 
-            N = self.config['simulation_count']
-            max_workers = self.config['max_workers']
-            seed = self.config['seed']
+            N = self._simulation_count
+            max_workers = self._max_workers
+            seed = self._seed
 
             from .batch_simulator import run_batch_parallel
             from ..core.streaming import SharedResultCollector, extract_aggregate, DrawSequenceExtractor
@@ -113,98 +116,6 @@ class SimulationThread(QThread):
         except Exception as e:
             self.error.emit(traceback.format_exc())
 
-    def _build_config_store(self):
-        from gacha_simulator.core.config_store import (
-            ConfigStore, PoolEntry, PityConfig, PityDef, PoolDistEntry,
-            CardDefEntry, TargetCardEntry,
-        )
-        config = self.config
-        pools = []
-        for p in config.get('pools', []):
-            distribution = []
-            for item in p.get('distribution', []):
-                rg_text = item.get('resources_gained', '')
-                rg = {}
-                if rg_text and isinstance(rg_text, str):
-                    for part in rg_text.split(','):
-                        part = part.strip()
-                        if ':' in part:
-                            rk, rv = part.split(':', 1)
-                            rg[rk.strip()] = float(rv.strip())
-                elif isinstance(rg_text, dict):
-                    rg = rg_text
-                distribution.append(PoolDistEntry(
-                    card_id=item['card_id'],
-                    probability=item.get('probability', 0),
-                    featured=item.get('featured', False),
-                    rarity=item.get('rarity', 'R'),
-                    resources_gained=rg,
-                ))
-            start_day = p.get('start_day', 0)
-            pools.append(PoolEntry(
-                pool_id=p['id'],
-                name=p.get('name', p['id']),
-                start_day=start_day,
-                end_day=start_day + p.get('duration', 21),
-                cost=p.get('cost', 'draw_resource:160'),
-                distribution=distribution,
-                exchange_card_id=p.get('exchange_card_id'),
-            ))
-
-        pity_cfg = config.get('pity', {})
-        pities = []
-        for pd in pity_cfg.get('pities', []):
-            pities.append(PityDef(
-                name=pd.get('name', 'pity'),
-                btype=pd.get('type', 'soft'),
-                params=pd.get('params', {}),
-                target_distribution=pd.get('target_distribution', {}),
-                reset_condition=pd.get('reset', 'any_ssr'),
-                pools=pd.get('pools', '*'),
-            ))
-        pity = PityConfig(
-            enabled=pity_cfg.get('enabled', True),
-            pities=pities,
-            counter_init=pity_cfg.get('counter_init', 0),
-        )
-
-        card_defs = []
-        for cd in config.get('card_defs', []):
-            card_defs.append(CardDefEntry(
-                card_id=cd['card_id'],
-                name=cd.get('name', ''),
-                rarity=cd.get('rarity', 'R'),
-                pools=cd.get('pools', []),
-            ))
-
-        target_cards = []
-        for tc in config.get('target_cards', []):
-            target_cards.append(TargetCardEntry(
-                card_id=tc['card_id'],
-                quantity=tc.get('quantity', 1),
-            ))
-
-        initial_resources = config.get('initial_resources', [])
-
-        ir_dict = {}
-        if isinstance(initial_resources, list):
-            for ir in initial_resources:
-                if isinstance(ir, dict):
-                    rid = ir.get('resource_id', 'draw_resource')
-                    amt = ir.get('amount', 0)
-                    if amt > 0:
-                        ir_dict[rid] = ir_dict.get(rid, 0) + float(amt)
-        elif isinstance(initial_resources, dict):
-            ir_dict = dict(initial_resources)
-
-        return ConfigStore(
-            pools=pools,
-            pity=pity,
-            card_defs=card_defs,
-            target_cards=target_cards,
-            initial_resources=ir_dict,
-        )
-
 
 class GachaPanel(QWidget):
 
@@ -219,7 +130,15 @@ class GachaPanel(QWidget):
         self.ssr_ids = set()
         self.gdr_context = None
         self.pool_end_times = {}
+        self._store = None
+        self._config_panel = None
         self._setup_ui()
+
+    def set_store(self, store):
+        self._store = store
+
+    def set_config_panel(self, config_panel):
+        self._config_panel = config_panel
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -300,32 +219,32 @@ class GachaPanel(QWidget):
         layout.addStretch()
 
     def start_simulation(self):
-        from .config_panel import ConfigPanel
-        config_panel = self._find_config_panel()
-        if not config_panel:
-            self._log("错误: 无法获取配置面板")
-            return
+        if not self._store:
+            if self._config_panel:
+                self._store = self._config_panel.get_store()
+            if not self._store:
+                self._log("错误: 无法获取配置")
+                return
 
-        config = config_panel.get_config()
-        config['simulation_count'] = self.sim_count.value()
-        config['max_workers'] = self.max_workers.value()
-        config['seed'] = self.seed.value()
+        self._store.simulation_count = self.sim_count.value()
+        self._store.max_workers = self.max_workers.value()
+        self._store.seed = self.seed.value()
 
-        store = config_panel.get_store()
-        if store is not None:
-            store.simulation_count = self.sim_count.value()
-            store.max_workers = self.max_workers.value()
-            store.seed = self.seed.value()
         self.status_label.setText("运行中...")
         self.run_btn.setEnabled(False)
         self.progress_bar.setValue(0)
 
-        self._log(f"开始模拟: {config['simulation_count']} 次")
-        pity_type = config.get('pity', {}).get('type', 'unknown')
-        self._log(f"保底类型: {pity_type}")
-        self._log(f"并行进程: {config['max_workers']}")
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self._store.strategy_type)
+        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
+        self._log(f"开始模拟: {self.sim_count.value()} 次")
+        self._log(f"使用策略: {_sname}")
+        self._log(f"并行进程: {self.max_workers.value()}")
 
-        self.simulation_thread = SimulationThread(config)
+        self.simulation_thread = SimulationThread(self._store)
+        self.simulation_thread._simulation_count = self.sim_count.value()
+        self.simulation_thread._max_workers = self.max_workers.value()
+        self.simulation_thread._seed = self.seed.value()
         self.simulation_thread.finished.connect(self.on_simulation_finished)
         self.simulation_thread.error.connect(self.on_simulation_error)
         self.simulation_thread.progress.connect(self.on_simulation_progress)
@@ -352,10 +271,9 @@ class GachaPanel(QWidget):
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
 
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY
-        _skey = getattr(self, '_strategy_key', 'smart')
+        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+        _skey = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
         _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
-        self._log(f"使用策略: {_sname}")
         self._log(f"模拟完成，共 {n_results} 次")
 
         if isinstance(result_bundle, dict):
@@ -432,14 +350,6 @@ class GachaPanel(QWidget):
 
         self.results_table.setItem(4, 1, QTableWidgetItem(f"{np.mean(sim_durations):.1f}"))
         self.results_table.setItem(4, 2, QTableWidgetItem(f"{np.median(sim_durations):.1f}"))
-
-    def _find_config_panel(self):
-        from PyQt6.QtWidgets import QApplication
-        for widget in QApplication.topLevelWidgets():
-            from .main_window import MainWindow
-            if isinstance(widget, MainWindow):
-                return widget.config_panel
-        return None
 
     def _log(self, message):
         self.log_text.append(message)

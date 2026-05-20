@@ -91,6 +91,8 @@ class MainWindow(QMainWindow):
         self.sensitivity_layout.addStretch()
 
         self.config_panel.set_store(self._store)
+        self.gacha_panel.set_store(self._store)
+        self.gacha_panel.set_config_panel(self.config_panel)
         self.strategy_panel.set_store(self._store)
         self.strategy_panel.set_config_panel(self.config_panel)
         self.resource_search_panel.set_store(self._store)
@@ -170,6 +172,7 @@ class MainWindow(QMainWindow):
 
     def _on_config_changed(self, config):
         self.config_panel.apply_to_store()
+        self.gacha_panel.set_store(self._store)
         self.strategy_panel.set_store(self._store)
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
