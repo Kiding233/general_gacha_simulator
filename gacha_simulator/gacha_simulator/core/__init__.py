@@ -37,7 +37,7 @@ from .gdr_analysis import (
 from .pool_config import PoolConfig, CardDef, CardCatalog, parse_schedule_file, parse_distribution_file, parse_cards_file, load_config_from_directory
 from .distribution import EmpiricalDistribution, DistributionSummary, JointSamples, WorstCaseAnalysis, BestCaseAnalysis
 from .risk_analysis import RiskAnalyzer
-from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, SuccessChecker, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability
+from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, register_gdr, SuccessChecker, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability
 from .per_pool_analysis import (
     PoolSnapshot, CumulativeSnapshot,
     compute_per_pool_snapshots, compute_cumulative_snapshots,
@@ -94,7 +94,7 @@ __all__ = [
     'PoolConfig', 'CardDef', 'CardCatalog', 'parse_schedule_file', 'parse_distribution_file', 'parse_cards_file', 'load_config_from_directory',
     'EmpiricalDistribution', 'DistributionSummary', 'JointSamples', 'WorstCaseAnalysis', 'BestCaseAnalysis',
     'RiskAnalyzer',
-    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'SuccessChecker', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability',
+    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'register_gdr', 'SuccessChecker', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability',
     'PoolSnapshot', 'CumulativeSnapshot',
     'compute_per_pool_snapshots', 'compute_cumulative_snapshots',
     'compute_per_pool_snapshots_batch', 'compute_cumulative_snapshots_batch',

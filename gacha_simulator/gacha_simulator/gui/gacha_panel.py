@@ -309,6 +309,12 @@ class GachaPanel(QWidget):
         config['simulation_count'] = self.sim_count.value()
         config['max_workers'] = self.max_workers.value()
         config['seed'] = self.seed.value()
+
+        store = config_panel.get_store()
+        if store is not None:
+            store.simulation_count = self.sim_count.value()
+            store.max_workers = self.max_workers.value()
+            store.seed = self.seed.value()
         self.status_label.setText("运行中...")
         self.run_btn.setEnabled(False)
         self.progress_bar.setValue(0)

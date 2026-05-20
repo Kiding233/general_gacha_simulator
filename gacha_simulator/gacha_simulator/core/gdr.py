@@ -502,6 +502,25 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
 }
 
 
+def register_gdr(definition: GDRDefinition, *, overwrite: bool = False) -> None:
+    existing = UNIFIED_GDR_REGISTRY.get(definition.key)
+    if existing is not None and not overwrite:
+        if existing.display_name != definition.display_name:
+            raise ValueError(
+                f"GDR key '{definition.key}' already registered as "
+                f"'{existing.display_name}', cannot re-register as "
+                f"'{definition.display_name}'. Use overwrite=True to force."
+            )
+        return
+    for k, v in UNIFIED_GDR_REGISTRY.items():
+        if k != definition.key and v.display_name == definition.display_name:
+            raise ValueError(
+                f"GDR display_name '{definition.display_name}' already used "
+                f"by key '{k}'. Choose a different display_name."
+            )
+    UNIFIED_GDR_REGISTRY[definition.key] = definition
+
+
 def _build_legacy_registries():
     gdr_registry = {}
     compact_gdr_registry = {}

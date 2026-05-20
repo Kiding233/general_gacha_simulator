@@ -95,6 +95,9 @@ class ConfigStore:
     stop_condition_params: Dict[str, Any] = field(default_factory=dict)
     auto_wait: bool = True
     card_weights: Dict[str, CardWeightEntry] = field(default_factory=dict)
+    simulation_count: int = 1000
+    max_workers: int = 4
+    seed: int = 42
 
     def clear(self):
         self.card_defs.clear()
@@ -111,3 +114,6 @@ class ConfigStore:
         self.stop_condition_params.clear()
         self.auto_wait = True
         self.card_weights.clear()
+        self.simulation_count = 1000
+        self.max_workers = 4
+        self.seed = 42
