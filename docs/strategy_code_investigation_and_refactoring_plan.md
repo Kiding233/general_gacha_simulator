@@ -1,8 +1,8 @@
 # 策略代码调查与重构方案报告
 
-> 调查日期：2026-05-20（第三次更新版）
+> 调查日期：2026-05-20（第四次更新版）
 > 基于代码版本：v1.8.0
-> 变更说明：本次更新基于对底层代码的全面审查，新增项目整体架构风险分析与重构方案，将视角从"策略代码"扩展到"项目整体"。
+> 变更说明：本次更新新增"策略信息传入机制"专题分析，提出 `StrategyContext` 统一方案，重构 Phase 2 设计以解决信息传入不统一问题。
 
 ---
 
@@ -46,7 +46,88 @@ gacha_simulator/
 
 ---
 
-## 二、项目整体架构风险分析
+## 二、策略信息传入机制分析（v4 新增）
+
+### 2.1 当前 `select_action` 签名
+
+```python
+class Strategy(ABC):
+    @abstractmethod
+    def select_action(
+        self,
+        state: GachaState,              # 资源、保底计数器、时间、extra_state
+        history: List[InfoVector],       # 完整历史记录
+        current_pools: List[Pool],       # 当前可用池
+        future_schedules: List[PoolSchedule],  # 未来池时间表
+        target_cards: TargetCardSet,     # 目标卡集合
+        stop_condition: StopCondition,   # 停止条件
+    ) -> Action:
+```
+
+### 2.2 各策略实际使用的信息差异
+
+| 信息 | SmartStrategy (core) | _PoolQuotaStrategy | _PityReserveStrategy | _StopOnTargetStrategy |
+|------|---------------------|--------------------|-----------------------|-----------------------|
+| `state` (资源/时间) | ✅ `can_afford`, `real_time` | ✅ `can_afford`, `real_time` | ✅ `can_afford`, `real_time` | ✅ `can_afford`, `real_time` |
+| `history` | ❌ 不用 | ❌ 不用 | ✅ **重放历史重建保底** | ❌ 不用 |
+| `current_pools` | ✅ 部分用 | ✅ 部分用 | ✅ 部分用 | ✅ 部分用 |
+| `future_schedules` | ❌ 不用 | ❌ 不用 | ❌ 不用 | ❌ 不用 |
+| `target_cards` | ❌ 不用（用构造时 `target_set`） | ❌ 不用 | ❌ 不用 | ❌ 不用 |
+| `stop_condition` | ❌ 不用 | ❌ 不用 | ❌ 不用 | ❌ 不用 |
+| `_wk_pools` 全局变量 | ❌ | ✅ **兑换池查找** | ✅ **兑换池查找** | ✅ **兑换池查找** |
+| `_wk_pity_engine` 全局变量 | ❌ | ❌ | ✅ **保底概率计算** | ❌ |
+| `self.acquired` 自维护 | ✅ | ✅ | ✅ | ✅ |
+| `self.pool_draw_counts` 自维护 | ❌ | ✅ | ❌ | ❌ |
+
+### 2.3 五个核心问题
+
+**问题 P1：兑换池查找绕过 `current_pools`**
+
+所有 batch 策略通过 `_wk_pools`（全局变量）查找兑换池，而非使用 `current_pools` 参数。原因是 `current_pools` 只包含当前时间可用的池，但策略需要知道所有池（含不可用的）来规划兑换路径。`SmartStrategy`（core 版）通过构造时的 `all_pools` 参数解决此问题，而 batch 版的策略直接用全局变量——两种方式不一致。
+
+**问题 P2：保底概率信息完全缺失**
+
+`select_action` 的参数中**没有任何保底概率信息**。`_PityReserveStrategy` 不得不从头重放整个 history 来重建保底状态，这是 O(N²) 的。而 `GachaService` 内部已经维护了 `pity_state` 和 `pity_engine`，每次抽卡前都调用 `before_draw()` 计算过保底概率，但策略无法访问这个计算结果。
+
+**问题 P3：`history` 是低效的信息载体**
+
+策略需要的信息（已获得哪些卡、各池抽了多少次）被编码在 `history: List[InfoVector]` 中，需要遍历才能提取。所以每个策略都自维护 `self.acquired` 字典来追踪，这本身就是对 `history` 信息不足的补偿。`GachaService` 内部已有 `SimulationStats` 维护了 `card_counts` 和 `pool_draw_counts`，但策略无法访问。
+
+**问题 P4：`future_schedules` 和 `stop_condition` 无人使用**
+
+这两个参数传入了但没有任何策略使用，增加了接口复杂度。`future_schedules` 需要 `strategy.lookahead` 非空时 `GachaService` 才会计算，但当前所有策略的 `lookahead` 都是 `None`。`stop_condition` 的信息对策略决策无意义——策略不需要知道何时停止，那是 `GachaService` 循环控制的事。
+
+**问题 P5：`target_cards` 参数与构造时 `target_set` 重复**
+
+策略通过构造函数接收 `target_set`，又通过 `select_action` 参数接收 `target_cards`，两者是同一个东西但来源不同。所有策略都忽略 `target_cards` 参数，只用构造时的 `target_set`。
+
+### 2.4 信息流向图
+
+```
+GachaService 内部状态                    select_action 参数          策略实际需要
+─────────────────                    ──────────────────         ────────────
+state.resources ───────────────────→ state ──────────────────→ ✅ 直接使用
+state.real_time ───────────────────→ state ──────────────────→ ✅ 直接使用
+state.pity_counters ───────────────→ state ──────────────────→ ❌ 不用
+state.extra_state ─────────────────→ state ──────────────────→ ❌ 不用
+
+pity_state + pity_engine ─────────→ ❌ 未传入 ──────────────→ 🔴 保底概率（PityReserve 需重放）
+simulation_stats.card_counts ─────→ ❌ 未传入 ──────────────→ 🔴 已获卡计数（策略自维护 acquired）
+simulation_stats.pool_draw_counts → ❌ 未传入 ──────────────→ 🔴 各池抽卡次数（PoolQuota 自维护）
+
+all_pools（含不可用池）───────────→ ❌ 未传入 ──────────────→ 🔴 兑换池查找（batch 策略用全局变量）
+current_pools ─────────────────────→ current_pools ──────────→ ✅ 部分使用
+future_schedules ──────────────────→ future_schedules ───────→ ❌ 无人使用
+target_cards ──────────────────────→ target_cards ───────────→ ❌ 与构造时 target_set 重复
+stop_condition ────────────────────→ stop_condition ─────────→ ❌ 无人使用
+history ───────────────────────────→ history ────────────────→ ⚠️ 仅 PityReserve 用于重放
+```
+
+**结论**：策略真正需要的信息有 3 类未传入（保底概率、已获卡计数、全部池列表），而 3 个传入的参数无人使用（future_schedules、target_cards、stop_condition）。信息传入与实际需求严重错位。
+
+---
+
+## 三、项目整体架构风险分析
 
 > 以下风险点不仅限于策略代码，而是基于对 core/、service/、gui/ 全部模块的底层审查发现的系统性问题。
 
@@ -169,27 +250,7 @@ class CompactCollector:
 
 **影响范围**：所有策略类、`run_batch_parallel`、`_wk_run_single`
 
-**建议方案**：
-```python
-@dataclass
-class SimulationContext:
-    pools: List[Pool]
-    schedule_mgr: Any
-    end_time: float
-    pity_engine: Any
-    resource_gain: Any
-    pity_state_init: Optional[dict]
-    card_defs: list
-
-class PoolQuotaStrategy(Strategy):
-    def __init__(self, target_set, pool_quotas=None, context: SimulationContext = None):
-        self._context = context
-        ...
-
-    def select_action(self, state, history, current_pools, ...):
-        pools = self._context.pools if self._context else current_pools
-        ...
-```
+**建议方案**：见 Phase 2 的 `StrategyContext` 设计
 
 ---
 
@@ -262,15 +323,9 @@ def register_gdr(key: str, defn: GDRDefinition):
 
 ---
 
-### 风险 R8：两个 `docs/` 文件夹内容重复（严重程度：🟢 低）
+### 风险 R8：两个 `docs/` 文件夹内容重复（严重程度：🟢 低）→ ✅ 已解决
 
-**位置**：
-- `/workspace/docs/`（项目根目录）
-- `/workspace/gacha_simulator/docs/`（包内，多一个 `strategy_code_investigation_and_refactoring_plan.md`）
-
-**问题描述**：两个文件夹内容几乎完全相同，属于重复。包内 docs 多出的文件是本报告。
-
-**建议方案**：保留 `/workspace/docs/` 作为唯一文档目录，将本报告移至该目录，删除 `/workspace/gacha_simulator/docs/`
+两个 `docs/` 目录已合并到 `/workspace/docs/`，`/workspace/gacha_simulator/docs/` 已删除。
 
 ---
 
@@ -325,7 +380,7 @@ if _wk_pity_engine:
 - **与 `GachaService` 的保底状态管理重复**：`GachaService` 内部已维护 `pity_state`，但策略无法访问
 - **SSR 概率判定使用 `'ssr' in cid.lower()` 字符串匹配**：脆弱，依赖卡牌 ID 命名约定
 
-**建议方案**：将当前保底概率作为 `select_action` 的上下文传入，或在 `GachaState` 中增加保底概率缓存
+**建议方案**：见 Phase 2 的 `StrategyContext.pity_probabilities` 设计
 
 ---
 
@@ -362,18 +417,40 @@ if hasattr(main_window, 'config_panel'):
 
 ---
 
-## 三、项目整体重构方案
+### 风险 R13：策略信息传入与实际需求严重错位（严重程度：🔴 高）（v4 新增）
+
+**位置**：`Strategy.select_action` 签名、`GachaService` 调用点、`batch_simulator.py` 全局变量
+
+**问题描述**：详见第二章"策略信息传入机制分析"。核心矛盾：
+
+| 传入但无人使用 | 需要但未传入 |
+|---------------|-------------|
+| `future_schedules` | 保底概率（`pity_probabilities`） |
+| `target_cards`（与构造时 `target_set` 重复） | 已获卡计数（`acquired`/`card_counts`） |
+| `stop_condition` | 全部池列表（`all_pools`，含不可用池） |
+
+**后果**：
+1. 策略被迫自维护状态（`self.acquired`、`self.pool_draw_counts`），与 `GachaService` 的 `SimulationStats` 重复
+2. 保底概率缺失导致 `_PityReserveStrategy` 的 O(N²) 重放（R10）
+3. 全部池列表缺失导致 batch 策略依赖全局变量（R3）
+4. `observe()` 方法成为必要但非标准的补丁——`GachaService` 通过 `hasattr(strategy, 'acquired')` 判断是否调用
+
+**建议方案**：见 Phase 2 的 `StrategyContext` 设计
+
+---
+
+## 四、项目整体重构方案
 
 ### Phase 0：消除冗余与建立 Schema（优先级：P0，前置依赖）
 
 **目标**：为后续重构建立安全基础
 
-| 步骤 | 内容 | 工作量 |
-|------|------|--------|
-| 0.1 | 删除根目录 `worst_impact.py`，统一使用 `core/worst_impact.py` | 小 |
-| 0.2 | 合并两个 `docs/` 目录，保留项目根目录 | 小 |
-| 0.3 | 定义 `CompactResult` dataclass 替代裸 dict | 中 |
-| 0.4 | `_AllPoolsEnd` 继承 `StopCondition` 基类 | 小 |
+| 步骤 | 内容 | 工作量 | 状态 |
+|------|------|--------|------|
+| 0.1 | 删除根目录 `worst_impact.py`，统一使用 `core/worst_impact.py` | 小 | 待实施 |
+| 0.2 | 合并两个 `docs/` 目录，保留项目根目录 | 小 | ✅ 已完成 |
+| 0.3 | 定义 `CompactResult` dataclass 替代裸 dict | 中 | 待实施 |
+| 0.4 | `_AllPoolsEnd` 继承 `StopCondition` 基类 | 小 | 待实施 |
 
 **步骤 0.3 详细设计**：
 
@@ -469,62 +546,243 @@ class CompactCollector(SimulationCollector):
 
 ---
 
-### Phase 2：统一策略体系（优先级：P1）
+### Phase 2：统一策略体系 + 信息传入机制（优先级：P1）（v4 重构）
 
-**目标**：消除两套策略体系，所有策略继承 `Strategy` 基类
+**目标**：消除两套策略体系，引入 `StrategyContext` 统一信息传入，消除全局变量依赖和策略自维护状态
 
 | 步骤 | 内容 | 工作量 |
 |------|------|--------|
-| 2.1 | `Strategy` 基类增加 `observe()` 方法（默认空实现） | 小 |
-| 2.2 | 将 `_PoolQuotaStrategy`、`_PityReserveStrategy`、`_StopOnTargetStrategy` 迁移到 `core/strategy.py`，继承 `Strategy` | 中 |
-| 2.3 | 将 `STRATEGY_REGISTRY` 迁移到 `core/strategy.py` | 小 |
-| 2.4 | 消除策略对全局变量的依赖，改用构造参数注入 `SimulationContext` | 中 |
-| 2.5 | `batch_simulator.py` 的工厂函数改为从 `core.strategy` 导入 | 小 |
+| 2.1 | 定义 `StrategyContext` dataclass | 小 |
+| 2.2 | 修改 `Strategy.select_action` 签名为 `select_action(self, ctx: StrategyContext) -> Action` | 中 |
+| 2.3 | 将 `_PoolQuotaStrategy`、`_PityReserveStrategy`、`_StopOnTargetStrategy` 迁移到 `core/strategy.py`，继承 `Strategy` | 中 |
+| 2.4 | 将 `STRATEGY_REGISTRY` 迁移到 `core/strategy.py` | 小 |
+| 2.5 | 修改 `GachaService` 在每次循环中构建 `StrategyContext` 并传入 | 中 |
+| 2.6 | 消除策略的 `self.acquired` 和 `self.pool_draw_counts` 自维护 | 中 |
+| 2.7 | 消除 `_PityReserveStrategy` 的 O(N²) 保底重放 | 小 |
+| 2.8 | 消除 batch 策略对全局变量的依赖 | 中 |
+| 2.9 | 删除 `observe()` 方法和 `hasattr(strategy, 'acquired')` 检查 | 小 |
+| 2.10 | `batch_simulator.py` 的工厂函数改为从 `core.strategy` 导入 | 小 |
 
-**步骤 2.4 关键设计——消除全局变量依赖**：
+**步骤 2.1 `StrategyContext` 详细设计**：
+
+```python
+# core/strategy.py（新增）
+
+@dataclass
+class StrategyContext:
+    state: GachaState
+    current_pools: List[Pool]
+    all_pools: List[Pool]
+    future_schedules: List[PoolSchedule]
+    target_cards: TargetCardSet
+    stop_condition: StopCondition
+    pity_probabilities: Dict[str, Dict[str, float]]
+    acquired: Dict[str, int]
+    pool_draw_counts: Dict[str, int]
+```
+
+**字段说明**：
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| `state` | `GachaState` | 不变，直接传入 |
+| `current_pools` | `GachaService` 过滤 | 不变，当前可用池 |
+| `all_pools` | `GachaService._pools_list` | **新增**，替代全局变量 `_wk_pools` 和构造时 `all_pools` |
+| `future_schedules` | `ScheduleManager` | 保留，未来策略可能使用 |
+| `target_cards` | `GachaService.target_cards` | 保留，消除构造时 `target_set` 重复 |
+| `stop_condition` | `GachaService.stop_condition` | 保留，未来策略可能使用 |
+| `pity_probabilities` | `PityEngine.before_draw()` | **新增**，由 `GachaService` 在每次循环中计算后传入，消除 O(N²) 重放 |
+| `acquired` | `SimulationStats.card_counts` | **新增**，由 `GachaService` 维护并传入，消除策略自维护 |
+| `pool_draw_counts` | `SimulationStats.pool_draw_counts` | **新增**，由 `GachaService` 维护并传入，消除策略自维护 |
+
+**步骤 2.2 新 `select_action` 签名**：
+
+```python
+class Strategy(ABC):
+    lookahead: Optional[float] = None
+
+    @classmethod
+    def name(cls) -> str:
+        return cls.__name__
+
+    @classmethod
+    @abstractmethod
+    def description(cls) -> str:
+        return ""
+
+    @abstractmethod
+    def select_action(self, ctx: StrategyContext) -> Action:
+        pass
+```
+
+**步骤 2.5 `GachaService` 构建 `StrategyContext`**：
+
+```python
+# gacha_service.py 主循环中
+for iteration in range(max_iterations):
+    if _check(state, history, stats):
+        break
+
+    current_pools = [p for p in pools_list
+                     if (p.available_from is None or real_time >= p.available_from)
+                     and (p.available_until is None or real_time <= p.available_until)]
+
+    future_schedules = []
+    if _schedule_mgr and _lookahead:
+        future_schedules = _schedule_mgr.get_future_schedules(real_time, _lookahead)
+
+    pity_probabilities = {}
+    if _pity_engine:
+        for pool in current_pools:
+            if not pool.is_exchange:
+                probs = {r.id: p for r, p in pool.rewards}
+                modified = _pity_engine.before_draw(pool.id, pity_state, probs)
+                pity_probabilities[pool.id] = modified
+
+    ctx = StrategyContext(
+        state=state,
+        current_pools=current_pools,
+        all_pools=pools_list,
+        future_schedules=future_schedules,
+        target_cards=_target_cards,
+        stop_condition=_stop,
+        pity_probabilities=pity_probabilities,
+        acquired=stats.card_counts,
+        pool_draw_counts=stats.pool_draw_counts,
+    )
+
+    action = _strategy(ctx)
+    ...
+```
+
+**注意**：保底概率计算从"策略内部重放"变为"GachaService 预计算"。`_pity_engine.before_draw()` 被调用两次（一次在 `StrategyContext` 构建，一次在实际抽卡时），但第二次调用时保底状态未改变（因为 `after_draw` 还没被调用），所以结果相同。未来可优化为缓存，避免重复计算。
+
+**步骤 2.6-2.7 策略迁移示例**：
 
 ```python
 # core/strategy.py
+class SmartStrategy(Strategy):
+    lookahead = None
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def description(cls) -> str:
+        return "按需追卡：优先兑换→按目标追卡→等待下一个池"
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        for t in ctx.target_cards.targets:
+            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def _get_needed_card_exchange(self, ctx: StrategyContext) -> Optional[str]:
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
+                continue
+            for pool in ctx.all_pools:
+                if pool.is_exchange and pool.exchange_card_id == t.card_id:
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
+                        return pool.id
+        return None
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        exchange_pool_id = self._get_needed_card_exchange(ctx)
+        if exchange_pool_id:
+            return DrawAction(pool_id=exchange_pool_id)
+
+        for pool in ctx.current_pools:
+            if not pool.is_exchange and self._pool_needs_target(pool.id, ctx) and ctx.state.can_afford(pool.cost):
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+
 class PityReserveStrategy(Strategy):
     lookahead = None
 
-    def __init__(self, target_set, pity_threshold_pct=80.0,
-                 pity_engine=None, pity_state_init=None, all_pools=None):
-        self.target_set = target_set
+    def __init__(self, pity_threshold_pct: float = 80.0):
         self.pity_threshold_pct = pity_threshold_pct / 100.0
-        self._pity_engine = pity_engine
-        self._pity_state_init = pity_state_init
-        self._all_pools = all_pools or []
-        self.acquired = {}
 
-    def select_action(self, state, history, current_pools, ...):
-        pools = self._all_pools or current_pools
-        for t in self.target_set.targets:
-            if self.acquired.get(t.card_id, 0) >= t.quantity_needed:
+    @classmethod
+    def description(cls) -> str:
+        return "保底预留：只在大保底概率≥阈值时才抽卡"
+
+    def _pool_needs_target(self, pool_id: str, ctx: StrategyContext) -> bool:
+        for t in ctx.target_cards.targets:
+            if pool_id in t.pool_ids and ctx.acquired.get(t.card_id, 0) < t.quantity_needed:
+                return True
+        return False
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        for t in ctx.target_cards.targets:
+            if ctx.acquired.get(t.card_id, 0) >= t.quantity_needed:
                 continue
-            for pool in pools:
+            for pool in ctx.all_pools:
                 if pool.is_exchange and pool.exchange_card_id == t.card_id:
-                    if pool.is_available_at(state.real_time) and state.can_afford(pool.cost):
+                    if pool.is_available_at(ctx.state.real_time) and ctx.state.can_afford(pool.cost):
                         return DrawAction(pool_id=pool.id)
-        ...
+
+        for pool in ctx.current_pools:
+            if pool.is_exchange or not ctx.state.can_afford(pool.cost):
+                continue
+            if not self._pool_needs_target(pool.id, ctx):
+                continue
+
+            pool_probs = ctx.pity_probabilities.get(pool.id, {})
+            ssr_prob = sum(p for cid, p in pool_probs.items() if 'ssr' in cid.lower())
+            if ssr_prob >= self.pity_threshold_pct:
+                return DrawAction(pool_id=pool.id)
+
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
 ```
 
-**`batch_simulator.py` 工厂函数适配**：
+**关键变化**：
+- `SmartStrategy` 不再需要 `target_set` 和 `all_pools` 构造参数——所有信息从 `ctx` 获取
+- `PityReserveStrategy` 不再需要 O(N²) 重放——保底概率从 `ctx.pity_probabilities` 直接读取
+- 不再需要 `self.acquired`——已获卡计数从 `ctx.acquired` 获取
+- 不再需要 `observe()` 方法——`GachaService` 通过 `SimulationStats` 维护所有计数
+
+**步骤 2.8 消除全局变量**：
 
 ```python
 # gui/batch_simulator.py
 from gacha_simulator.core.strategy import (
-    SmartStrategy, PoolQuotaStrategy, PityReserveStrategy, StopOnTargetStrategy
+    SmartStrategy, PoolQuotaStrategy, PityReserveStrategy, StopOnTargetStrategy,
+    STRATEGY_REGISTRY
 )
+
+def _create_smart_strategy(target_set, params):
+    return SmartStrategy()
 
 def _create_pity_reserve_strategy(target_set, params):
     pct = params.get('pity_threshold_pct', 80.0)
-    return PityReserveStrategy(
-        target_set, pity_threshold_pct=pct,
-        pity_engine=_wk_pity_engine,
-        pity_state_init=_wk_pity_state_init,
-        all_pools=_wk_pools,
-    )
+    return PityReserveStrategy(pity_threshold_pct=pct)
+```
+
+工厂函数不再传入 `_wk_pools`、`_wk_pity_engine` 等全局变量，因为策略不再需要这些构造参数。
+
+**步骤 2.9 删除 `observe()` 和 `hasattr` 检查**：
+
+```python
+# gacha_service.py 主循环中，删除以下代码：
+# if hasattr(_strategy_obj, 'acquired') and reward.id != _NO_CARD_ID:
+#     _strategy_obj.acquired[reward.id] = _strategy_obj.acquired.get(reward.id, 0) + 1
+
+# 改为：SimulationStats.on_draw() 已维护 card_counts，通过 StrategyContext 传入
 ```
 
 ---
@@ -561,18 +819,19 @@ def _create_pity_reserve_strategy(target_set, params):
 |------|------|--------|
 | 5.1 | 实现策略比较面板（已有计划文档） | 中 |
 | 5.2 | 停止条件注册表 | 中 |
-| 5.3 | `_PityReserveStrategy` 性能优化：保底概率缓存或通过 `select_action` 上下文传入 | 中 |
+| 5.3 | 保底概率缓存优化：`GachaService` 中 `before_draw` 调用结果缓存，避免重复计算 | 小 |
 | 5.4 | compact dict 元数据：记录策略名、版本号、生成时间 | 小 |
+| 5.5 | `StrategyContext` 增加 `ssr_ids: Set[str]`，消除 `'ssr' in cid.lower()` 脆弱匹配 | 小 |
 
 ---
 
-## 四、重构实施路线图
+## 五、重构实施路线图
 
 ```
 Phase 0 (消除冗余 + Schema)     ──→  Phase 1 (统一模拟核心)
     │                                    │
     │                                    ↓
-    └──→  Phase 2 (统一策略体系)  ←──  Phase 1 完成
+    └──→  Phase 2 (统一策略体系 + StrategyContext)  ←──  Phase 1 完成
               │
               ↓
          Phase 3 (统一 GDR 判定)
@@ -586,34 +845,36 @@ Phase 0 (消除冗余 + Schema)     ──→  Phase 1 (统一模拟核心)
 
 **关键依赖关系**：
 - Phase 1 和 Phase 2 可并行，但都依赖 Phase 0 的 `CompactResult`
+- Phase 2 的 `StrategyContext` 设计依赖 Phase 1 的 `SimulationStats` 统一（`acquired` 和 `pool_draw_counts` 的来源）
 - Phase 3 依赖 Phase 2（策略迁移后 GDR 判定位置才稳定）
 - Phase 4 依赖 Phase 2（ConfigStore 需要统一的策略注册表）
 - Phase 5 依赖 Phase 2 + Phase 4
 
 ---
 
-## 五、风险应对措施汇总
+## 六、风险应对措施汇总
 
 | 风险 | 严重程度 | 应对 Phase | 关键措施 |
 |------|---------|-----------|---------|
 | R1: compact dict 无 Schema | 🔴 高 | Phase 0 | 定义 `CompactResult` dataclass |
 | R2: 模拟方法代码重复 | 🔴 高 | Phase 1 | Collector 模式统一 |
-| R3: 全局变量模式 | 🔴 高 | Phase 2 | 构造参数注入 `SimulationContext` |
+| R3: 全局变量模式 | 🔴 高 | Phase 2 | `StrategyContext.all_pools` 替代全局变量 |
 | R4: 两套策略体系 | 🟡 中 | Phase 2 | 统一继承 `Strategy` 基类 |
 | R5: SuccessChecker 不一致 | 🟡 中 | Phase 3 | 全面替换为 `SuccessChecker` |
 | R6: GDR 注册无冲突检测 | 🟡 中 | Phase 3 | `register_gdr()` 函数 |
 | R7: 两个 worst_impact.py | 🟡 中 | Phase 0 | 删除根目录版本 |
-| R8: 两个 docs/ 目录 | 🟢 低 | Phase 0 | 合并到根目录 |
+| R8: 两个 docs/ 目录 | 🟢 低 | Phase 0 | ✅ 已合并 |
 | R9: _AllPoolsEnd 无基类 | 🟡 中 | Phase 0 | 继承 `StopCondition` |
-| R10: 保底状态重建 O(N²) | 🔴 高 | Phase 5 | 保底概率缓存 |
+| R10: 保底状态重建 O(N²) | 🔴 高 | Phase 2 | `StrategyContext.pity_probabilities` 预计算 |
 | R11: GUI 面板耦合 MainWindow | 🟡 中 | Phase 4 | 信号/参数注入 |
 | R12: ConfigStore 不完整 | 🟡 中 | Phase 4 | 增加 strategy_params |
+| R13: 策略信息传入错位 | 🔴 高 | Phase 2 | `StrategyContext` 统一信息传入 |
 
 ---
 
-## 六、向后兼容性策略
+## 七、向后兼容性策略
 
-### 6.1 compact dict 过渡
+### 7.1 compact dict 过渡
 
 ```python
 # gacha_service.py
@@ -626,7 +887,28 @@ def run_simulation_compact(self, initial_state, ...) -> CompactResult:
     return self.run_simulation(initial_state, collector=CompactCollector(), ...)
 ```
 
-### 6.2 ConfigStore 迁移
+### 7.2 select_action 签名过渡
+
+```python
+# 过渡期：同时支持旧签名和新签名
+class Strategy(ABC):
+    @abstractmethod
+    def select_action(self, ctx: StrategyContext) -> Action:
+        pass
+
+    def select_action_legacy(self, state, history, current_pools,
+                              future_schedules, target_cards, stop_condition):
+        ctx = StrategyContext(
+            state=state, current_pools=current_pools,
+            all_pools=current_pools,  # 旧版无 all_pools，降级为 current_pools
+            future_schedules=future_schedules,
+            target_cards=target_cards, stop_condition=stop_condition,
+            pity_probabilities={}, acquired={}, pool_draw_counts={},
+        )
+        return self.select_action(ctx)
+```
+
+### 7.3 ConfigStore 迁移
 
 ```python
 @dataclass
@@ -642,35 +924,39 @@ class ConfigStore:
                 self.strategy_name = old_to_new[self.strategy_type]
 ```
 
-### 6.3 历史模拟结果兼容
+### 7.4 历史模拟结果兼容
 
 所有读取 compact dict 的代码已使用 `.get()` 带默认值。`CompactResult.from_dict()` 会忽略未知字段并补全缺失字段为默认值。
 
 ---
 
-## 七、测试策略
+## 八、测试策略
 
-### 7.1 重构前必写的回归测试
+### 8.1 重构前必写的回归测试
 
 | 测试 | 覆盖路径 | 优先级 |
 |------|---------|--------|
 | `test_compact_result_roundtrip` | CompactResult ↔ dict 转换 | P0 |
 | `test_simulation_compact_equals_dict` | 新 CompactCollector 输出与旧 dict 输出一致 | P1 |
+| `test_strategy_context_fields` | StrategyContext 所有字段正确填充 | P2 |
 | `test_all_strategies_inherit_base` | 所有策略类 isinstance(strategy, Strategy) | P2 |
 | `test_strategy_registry_complete` | 注册表 key 与工厂函数对应 | P2 |
+| `test_smart_strategy_no_state` | SmartStrategy 无 self.acquired，从 ctx 读取 | P2 |
+| `test_pity_reserve_no_history_replay` | PityReserveStrategy 不再遍历 history | P2 |
 | `test_config_store_migration` | 旧 strategy_type → 新 strategy_name | P4 |
 | `test_pool_end_pity_states_chain` | 链式模拟保底状态传递正确性 | P0 |
 
-### 7.2 性能基准测试
+### 8.2 性能基准测试
 
 | 测试 | 目的 |
 |------|------|
 | `bench_compact_vs_infovector` | 验证 Collector 模式不引入性能回退 |
-| `bench_pity_reserve_strategy` | 量化 O(N²) 问题，为 Phase 5 优化提供基线 |
+| `bench_pity_reserve_before_after` | 对比 PityReserveStrategy 重构前后性能（消除 O(N²)） |
+| `bench_pity_probabilities_overhead` | 量化 StrategyContext 中保底概率预计算的额外开销 |
 
 ---
 
-## 八、参考文档
+## 九、参考文档
 
 - [docs/superpowers/plans/2026-05-13-strategy-comparison-infra.md](file:///workspace/docs/superpowers/plans/2026-05-13-strategy-comparison-infra.md)
 - [docs/superpowers/plans/2026-05-13-strategy-comparison.md](file:///workspace/docs/superpowers/plans/2026-05-13-strategy-comparison.md)
@@ -679,10 +965,11 @@ class ConfigStore:
 
 ---
 
-## 九、变更追踪
+## 十、变更追踪
 
 | 日期 | 版本 | 变更内容 |
 |------|------|---------|
 | 2026-05-20 | v1 | 初始版本：策略代码调查 |
 | 2026-05-20 | v2 | 第二次更新：反映 worst_impact.py 和 gacha_service.py 变更 |
 | 2026-05-20 | v3 | 第三次更新：扩展为项目整体重构方案，新增 12 个风险点、5 个 Phase、CompactResult Schema 设计、Collector 模式设计 |
+| 2026-05-20 | v4 | 第四次更新：新增"策略信息传入机制"专题分析（第二章），新增风险 R13，重构 Phase 2 设计引入 `StrategyContext`，消除策略自维护状态和 O(N²) 保底重放，更新路线图和测试策略 |
