@@ -470,8 +470,8 @@ class ProcessAnalysisPanel(QWidget):
 
             detail_text = (
                 f"总样本: {total}\n"
-                f"整体失败概率（全部池失败）: {all_fail_prob:.4f}\n"
-                f"整体成功概率（全部池成功）: {all_success_prob:.4f}\n\n"
+                f"全部池失败: {all_fail_prob:.4f}\n"
+                f"全部池成功: {all_success_prob:.4f}\n\n"
                 f"各池成功率:\n"
             )
             for pid, rate in sorted(pool_rates.items()):
