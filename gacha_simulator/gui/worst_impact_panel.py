@@ -147,11 +147,15 @@ class WorstImpactPanel(QWidget):
         self._target_specs = None
         self._worker = None
         self._custom_distribution = None
+        self._config_panel = None
         self._setup_ui()
 
     def set_store(self, store):
         self._store = store
         self._load_last_pool_config()
+
+    def set_config_panel(self, config_panel):
+        self._config_panel = config_panel
 
     def set_simulation_results(self, results, target_specs=None):
         self._simulation_results = results
@@ -376,11 +380,10 @@ class WorstImpactPanel(QWidget):
         desire_weights = None
         miss_cost_weights = None
         card_value_weights = None
-        main_window = self.window()
-        if hasattr(main_window, 'config_panel'):
-            desire_weights = main_window.config_panel.get_desire_weights()
-            miss_cost_weights = main_window.config_panel.get_miss_cost_weights()
-            card_value_weights = main_window.config_panel.get_card_value_weights()
+        if self._config_panel:
+            desire_weights = self._config_panel.get_desire_weights()
+            miss_cost_weights = self._config_panel.get_miss_cost_weights()
+            card_value_weights = self._config_panel.get_card_value_weights()
 
         analyzer = WorstImpactAnalyzer(
             simulation_results=self._simulation_results,
