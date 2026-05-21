@@ -169,6 +169,7 @@ _wk_card_defs = None
 _wk_strategy_name = 'smart'
 _wk_strategy_params = {}
 _wk_ssr_ids = set()
+_wk_stop_condition = None
 
 
 def _wk_init(
@@ -182,10 +183,11 @@ def _wk_init(
     strategy_name,
     strategy_params,
     ssr_ids=None,
+    stop_condition=None,
 ):
     global _wk_pools, _wk_schedule_mgr, _wk_end_time
     global _wk_pity_engine, _wk_resource_gain, _wk_pity_state_init, _wk_card_defs
-    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids
+    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids, _wk_stop_condition
     _wk_pools = pools
     _wk_schedule_mgr = schedule_mgr
     _wk_end_time = end_time
@@ -196,6 +198,7 @@ def _wk_init(
     _wk_strategy_name = strategy_name
     _wk_strategy_params = strategy_params
     _wk_ssr_ids = ssr_ids or set()
+    _wk_stop_condition = stop_condition
 
 
 # --- 单次模拟执行 ---
@@ -219,7 +222,10 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
 
         target_set = TargetCardSet(targets)
         strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
-        stop_cond = AllPoolsEndCondition(_wk_end_time)
+        if _wk_stop_condition is not None:
+            stop_cond = _wk_stop_condition
+        else:
+            stop_cond = AllPoolsEndCondition(_wk_end_time)
 
         pity_state = None
         if _wk_pity_state_init:
@@ -263,6 +269,7 @@ def run_batch_parallel(
     strategy_params: Optional[dict] = None,
     on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
     ssr_ids: Optional[set] = None,
+    stop_condition=None,
 ) -> List[Optional[Dict[str, Any]]]:
     if max_workers <= 1:
         _wk_init(
@@ -270,6 +277,7 @@ def run_batch_parallel(
             resource_gain, pity_state_init, card_defs,
             strategy_name, strategy_params or {},
             ssr_ids=ssr_ids,
+            stop_condition=stop_condition,
         )
         results = [] if on_result is None else None
         n_failed = 0
@@ -297,7 +305,7 @@ def run_batch_parallel(
     with MPPool(
         processes=max_workers,
         initializer=_wk_init,
-        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}, ssr_ids),
+        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}, ssr_ids, stop_condition),
     ) as mp_pool:
         results = [] if on_result is None else None
         n_failed = 0

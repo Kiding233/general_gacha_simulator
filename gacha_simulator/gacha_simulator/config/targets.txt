@@ -1,9 +1,0 @@
-# Target Cards
-# Format: card_id | quantity | pool_ids(comma separated)
-
-limited_ssr_1 | 1 | pool_c1,pool_c7
-limited_ssr_2 | 1 | pool_c2,pool_c8
-limited_ssr_3 | 1 | pool_c3
-limited_ssr_4 | 1 | pool_c4
-limited_ssr_5 | 1 | pool_c5
-limited_ssr_6 | 1 | pool_c6
