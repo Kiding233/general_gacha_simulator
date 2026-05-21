@@ -427,6 +427,8 @@ def create_strategy(strategy_name: str, params: Optional[Dict[str, Any]] = None)
     entry = STRATEGY_REGISTRY.get(strategy_name)
     if entry is None:
         raise ValueError(f"Unknown strategy: {strategy_name}")
+    if entry.get('internal'):
+        raise ValueError(f"Cannot create internal strategy '{strategy_name}' via create_strategy()")
     cls = entry['class']
     p = params or {}
     if strategy_name == 'smart':
