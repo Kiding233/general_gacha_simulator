@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self.sensitivity_layout.addStretch()
 
         self.config_panel.set_store(self._store)
+        self.gacha_panel.set_config_panel(self.config_panel)
         self.strategy_panel.set_store(self._store)
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)

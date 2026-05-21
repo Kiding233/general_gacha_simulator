@@ -218,7 +218,11 @@ class GachaPanel(QWidget):
         self.ssr_ids = set()
         self.gdr_context = None
         self.pool_end_times = {}
+        self._config_panel = None
         self._setup_ui()
+
+    def set_config_panel(self, config_panel):
+        self._config_panel = config_panel
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -300,7 +304,7 @@ class GachaPanel(QWidget):
 
     def start_simulation(self):
         from .config_panel import ConfigPanel
-        config_panel = self._find_config_panel()
+        config_panel = self._config_panel
         if not config_panel:
             self._log("错误: 无法获取配置面板")
             return
@@ -427,14 +431,6 @@ class GachaPanel(QWidget):
 
         self.results_table.setItem(4, 1, QTableWidgetItem(f"{np.mean(sim_durations):.1f}"))
         self.results_table.setItem(4, 2, QTableWidgetItem(f"{np.median(sim_durations):.1f}"))
-
-    def _find_config_panel(self):
-        from PyQt6.QtWidgets import QApplication
-        for widget in QApplication.topLevelWidgets():
-            from .main_window import MainWindow
-            if isinstance(widget, MainWindow):
-                return widget.config_panel
-        return None
 
     def _log(self, message):
         self.log_text.append(message)
