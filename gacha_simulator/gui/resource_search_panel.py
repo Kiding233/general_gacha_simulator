@@ -69,6 +69,7 @@ class ResourceSearchWorker(QThread):
             'pity_state_init': env.pity_state_init,
             'card_defs': env.card_defs,
             'initial_resources': env.initial_resources,
+            'ssr_ids': env.ssr_ids,
         }
         self._actual_cost_per_draw = self._extract_cost_per_draw(env.pools)
         self._display_cost_per_draw = self.cost_per_draw_override if self.cost_per_draw_override else self._actual_cost_per_draw
@@ -107,6 +108,7 @@ class ResourceSearchWorker(QThread):
 
     def _simulate_with_resource(self, resource_value):
         from .batch_simulator import run_batch_parallel
+        from ..core.strategy import strategy_type_to_key
         ir = dict(self._initial_resources_backup)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
@@ -122,8 +124,9 @@ class ResourceSearchWorker(QThread):
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
-            strategy_name='smart',
-            strategy_params={},
+            strategy_name=strategy_type_to_key(self.config_store.strategy_type),
+            strategy_params=self.config_store.strategy_params,
+            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         return compute_success_probability(histories, self.target_specs, self.gdr_key, self.gdr_threshold,
@@ -415,15 +418,18 @@ class ResourceSearchPanel(QWidget):
         result_layout = QVBoxLayout(result_group)
 
         desc_label = QLabel(
-            "<b>资源搜索</b>：给定目标卡和成功率阈值，二分搜索最少抽卡资源。"
-            "先搜索上界（不够则翻倍），再二分缩小到精度范围内。"
+            "<b>资源搜索</b>：给定目标卡集合和成功率阈值，"
+            "通过二分搜索找到使得成功率≥阈值所需的最少抽卡资源。<br><br>"
+            "搜索分两阶段：<br>"
+            "1. <b>搜索上界</b>：从初始资源开始，若不够则翻倍，直到成功率≥阈值<br>"
+            "2. <b>二分搜索</b>：在 [0, 上界] 区间二分，逐步缩小到精度范围内"
         )
         desc_label.setWordWrap(True)
         result_layout.addWidget(desc_label)
 
         self.result_label = QLabel("")
         self.result_label.setWordWrap(True)
-        self.result_label.setStyleSheet("padding: 6px; background: #f5f5f5; border-radius: 4px; font-size: 13px; line-height: 1.4;")
+        self.result_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 13px;")
         result_layout.addWidget(self.result_label)
 
         right_layout.addWidget(result_group)
@@ -535,15 +541,14 @@ class ResourceSearchPanel(QWidget):
 
         r = result.min_resource
         draws = r / result.cost_per_draw if result.cost_per_draw > 0 else 0
-        precision_val = result.cost_per_draw * self.precision_spin.value()
         self.result_label.setText(
-            f"<b>最少所需资源:</b> {r:.0f} &nbsp;|&nbsp; "
-            f"<b>约等于:</b> {draws:.1f} 抽 &nbsp;|&nbsp; "
-            f"<b>对应成功率:</b> {result.final_success_probability:.2%}<br>"
-            f"<b>单抽成本:</b> {result.cost_per_draw:.0f} &nbsp;|&nbsp; "
-            f"<b>搜索精度:</b> ±{precision_val:.0f} 资源 &nbsp;|&nbsp; "
-            f"<b>总迭代次数:</b> {result.total_iterations}<br>"
-            f"<b>目标规格:</b> {result.target_specs}"
+            f"<p><b>最少所需资源:</b> {r:.0f}</p>"
+            f"<p><b>约等于:</b> {draws:.1f} 抽</p>"
+            f"<p><b>对应成功率:</b> {result.final_success_probability:.2%}</p>"
+            f"<p><b>单抽成本:</b> {result.cost_per_draw:.0f}</p>"
+            f"<p><b>搜索精度:</b> ±{result.cost_per_draw * self.precision_spin.value():.0f} 资源</p>"
+            f"<p><b>总迭代次数:</b> {result.total_iterations}</p>"
+            f"<p><b>目标规格:</b> {result.target_specs}</p>"
         )
 
         self.steps_table.setRowCount(len(result.steps))

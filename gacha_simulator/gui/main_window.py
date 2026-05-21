@@ -21,6 +21,7 @@ from .retreat_panel import RetreatPanel
 from .retreat_search_panel import RetreatSearchPanel
 from .worst_impact_panel import WorstImpactPanel
 from .process_analysis_panel import ProcessAnalysisPanel
+from .strategy_comparison_panel import StrategyComparisonPanel
 from ..core.config_store import ConfigStore
 from ..core.config_io import load_store_from_directory, save_store_to_directory
 
@@ -81,6 +82,8 @@ class MainWindow(QMainWindow):
 
         self.process_analysis_panel = ProcessAnalysisPanel()
 
+        self.strategy_comparison_panel = StrategyComparisonPanel()
+
         self.sensitivity_panel = QWidget()
         self.sensitivity_layout = QVBoxLayout(self.sensitivity_panel)
         self.sensitivity_layout.addWidget(QLabel("敏感度分析（功能开发中）"))
@@ -91,6 +94,7 @@ class MainWindow(QMainWindow):
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
         self.retreat_search_panel.set_store(self._store)
+        self.strategy_comparison_panel.set_store(self._store)
 
         self.tabs.addTab(self.config_panel, "配置")
         self.tabs.addTab(self.gacha_panel, "批量模拟")
@@ -100,6 +104,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.resource_search_panel, "最少资源")
         self.tabs.addTab(self.retreat_tab, "退路分析")
         self.tabs.addTab(self.worst_impact_panel, "最差影响")
+        self.tabs.addTab(self.strategy_comparison_panel, "策略比较")
         self.tabs.addTab(self.sensitivity_panel, "敏感度分析")
 
         self.status_bar = QStatusBar()
@@ -154,6 +159,7 @@ class MainWindow(QMainWindow):
         self.retreat_panel.status_update.connect(self.status_bar.showMessage)
         self.retreat_search_panel.status_update.connect(self.status_bar.showMessage)
         self.worst_impact_panel.status_update.connect(self.status_bar.showMessage)
+        self.strategy_comparison_panel.status_update.connect(self.status_bar.showMessage)
         self.config_panel.config_changed.connect(self._on_config_changed)
         self.retreat_panel.vulnerability_finished.connect(self.retreat_search_panel.set_vulnerability_result)
 
@@ -163,6 +169,7 @@ class MainWindow(QMainWindow):
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
         self.retreat_search_panel.set_store(self._store)
+        self.strategy_comparison_panel.set_store(self._store)
 
     def _on_tab_changed(self, index):
         widget = self.tabs.widget(index)
@@ -175,6 +182,8 @@ class MainWindow(QMainWindow):
             self.retreat_search_panel.set_store(self._store)
         elif widget is self.worst_impact_panel:
             self.worst_impact_panel.set_store(self._store)
+        elif widget is self.strategy_comparison_panel:
+            self.strategy_comparison_panel.set_store(self._store)
 
     def _load_default_config(self):
         try:
@@ -343,7 +352,7 @@ def main():
     app.setStyle('Fusion')
     app.setApplicationName("Gacha Simulator")
     app.setOrganizationName("Gacha Simulator")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("1.9.0")
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))
     window = MainWindow()

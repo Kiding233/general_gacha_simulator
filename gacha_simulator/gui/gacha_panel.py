@@ -68,6 +68,10 @@ class SimulationThread(QThread):
             )
             collector.add_extractor('draw_sequence', seq_extractor)
 
+            from ..core.strategy import strategy_type_to_key
+
+            strategy_key = strategy_type_to_key(config_store.strategy_type)
+
             run_batch_parallel(
                 pools=env.pools,
                 schedule_mgr=env.schedule_mgr,
@@ -82,9 +86,10 @@ class SimulationThread(QThread):
                 max_workers=max_workers,
                 seed=seed,
                 progress_callback=lambda done, total: self.progress.emit(done, total),
-                strategy_name='smart',
-                strategy_params={},
+                strategy_name=strategy_key,
+                strategy_params=config_store.strategy_params,
                 on_result=collector.on_result,
+                ssr_ids=env.ssr_ids,
             )
 
             result_bundle = {
@@ -304,6 +309,12 @@ class GachaPanel(QWidget):
         config['simulation_count'] = self.sim_count.value()
         config['max_workers'] = self.max_workers.value()
         config['seed'] = self.seed.value()
+
+        store = config_panel.get_store()
+        if store is not None:
+            store.simulation_count = self.sim_count.value()
+            store.max_workers = self.max_workers.value()
+            store.seed = self.seed.value()
         self.status_label.setText("运行中...")
         self.run_btn.setEnabled(False)
         self.progress_bar.setValue(0)
