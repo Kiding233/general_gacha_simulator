@@ -108,17 +108,15 @@ def extract_process(compact, target_ids, target_specs, gdr_key,
                     desire_weights=None, miss_cost_weights=None,
                     card_value_weights=None, ssr_ids=None,
                     weapon_character_map=None):
-    from .gdr import compute_gdr_from_compact
+    from .gdr import SuccessChecker
     from .process_trace import infer_events
 
-    val = compute_gdr_from_compact(
-        compact, target_specs, gdr_key,
-        desire_weights=desire_weights,
-        miss_cost_weights=miss_cost_weights,
-        card_value_weights=card_value_weights,
-        ssr_ids=ssr_ids,
-        weapon_character_map=weapon_character_map,
+    checker = SuccessChecker(
+        target_specs, gdr_key, gdr_threshold,
+        desire_weights, miss_cost_weights, card_value_weights,
+        ssr_ids, weapon_character_map,
     )
+    val = checker.compute_gdr(compact)
 
     pool_events = infer_events(compact, target_ids)
 
@@ -133,7 +131,7 @@ def extract_process(compact, target_ids, target_specs, gdr_key,
             }
             for pid, ev in pool_events.items()
         },
-        'success': val >= gdr_threshold,
+        'success': val >= checker.gdr_threshold,
         'gdr_value': val,
     }
 
