@@ -1,0 +1,4 @@
+# Initial Resources
+# Format: resource_id | amount
+
+draw_resource | 55000

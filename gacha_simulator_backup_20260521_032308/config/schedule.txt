@@ -1,0 +1,13 @@
+# Pool Schedule Configuration
+# Format: pool_id | name | start_day | end_day | cost | template | bindings(key=val) | target_card_ids
+#
+# 常驻SSR/SR/R共享，只有限定SSR不同
+
+pool_c1 | 角色池1 | 0  | 21 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_1;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_1
+pool_c2 | 角色池2 | 21 | 42 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_2;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_2
+pool_c3 | 角色池3 | 42 | 63 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_3;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_3
+pool_c4 | 角色池4 | 63 | 84 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_4;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_4
+pool_c5 | 角色池5 | 84 | 105 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_5;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_5
+pool_c6 | 角色池6 | 105 | 126 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_6;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_6
+pool_c7 | 角色池7 | 126 | 147 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_1;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_1
+pool_c8 | 角色池8 | 147 | 168 | draw_resource:160 | pools/character_pool.txt | ssr=limited_ssr_2;ssr_alt=standard_ssr_1,standard_ssr_2,standard_ssr_3,standard_ssr_4,standard_ssr_5,standard_ssr_6;sr=sr_1,sr_2,sr_3,sr_4,sr_5,sr_6;r=r_1,r_2,r_3,r_4,r_5,r_6 | limited_ssr_2

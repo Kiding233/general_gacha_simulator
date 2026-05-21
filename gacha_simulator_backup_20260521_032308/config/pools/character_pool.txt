@@ -1,0 +1,15 @@
+# Limited Character Pool Template (SSR rate: 0.4%)
+# Limited banner: SSR split into featured + off-rate
+
+[1]:0.004
+[1]=[featured,offrate]
+[featured]:0.5
+[offrate]:0.5
+[featured]=ssr
+[offrate]=ssr_alt
+
+[2]:0.051
+[2]=sr
+
+[3]:0.945
+[3]=r
