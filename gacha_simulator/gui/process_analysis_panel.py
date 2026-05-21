@@ -464,14 +464,14 @@ class ProcessAnalysisPanel(QWidget):
         if isinstance(results, dict):
             pattern_table = results.get('pattern_table', [])
             pool_rates = results.get('pool_success_rates', {})
-            never_success = results.get('never_success_prob', 0)
-            never_fail = results.get('never_fail_prob', 0)
+            all_fail_prob = results.get('all_fail_prob', 0)
+            all_success_prob = results.get('all_success_prob', 0)
             total = results.get('total', 0)
 
             detail_text = (
                 f"总样本: {total}\n"
-                f"整体失败概率: {never_success:.4f}\n"
-                f"整体成功概率: {never_fail:.4f}\n\n"
+                f"全部池失败概率: {all_fail_prob:.4f}\n"
+                f"全部池成功概率: {all_success_prob:.4f}\n\n"
                 f"各池成功率:\n"
             )
             for pid, rate in sorted(pool_rates.items()):
