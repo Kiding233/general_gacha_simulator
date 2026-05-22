@@ -1,6 +1,6 @@
 # Gacha Simulator 项目交接文档
 
-> 当前版本：v1.9.0 | 最后更新：2026-05-20
+> 当前版本：v1.9.1 | 最后更新：2026-05-22
 
 ---
 
@@ -142,7 +142,211 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 4. **单次模拟**：`GachaService.run_simulation_compact()` 执行主循环——策略选择动作 → 执行抽卡/等待 → 更新状态 → 收集 compact 数据
 5. **结果收集**：`SharedResultCollector.on_result(compact)` 边模拟边提取，内存与 N 无关
 
-### 3.2 两种模拟模式
+### 3.2 核心算法设计
+
+#### 3.2.1 蒙特卡洛模拟框架
+
+系统采用**离散事件蒙特卡洛模拟**。每次模拟是一个独立的时间推进过程：
+
+1. **初始化**：给定初始资源、保底计数器初始值、随机种子
+2. **时间推进循环**：
+   - 检查当前可用池（根据时间表过滤）
+   - 调用策略的 `select_action()` 决定下一步操作（抽卡/等待/兑换）
+   - 执行操作：抽卡时从池分布中按概率抽样，等待时推进时间并触发资源获取
+   - 更新状态：资源余额、保底计数器、已获得卡牌集合
+   - 检查停止条件
+3. **终止**：停止条件满足时，输出 compact 结果（卡牌计数、资源剩余、保底触发次数等）
+
+**并行化**：N 次模拟完全独立，通过 multiprocessing 分发到多个 worker 进程。每个 worker 进程内环境静态不变（池、保底引擎、时间表），只有种子和目标规格随任务变化。
+
+#### 3.2.2 GDR（广义出率）指标体系
+
+GDR 是广义化的"出率"概念，将抽卡结果映射为标量值。系统定义了 13 种 GDR 指标，分为三类：
+
+**A. 目标达成类**（值域 [0,1] 或 {0,1}）
+
+| 指标 | 数学定义 | 说明 |
+|------|----------|------|
+| `target_achievement` | Σ min(got_i, need_i) / Σ need_i | 加权目标达成率，考虑超额 |
+| `target_collection` | \|{i : got_i > 0}\| / \|目标卡种类数\| | 目标卡种类收集率 |
+| `all_targets` | Π [got_i ≥ need_i] | 全部目标达成指示函数（0或1） |
+| `ssr_collection` | \|{SSR卡 : got > 0}\| / \|SSR卡总数\| | SSR全收集率 |
+
+**B. 资源效率类**（值域实数）
+
+| 指标 | 数学定义 | 说明 |
+|------|----------|------|
+| `resource_remaining` | initial + gained − consumed | 最终剩余资源 |
+| `resource_efficiency` | Σ min(got_i, need_i) / consumed | 每单位资源获得的目标卡数 |
+| `extra_target` | Σ max(got_i − need_i, 0) | 超额目标卡总数 |
+| `non_pity_draws` | total_draws − pity_triggers | 非保底抽卡数 |
+| `pity_draws` | pity_triggers | 保底触发次数 |
+
+**C. 加权综合类**（需要用户配置权重）
+
+| 指标 | 数学定义 | 说明 |
+|------|----------|------|
+| `weighted_satisfaction` | Σ (got_i × desire_w_i − missed_i × cost_w_i) | 加权满意度，可正可负 |
+| `total_card_value` | Σ got_j × value_w_j | 所有获得卡的总价值 |
+| `per_pool_draw_rate` | Σ目标卡抽数 / 有抽卡的池数 | 平均每池目标卡出率 |
+| `weapon_character_ratio` | 武器数 / 对应角色数 | 专武角色比 |
+
+**成功判定**：`SuccessChecker` 统一判定逻辑。给定 GDR 指标 key 和阈值 θ，一次模拟成功当且仅当 `GDR_value ≥ θ`。阈值可配置，默认值为各指标的 `default_threshold`。
+
+**两种计算路径**：
+- **compact 路径**：直接从 compact dict 的聚合字段计算（O(1) 每模拟）
+- **history 路径**：从 InfoVector 列表逐条遍历计算（O(T) 每模拟，T 为抽卡次数）
+
+#### 3.2.3 策略决策算法
+
+策略是一个从模拟状态到动作的映射函数。系统采用**策略-环境分离**架构：策略只决定"做什么"，环境负责"怎么做"。
+
+**StrategyContext**：每次调用 `select_action()` 前，环境构建一个上下文对象，包含：
+- 当前状态（资源余额、时间、保底计数器）
+- 当前可用池列表
+- 所有池列表（含未开放的）
+- 未来池时间表
+- 目标卡集合及已获得数量
+- 停止条件
+- 保底引擎和状态（用于查询保底概率）
+- 已抽卡统计（总抽数、各池抽数）
+
+**6 种策略的决策逻辑**：
+
+| 策略 | 决策规则 |
+|------|----------|
+| **smart（按需追卡）** | 1) 若有可兑换的目标卡且资源足够 → 兑换；2) 若有含目标卡的开放池且资源足够 → 抽该池；3) 否则 → 等待 |
+| **pool_quota（指定池配额）** | 每池维护一个配额计数器，达到配额后不再抽该池，转向其他池或等待 |
+| **pity_reserve（保底预留）** | 只在保底概率 ≥ 阈值时才抽卡，否则等待。保底概率通过 `get_pity_probabilities()` 查询 |
+| **stop_on_target（目标即停）** | 抽到限定/目标卡后，对该池不再抽卡（但可能继续抽其他池） |
+| **target_hunting（指定池追卡）** | 只在指定的池子中抽卡，忽略其他池 |
+| **fixed_count（固定次数）** | 累计抽卡次数达到固定值后，所有后续动作变为等待 |
+
+**保底概率查询**：`get_pity_probabilities(pool_id)` 返回当前保底状态下各卡的理论出率。查询过程：
+1. 从缓存中查找（若已查询过该池）
+2. 获取该池的基础概率分布
+3. 对每个适用的保底机制，调用 `behavior.apply(counter, probs)` 调整概率
+4. 返回调整后的概率分布，并写入缓存
+
+#### 3.2.4 保底机制算法
+
+保底系统由**计数器-行为-重置条件**三元组构成。
+
+**计数器模型**：每个保底机制有一个独立计数器，记录自上次重置以来的抽卡次数。计数器在每次抽卡前递增，在抽卡后根据重置条件决定是否归零。
+
+**软保底（Soft Pity）**：
+- 计数器达到 `start_at` 时开始生效
+- 概率从基础值线性（或指数、阶梯）上升至 `end_at` 时的 100%
+- 上升进度 `progress = (counter − start_at) / (end_at − start_at)`，限制在 [0,1]
+- 概率调整：将非目标概率按 `progress` 比例转移到目标概率上
+- 目标概率在目标卡之间按 `target_distribution` 权重分配
+
+**硬保底（Hard Pity）**：
+- 计数器达到 `threshold` 时，目标卡概率变为 100%
+- 若指定了 `target_distribution`，按权重分配；否则全部给第一个卡
+
+**重置条件**：
+- `any_ssr`：抽到任何 SSR 卡时重置
+- `featured`：抽到限定 SSR 卡时重置
+- `never`：永不重置
+
+**多保底叠加**：一个池可同时适用多个保底机制。概率调整按顺序叠加：每个保底机制在前一个调整结果上继续调整。
+
+#### 3.2.5 过程分析算法
+
+**事件推断**：对每次模拟的每个池，根据抽卡结果推断事件类型：
+- 若该池抽到了目标卡且保底触发 → `pity_hit`
+- 若该池抽到了目标卡但保底未触发 → `early_hit`
+- 若该池抽了卡但没抽到目标卡 → `miss`
+- 若该池有目标卡但未抽（资源不足或策略选择等待）→ `skip`
+- 若该池无目标卡且未抽 → `ignore`
+
+**交叉统计（AA/BB/AB/BA）**：
+
+- **AA（事件模式分布）**：对所有模拟的所有池的事件序列进行模式计数。支持两种聚合粒度：
+  - `sequence`：严格顺序模式（如 pity_hit→miss→early_hit）
+  - `set`：事件集合模式（如 {pity_hit, early_hit}，忽略顺序和重复）
+  - `count`：事件计数模式（如 pity_hit≥1, miss=0）
+  - `custom`：用户自定义约束（如 "保底出≥1 且 没出=0"）
+
+- **BB（成败模式分布）**：对每个池定义"成功"（达成目标）或"失败"（未达成），统计所有池的成功/失败组合模式：
+  - `count`：成功池数
+  - `all`：全部成功 / 全部失败 / 混合
+  - `custom`：用户指定成功池数阈值和比较操作
+
+- **AB（事件 × 成败交叉）**：对每个事件模式，分别统计成功模拟和失败模拟的比例
+
+- **BA（成败 × 事件交叉）**：对每个成败模式，统计其对应的事件模式分布
+
+#### 3.2.6 资源搜索算法
+
+**二分搜索最少资源**：给定目标成功率 P，搜索满足 `success_rate(resource) ≥ P` 的最小初始资源。
+
+算法：
+1. 确定搜索区间 `[low, high]`（low 通常导致成功率接近 0，high 通常导致成功率接近 1）
+2. 对中点 `mid` 运行批量模拟，计算成功率
+3. 若成功率 ≥ P，则 `high = mid`；否则 `low = mid`
+4. 重复直到区间宽度小于容差或达到最大迭代次数
+5. 返回 `high` 作为最小资源估计
+
+**注意**：成功率函数 `f(resource)` 理论上单调递增但不保证严格单调（蒙特卡洛噪声），因此二分搜索可能因噪声而震荡。实践中使用足够大的模拟次数（如 1000 次）来抑制噪声。
+
+#### 3.2.7 退路搜索算法
+
+**Pareto 前沿搜索**：在多目标优化框架下搜索"最优退路"。
+
+定义：一个退路（减少目标卡集合或降低数量）是 Pareto 最优的，如果不存在另一个退路在"成功率更高"和"资源消耗更少"两个维度上都严格更优。
+
+算法：
+1. 从原始目标卡集合生成所有可能的子集（或降低数量的变体）
+2. 对每个变体运行批量模拟
+3. 计算两个目标：成功率和资源消耗
+4. 筛选 Pareto 最优解：保留那些不被任何其他解支配的解
+5. 按成功率排序返回
+
+**复杂度**：若原始目标有 M 张卡，每张卡有 K 种数量选择，则候选退路数为 O(K^M)。实践中 M 通常 ≤ 10，K 通常 = 2（保留/移除），通过剪枝和并行模拟控制计算量。
+
+#### 3.2.8 脆弱性分析算法
+
+**条件分布分析**：分析"失败模拟"的资源分布特征。
+
+算法：
+1. 运行 N 次模拟，按成功/失败分类
+2. 对失败模拟，提取最终资源值，构建经验分布
+3. 将资源区间分桶，计算每个桶内的失败率
+4. 使用核密度回归（局部多项式）拟合失败率-资源曲线
+5. 识别"脆弱区间"：失败率显著高于整体的资源范围
+
+**输出**：
+- 各资源桶的失败率
+- 拟合的平滑曲线
+- 脆弱区间（失败率 > 整体失败率 × 阈值的连续区间）
+
+#### 3.2.9 最差影响分析算法
+
+**条件尾部分布**：在失败条件下，分析资源消耗的极端情况。
+
+算法：
+1. 运行 N 次模拟
+2. 筛选失败模拟
+3. 对失败模拟的资源消耗值，计算条件分布的下尾分位数：
+   - VaR(α)：失败模拟中资源消耗的第 α 分位数（即 α% 的失败模拟消耗不超过该值）
+   - CVaR(α)：超过 VaR(α) 的失败模拟的平均消耗
+4. 可视化：资源消耗的条件分布直方图 + 下尾标记
+
+#### 3.2.10 流式结果收集算法
+
+**内存控制**：传统方式保存 N 次模拟的完整结果，内存 O(N)。流式架构改为边模拟边提取：
+
+1. 注册多个 extractor，每个 extractor 定义需要从 compact 结果中提取的字段
+2. 每次模拟完成后，立即调用所有 extractor 的 `on_result(compact)`
+3. extractor 内部维护聚合状态（如计数器、累加器、分布直方图）
+4. 模拟全部完成后，通过 `get_extracted(name)` 获取最终聚合结果
+5. compact dict 在提取后立即被垃圾回收
+
+**内存复杂度**：从 O(N × compact_size) 降为 O(extractor_count × aggregation_size)，与 N 无关。
+
+### 3.3 两种模拟模式
 
 | 模式 | 方法 | 输出 | 用途 |
 |------|------|------|------|
@@ -156,7 +360,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 - `result_version: int` — 结果格式版本号（当前为 1）
 - `generated_at: float` — 结果生成时间戳
 
-### 3.3 GDR（广义出率）系统
+### 3.4 GDR（广义出率）系统
 
 `UNIFIED_GDR_REGISTRY` 定义了 13 种 GDR 指标，每种都有两种计算路径：
 
@@ -180,7 +384,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 - `compute_from_history(history_list, ctx)` → 从 InfoVector 列表计算（兼容旧代码）
 - `SuccessChecker` 统一了"某次模拟是否成功"的判断逻辑（GDR值 ≥ 阈值）
 
-### 3.4 策略系统
+### 3.5 策略系统
 
 `STRATEGY_REGISTRY`（在 `core/strategy.py` 中）注册了 6 种策略：
 
@@ -204,7 +408,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 
 工厂函数：`create_strategy(name, params)` / `strategy_type_to_key(display_name)` / `strategy_key_to_type(key)`
 
-### 3.5 停止条件系统
+### 3.6 停止条件系统
 
 `STOP_CONDITION_REGISTRY`（在 `core/stop_condition.py` 中）注册了 6 种停止条件：
 
@@ -219,7 +423,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 
 工厂函数：`create_stop_condition(name, params)` / `stop_condition_type_to_key(display_name)` / `stop_condition_key_to_type(key)`
 
-### 3.6 保底机制
+### 3.7 保底机制
 
 `PityEngine` 管理多种保底机制，支持：
 - **软保底**（soft pity）：从 `start_at` 抽开始概率线性/指数上升，到 `end_at` 抽达到 100%
@@ -228,7 +432,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 - `reset_condition`：`any_ssr`（任何SSR重置）或 `featured`（仅限定SSR重置）
 - `pools` 字段支持通配符匹配（如 `character_*`）
 
-### 3.7 过程分析系统
+### 3.8 过程分析系统
 
 **事件推断**（`process_trace.py`）：从 compact dict 的逐抽记录推断每个池的事件类型：
 - `pity_hit`：保底出（目标卡 + 保底触发）
@@ -243,7 +447,7 @@ SharedResultCollector.on_result(compact) → 提取聚合数据
 - AB：事件模式 × 成败模式交叉分布
 - BA：成败模式 × 事件模式交叉分布
 
-### 3.8 流式架构
+### 3.9 流式架构
 
 `SharedResultCollector` 实现了边模拟边提取边丢弃：
 - 注册多个 `extractor`（如 `aggregate`、`process_data`）
@@ -370,6 +574,7 @@ draw_resource | 100 | 0 | 21
 | 1.7.0 | 05-17 | DEFAULT | 流式模拟架构重构：SharedResultCollector，内存与N无关 |
 | 1.8.0 | 05-17 | DEFAULT | 过程分析功能：事件推断、交叉统计、ProcessAnalysisPanel |
 | 1.9.0 | 05-20 | DEFAULT | 策略代码重构：CompactResult + Collector模式 + StrategyContext + 6种策略统一 + 停止条件注册表 + 策略比较面板 + 保底概率缓存 + compact元数据 |
+| 1.9.1 | 05-22 | DEFAULT | ConfigStore 添加 strategy_name 字段 + 旧字段迁移逻辑；消除7处冗余 strategy_type_to_key 调用；更新 HANDOVER.md 算法说明 |
 
 ### 重大架构变更
 
@@ -377,6 +582,7 @@ draw_resource | 100 | 0 | 21
 2. **v1.6.0 GDR 统一**：合并两套注册表为 `UNIFIED_GDR_REGISTRY`，创建 `SuccessChecker`
 3. **v1.7.0 流式重构**：`SharedResultCollector` 替代保存全部 compact dict 的方式，内存从 O(N) 降为 O(1)
 4. **v1.9.0 策略重构**：`CompactResult` 替代裸 dict；`SimulationCollector` 统一两种模拟模式；`StrategyContext` + `STRATEGY_REGISTRY` 统一 6 种策略；`STOP_CONDITION_REGISTRY` 统一 6 种停止条件；策略比较面板
+5. **v1.9.1 字段迁移**：`ConfigStore` 新增 `strategy_name` 字段，通过 `__post_init__` 自动从 `strategy_type` 同步，消除所有调用方的冗余转换
 
 ---
 
@@ -419,16 +625,17 @@ draw_resource | 100 | 0 | 21
 
 ### P6：策略代码重构遗留项
 
-状态：6项未实施
+状态：4项已完成，2项未实施
 
-| 步骤 | 内容 | 优先级 |
-|------|------|--------|
-| 0.1 | 删除根目录 `worst_impact.py` | 🟢低 |
-| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 🟡中 |
-| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 🟡中 |
-| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数 | 🟡中 |
-| 4.4 | 策略参数动态控件 | 🟡中 |
-| 4.6 | GUI 面板权重获取改为 `set_store()` / 信号 | 🟢低 |
+| 步骤 | 内容 | 优先级 | 状态 |
+|------|------|--------|------|
+| 0.1 | 删除根目录 `worst_impact.py` | 🟢低 | ❌ 未实施 |
+| 3.1 | `vulnerability.py` 的 `_is_success()` 替换为 `SuccessChecker` | 🟡中 | ✅ 已完成 |
+| 3.3 | `analysis_panel.py` 的 GDR 调用统一为 `SuccessChecker` | 🟡中 | ✅ 已完成（analysis_panel 使用 compute_gdr_from_compact 计算多指标值，非成功判定，保留正确） |
+| 3.4 | `UNIFIED_GDR_REGISTRY` 增加 `register_gdr()` 函数 | 🟡中 | ✅ 已完成 |
+| 4.2 | ConfigStore 添加 `strategy_name` 字段和迁移逻辑 | 🟡中 | ✅ 已完成 |
+| 4.4 | 策略参数动态控件 | 🟡中 | ❌ 未实施 |
+| 4.6 | GUI 面板权重获取改为 `set_store()` / 信号 | 🟢低 | ✅ 已完成 |
 
 ### 建议执行顺序
 
