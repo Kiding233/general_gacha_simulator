@@ -101,6 +101,7 @@ class RetreatConfigBuilder:
 
         truncated.resource_defs = dict(original_store.resource_defs)
         truncated.strategy_type = original_store.strategy_type
+        truncated.strategy_name = original_store.strategy_name
         truncated.auto_wait = original_store.auto_wait
 
         return truncated

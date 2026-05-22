@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
+from .strategy import strategy_type_to_key, strategy_key_to_type, STRATEGY_REGISTRY
+
 
 @dataclass
 class PoolDistEntry:
@@ -90,6 +92,7 @@ class ConfigStore:
     initial_resources: Dict[str, float] = field(default_factory=dict)
     target_cards: List[TargetCardEntry] = field(default_factory=list)
     strategy_type: str = '按需追卡'
+    strategy_name: str = 'smart'
     strategy_params: Dict[str, Any] = field(default_factory=dict)
     stop_condition_type: str = '所有池结束'
     stop_condition_params: Dict[str, Any] = field(default_factory=dict)
@@ -98,6 +101,15 @@ class ConfigStore:
     simulation_count: int = 1000
     max_workers: int = 4
     seed: int = 42
+
+    def __post_init__(self):
+        if self.strategy_type:
+            if self.strategy_type in STRATEGY_REGISTRY:
+                self.strategy_name = self.strategy_type
+            else:
+                resolved = strategy_type_to_key(self.strategy_type)
+                if resolved != self.strategy_name:
+                    self.strategy_name = resolved
 
     def clear(self):
         self.card_defs.clear()
@@ -109,6 +121,7 @@ class ConfigStore:
         self.initial_resources.clear()
         self.target_cards.clear()
         self.strategy_type = '按需追卡'
+        self.strategy_name = 'smart'
         self.strategy_params.clear()
         self.stop_condition_type = '所有池结束'
         self.stop_condition_params.clear()

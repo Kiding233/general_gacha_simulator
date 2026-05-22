@@ -1962,6 +1962,7 @@ class ConfigPanel(QWidget):
             },
             'strategy': {
                 'type': store.strategy_type,
+                'name': store.strategy_name,
                 'params': dict(store.strategy_params),
                 'auto_wait': store.auto_wait,
             },
@@ -2065,6 +2066,7 @@ class ConfigPanel(QWidget):
         else:
             strategy_type_resolved = strategy_type_raw
         store.strategy_type = strategy_type_resolved
+        store.strategy_name = strategy.get('name', None) or strategy_type_to_key(strategy_type_resolved)
         store.strategy_params = strategy.get('params', {})
         store.auto_wait = strategy.get('auto_wait', True)
 
@@ -2444,6 +2446,7 @@ class ConfigPanel(QWidget):
     def apply_to_store(self):
         if self._store is None or self._refreshing:
             return
+        from gacha_simulator.core.strategy import strategy_type_to_key
         store = self._store
 
         store.pools = []
@@ -2507,6 +2510,7 @@ class ConfigPanel(QWidget):
         store.pity.counter_init = {pd['name']: pd.get('counter_init', 0) for pd in self._pity_defs}
 
         store.strategy_type = self.strategy_type.currentText()
+        store.strategy_name = strategy_type_to_key(store.strategy_type)
         store.strategy_params = self._get_strategy_params_from_widgets()
         store.stop_condition_type = self.stop_condition_type.currentText()
         store.stop_condition_params = {}

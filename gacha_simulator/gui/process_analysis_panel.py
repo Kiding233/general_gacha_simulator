@@ -14,7 +14,7 @@ from ..core.process_analysis import (
     compute_aa, compute_bb, compute_ab, compute_ba,
     EVENT_MODE_MAP, SUCCESS_MODE_MAP,
 )
-from ..core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact
+from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker
 
 _gdr_key_to_display = {key: defn.display_name for key, defn in UNIFIED_GDR_REGISTRY.items()}
 
@@ -336,12 +336,14 @@ class ProcessAnalysisPanel(QWidget):
         )
         initial_resources = self._initial_resources
 
+        checker = SuccessChecker(
+            target_specs, gdr_key, gdr_threshold=threshold,
+            ssr_ids=ssr_ids,
+            weapon_character_map=weapon_character_map,
+        )
+
         for sample_idx, agg in enumerate(self._aggregate_data):
-            val = compute_gdr_from_compact(
-                agg, target_specs, gdr_key,
-                ssr_ids=ssr_ids,
-                weapon_character_map=weapon_character_map,
-            )
+            val = checker.compute_gdr(agg)
 
             pool_events = infer_events(agg, target_ids)
             pool_ids_sorted = sorted(pool_events.keys())
@@ -357,12 +359,12 @@ class ProcessAnalysisPanel(QWidget):
                     weapon_character_map, initial_resources,
                 )
                 pool_gdr_values[pid] = pool_gdr_val if pool_gdr_val is not None else 0.0
-                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= threshold)
+                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= checker.gdr_threshold)
 
             traces.append(SampleTrace(
                 events=events_list,
                 pool_success=pool_success,
-                is_success=val >= threshold,
+                is_success=checker.is_success(agg),
                 gdr_value=val,
                 pool_gdr_values=pool_gdr_values,
             ))
