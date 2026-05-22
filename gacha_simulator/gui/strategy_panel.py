@@ -98,8 +98,7 @@ class StrategyWorker(QThread):
             current_specs[card_id] = self.target_qty
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
+            _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],
@@ -162,8 +161,7 @@ class StrategyWorker(QThread):
         self.progress.emit("后退法: 初始完整集合模拟", 5)
 
         from .batch_simulator import run_batch_parallel
-        from ..core.strategy import strategy_type_to_key
-        _skey = strategy_type_to_key(self.config_store.strategy_type)
+        _skey = self.config_store.strategy_name
         _sparams = self.config_store.strategy_params
         initial_histories = run_batch_parallel(
             pools=self._sim_env['pools'],
@@ -219,8 +217,7 @@ class StrategyWorker(QThread):
             del temp_specs[card_id]
 
             from .batch_simulator import run_batch_parallel
-            from ..core.strategy import strategy_type_to_key
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
+            _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],

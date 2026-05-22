@@ -71,9 +71,7 @@ class SimulationThread(QThread):
             )
             collector.add_extractor('draw_sequence', seq_extractor)
 
-            from ..core.strategy import strategy_type_to_key
-
-            strategy_key = strategy_type_to_key(config_store.strategy_type)
+            strategy_key = config_store.strategy_name
 
             run_batch_parallel(
                 pools=env.pools,

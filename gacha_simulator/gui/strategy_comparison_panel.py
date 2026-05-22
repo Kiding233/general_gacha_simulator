@@ -20,7 +20,7 @@ if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
 from gacha_simulator.core.config_store import ConfigStore
-from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
+from gacha_simulator.core.strategy import STRATEGY_REGISTRY
 
 
 class ComparisonWorker(QThread):
@@ -66,7 +66,7 @@ class ComparisonWorker(QThread):
             for tc in self.config_store.target_cards:
                 target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
 
-            current_strategy_key = strategy_type_to_key(self.config_store.strategy_type)
+            current_strategy_key = self.config_store.strategy_name
             current_strategy_params = dict(self.config_store.strategy_params) if self.config_store.strategy_params else {}
 
             results = {}
