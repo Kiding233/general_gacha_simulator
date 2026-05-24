@@ -159,7 +159,7 @@ class TestEventModeConversions:
             _make_event('b', 'miss'),
             _make_event('c', 'pity_hit', pity_name='ssr_soft'),
         ]
-        assert to_event_type_sequence(events) == ('early_hit', 'miss', 'pity_hit')
+        assert to_event_type_sequence(events) == ('early_hit', 'miss', 'pity_hit:ssr_soft')
 
     def test_to_event_type_set(self):
         events = [
@@ -178,11 +178,8 @@ class TestEventModeConversions:
         ]
         result = to_custom_pattern(events)
         assert result == {
-            'pity_hit': '保底出=0',
             'early_hit': '提前出=2',
             'miss': '没出=1',
-            'skip': '跳过=0',
-            'ignore': '忽略=0',
         }
 
     def test_to_custom_pattern_with_constraints(self):
@@ -211,7 +208,7 @@ class TestEventModeConversions:
             _make_event('c', 'early_hit'),
         ]
         result = to_event_count_set(events)
-        assert result == (0, 2, 1, 0, 0)
+        assert result == (('early_hit', 2), ('miss', 1))
 
     def test_unhashable_restores_dict(self):
         d = {'a': '1', 'b': '2'}

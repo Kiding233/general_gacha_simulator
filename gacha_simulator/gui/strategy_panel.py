@@ -320,6 +320,12 @@ class StrategyPanel(QWidget):
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
+        config_panel.config_changed.connect(self._update_strategy_display)
+        self._update_strategy_display()
+
+    def _update_strategy_display(self):
+        if self._config_panel:
+            self.strategy_label.setText(self._config_panel.strategy_type.currentText())
 
     def _load_weights(self):
         if self._store and self._store.target_cards:
@@ -394,6 +400,10 @@ class StrategyPanel(QWidget):
 
         params_group = QGroupBox("分析参数")
         params_layout = QFormLayout(params_group)
+
+        self.strategy_label = QLabel("--")
+        self.strategy_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        params_layout.addRow("当前策略:", self.strategy_label)
 
         self.method_combo = QComboBox()
         self.method_combo.addItems(["前进法", "后退法"])
@@ -697,7 +707,7 @@ class StrategyPanel(QWidget):
 
         plt.tight_layout()
         tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight')
+        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
         plt.close()
 
         from PyQt6.QtGui import QPixmap

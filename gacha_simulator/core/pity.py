@@ -12,6 +12,10 @@ class PityBehavior(ABC):
               extra: Dict[str, Any] = None) -> Dict[str, float]:
         pass
 
+    def is_active(self, counter_value: int) -> bool:
+        """该保底在给定计数器值下是否影响概率。子类应覆写此方法。"""
+        return False
+
 
 class SoftPityBehavior(PityBehavior):
     def __init__(self, start_at: int, end_at: int,
@@ -21,6 +25,9 @@ class SoftPityBehavior(PityBehavior):
         self.end_at = end_at
         self.func_type = func_type
         self.target_distribution = target_distribution or {}
+
+    def is_active(self, counter_value: int) -> bool:
+        return counter_value >= self.start_at
 
     def _progress(self, counter_value: int) -> float:
         if counter_value < self.start_at:
@@ -103,6 +110,9 @@ class HardPityBehavior(PityBehavior):
                  target_distribution: Dict[str, float] = None):
         self.threshold = threshold
         self.target_distribution = target_distribution or {}
+
+    def is_active(self, counter_value: int) -> bool:
+        return counter_value >= self.threshold
 
     def apply(self, counter_value: int, probabilities: Dict[str, float],
               extra: Dict[str, Any] = None) -> Dict[str, float]:

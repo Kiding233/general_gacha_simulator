@@ -478,7 +478,7 @@ class WorstImpactPanel(QWidget):
         plt.tight_layout()
 
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+        fig.savefig(tmp.name, dpi=200, bbox_inches='tight', pad_inches=0.15)
         plt.close(fig)
         pixmap = QPixmap(tmp.name)
         if not pixmap.isNull():

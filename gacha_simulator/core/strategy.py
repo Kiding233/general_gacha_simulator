@@ -309,6 +309,24 @@ class TargetHuntingStrategy(Strategy):
         return WaitAction(duration=3600)
 
 
+class NoDrawStrategy(Strategy):
+    """不抽卡策略：始终等待，一次都不抽。用于计算不抽卡基线资源水平。"""
+
+    @classmethod
+    def description(cls) -> str:
+        return "不抽卡：始终等待，用于计算基线资源水平"
+
+    def select_action(self, ctx: StrategyContext) -> Action:
+        from .action import WaitAction
+        wait_time = 86400
+        for pool in ctx.current_pools:
+            if hasattr(pool, 'available_until') and pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
+        if wait_time <= 0:
+            wait_time = 3600
+        return WaitAction(duration=wait_time)
+
+
 class CompositeStrategy(Strategy):
     def __init__(self, strategies: List[Strategy], mode: str = 'first_valid'):
         self.strategies = strategies
@@ -402,6 +420,13 @@ STRATEGY_REGISTRY = {
             },
         },
     },
+    'no_draw': {
+        'display_name': '不抽卡基线',
+        'description': '不抽卡：始终等待，用于计算基线资源水平',
+        'class': NoDrawStrategy,
+        'params': {},
+        'internal': True,
+    },
     'draw_target': {
         'display_name': '目标池抽卡',
         'description': '最差影响分析专用：从目标池抽卡',
@@ -427,8 +452,8 @@ def create_strategy(strategy_name: str, params: Optional[Dict[str, Any]] = None)
     entry = STRATEGY_REGISTRY.get(strategy_name)
     if entry is None:
         raise ValueError(f"Unknown strategy: {strategy_name}")
-    if entry.get('internal'):
-        raise ValueError(f"Cannot create internal strategy '{strategy_name}' via create_strategy()")
+    if entry.get('internal') and entry.get('class') is None:
+        raise ValueError(f"Cannot create internal strategy '{strategy_name}': no instantiable class")
     cls = entry['class']
     p = params or {}
     if strategy_name == 'smart':

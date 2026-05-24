@@ -748,8 +748,8 @@ python gacha_simulator/run.py
 
 | 文档 | 路径 | 内容 |
 |------|------|------|
-| 项目计划汇总 | `docs/superpowers/PLAN_SUMMARY.md` | 所有计划的状态、依赖、兼容性 |
-| 策略重构计划 | `docs/strategy_code_investigation_and_refactoring_plan.md` | v8，5阶段重构（含6项遗留） |
+| 项目计划汇总 | `docs/计划汇总.md` | 所有计划的状态、依赖、兼容性 |
+| 策略重构计划 | `docs/策略代码调查与重构方案.md` | v8，5阶段重构（含6项遗留） |
 | 过程分析计划 | `docs/superpowers/plans/2026-05-15-process-analysis.md` | v8，含 Task 9 条件 GDR 分布 |
 | 过程分析设计 | `docs/superpowers/specs/2026-05-15-process-analysis-design.md` | v6 |
 | Bootstrap 计划 | `docs/superpowers/plans/2026-05-18-bootstrap-stability-analysis.md` | 完整设计 |

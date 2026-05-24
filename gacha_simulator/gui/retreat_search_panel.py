@@ -71,6 +71,12 @@ class RetreatSearchPanel(QWidget):
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
+        config_panel.config_changed.connect(self._update_strategy_display)
+        self._update_strategy_display()
+
+    def _update_strategy_display(self):
+        if self._config_panel:
+            self.strategy_label.setText(self._config_panel.strategy_type.currentText())
 
     def set_vulnerability_result(self, result):
         self._vulnerability_result = result
@@ -237,7 +243,7 @@ class RetreatSearchPanel(QWidget):
         # 根据点数决定图表尺寸，保持紧凑
         n = len(result.points)
         fig_w = max(5, min(n * 0.8 + 3, 10))
-        fig_h = 4.5
+        fig_h = 5.5
 
         fig, ax = plt.subplots(figsize=(fig_w, fig_h))
         scatter = ax.scatter(extra_resources, target_counts, c=probs, cmap='RdYlGn',
@@ -263,10 +269,11 @@ class RetreatSearchPanel(QWidget):
         mode_labels = {'resource': '最少额外资源', 'target': '最多目标卡', 'pareto': 'Pareto前沿'}
         ax.set_title(f'退路方案搜索 — {mode_labels.get(result.search_mode, result.search_mode)}')
         ax.grid(True, alpha=0.3)
+        ax.margins(y=0.1)
 
         plt.tight_layout()
         tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight')
+        fig.savefig(tmp.name, dpi=200, bbox_inches='tight', pad_inches=0.3)
         plt.close(fig)
         return tmp.name
 
@@ -287,7 +294,8 @@ class RetreatSearchPanel(QWidget):
 
         res_group = QGroupBox("资源剩余值")
         res_grid = QGridLayout(res_group)
-        res_grid.setSpacing(4)
+        res_grid.setSpacing(8)
+        res_grid.setContentsMargins(6, 6, 6, 6)
         self.res_btn_group = QButtonGroup(self)
         self.res_vi_lower = QRadioButton("VI下限 (--)")
         self.res_vi_mean = QRadioButton("VI均值 (--)")
@@ -348,6 +356,10 @@ class RetreatSearchPanel(QWidget):
         search_group = QGroupBox("搜索配置")
         search_form = QFormLayout(search_group)
 
+        self.strategy_label = QLabel("--")
+        self.strategy_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        search_form.addRow("当前策略:", self.strategy_label)
+
         self.mode_resource = QRadioButton("最少额外资源")
         self.mode_target = QRadioButton("最多目标卡")
         self.mode_pareto = QRadioButton("Pareto前沿")
@@ -355,7 +367,8 @@ class RetreatSearchPanel(QWidget):
         for btn in [self.mode_resource, self.mode_target, self.mode_pareto]:
             self.mode_btn_group.addButton(btn)
         self.mode_pareto.setChecked(True)
-        mode_layout = QVBoxLayout()
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(12)
         mode_layout.addWidget(self.mode_resource)
         mode_layout.addWidget(self.mode_target)
         mode_layout.addWidget(self.mode_pareto)
@@ -445,7 +458,11 @@ class RetreatSearchPanel(QWidget):
         detail_layout.addWidget(self.detail_table)
         right_layout.addWidget(detail_group)
 
-        splitter.addWidget(left_panel)
+        scroll = QScrollArea()
+        scroll.verticalScrollBar().setSingleStep(15)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(left_panel)
+        splitter.addWidget(scroll)
         splitter.addWidget(right_panel)
         splitter.setSizes([400, 600])
 

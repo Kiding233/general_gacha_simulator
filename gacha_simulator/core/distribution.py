@@ -248,3 +248,19 @@ class BestCaseAnalysis:
             '均值': self.dist.mean(),
             '中位数': self.dist.median(),
         }
+
+
+def freedman_diaconis_bins(data, min_bins: int = 5, max_bins: int = 200) -> int:
+    """Freedman-Diaconis 规则自适应 Bin 宽度: bin_width = 2 * IQR * n^(-1/3)"""
+    import numpy as np
+    n = len(data)
+    if n < 2:
+        return 1
+    q75, q25 = np.percentile(data, [75, 25])
+    iqr = q75 - q25
+    if iqr == 0:
+        return int(np.ceil(np.log2(n) + 1))
+    bin_width = 2.0 * iqr / (n ** (1.0 / 3.0))
+    data_range = max(data) - min(data)
+    n_bins = int(np.ceil(data_range / bin_width)) if bin_width > 0 else 1
+    return max(min_bins, min(max_bins, n_bins))

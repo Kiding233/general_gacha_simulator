@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
+
 
 class StreamingAnalyzer(ABC):
     @abstractmethod
@@ -67,9 +69,11 @@ def extract_aggregate(compact):
     draw_res_consumed = compact.get('draw_resources_consumed', [])
     draw_res_gained = compact.get('draw_resources_gained', [])
     draw_pity_counter_max = compact.get('draw_pity_counter_max', [])
+    draw_pity_names = compact.get('draw_pity_names', [])
     pool_resources_consumed = {}
     pool_resources_gained = {}
     pool_counter_max = {}
+    pool_pity_names = {}
     for i, pid in enumerate(pool_ids_list):
         if pid not in pool_resources_consumed:
             pool_resources_consumed[pid] = {}
@@ -83,6 +87,9 @@ def extract_aggregate(compact):
                 pool_resources_gained[pid][k] = pool_resources_gained[pid].get(k, 0) + v
         if i < len(draw_pity_counter_max):
             pool_counter_max[pid] = max(pool_counter_max[pid], draw_pity_counter_max[i])
+        if i < len(draw_pity_names) and draw_pity_names[i]:
+            for name in draw_pity_names[i].split(','):
+                pool_pity_names.setdefault(pid, set()).add(name)
 
     return {
         'card_counts': dict(compact.get('card_counts', {})),
@@ -100,6 +107,7 @@ def extract_aggregate(compact):
         'pool_resources_consumed': pool_resources_consumed,
         'pool_resources_gained': pool_resources_gained,
         'pool_counter_max': pool_counter_max,
+        'pool_pity_names': {pid: sorted(names) for pid, names in pool_pity_names.items()},
     }
 
 
@@ -138,7 +146,8 @@ def extract_process(compact, target_ids, target_specs, gdr_key,
 
 class DrawSequenceExtractor(StreamingAnalyzer):
     def __init__(self, max_keep=200, pool_end_times=None, target_ids=None,
-                 ssr_ids=None, target_specs=None, initial_resources=None):
+                 ssr_ids=None, target_specs=None, initial_resources=None,
+                 n_heatmap_bins=None):
         self._max_keep = max_keep
         self._kept = []
         self._heatmap_data = {}
@@ -149,6 +158,12 @@ class DrawSequenceExtractor(StreamingAnalyzer):
         self._ssr_ids = ssr_ids or set()
         self._target_specs = target_specs or {}
         self._initial_resources = initial_resources or {}
+        self._n_heatmap_bins = n_heatmap_bins or 50
+        max_resource = max(self._initial_resources.get('draw_resource', 0), 1.0) * 2
+        self._heatmap_bins = {
+            'achievement': np.linspace(0, 1.05, self._n_heatmap_bins + 1),
+            'resource': np.linspace(0, max_resource, self._n_heatmap_bins + 1),
+        }
 
     def on_result(self, compact):
         if compact is None:
@@ -183,7 +198,10 @@ class DrawSequenceExtractor(StreamingAnalyzer):
         return self._kept
 
     def get_heatmap_data(self):
-        return self._heatmap_data
+        return {
+            'data': self._heatmap_data,
+            'bins': getattr(self, '_heatmap_bins', {}),
+        }
 
     def get_cumulative_snapshots(self):
         return self._cumulative_snapshots
@@ -220,9 +238,18 @@ class DrawSequenceExtractor(StreamingAnalyzer):
             )
 
             if i not in self._heatmap_data:
-                self._heatmap_data[i] = {'achievement': [], 'resource': []}
-            self._heatmap_data[i]['achievement'].append(achievement_val)
-            self._heatmap_data[i]['resource'].append(resource_val)
+                self._heatmap_data[i] = {
+                    'achievement': np.zeros(self._n_heatmap_bins, dtype=np.int32),
+                    'resource': np.zeros(self._n_heatmap_bins, dtype=np.int32),
+                }
+
+            ach_bin = np.digitize(achievement_val, self._heatmap_bins['achievement']) - 1
+            ach_bin = max(0, min(self._n_heatmap_bins - 1, ach_bin))
+            self._heatmap_data[i]['achievement'][ach_bin] += 1
+
+            res_bin = np.digitize(resource_val, self._heatmap_bins['resource']) - 1
+            res_bin = max(0, min(self._n_heatmap_bins - 1, res_bin))
+            self._heatmap_data[i]['resource'][res_bin] += 1
 
     def _update_cumulative(self, compact):
         if not self._pool_end_times:
@@ -261,12 +288,14 @@ class DrawSequenceExtractor(StreamingAnalyzer):
 
             if pool_id not in self._cumulative_snapshots:
                 self._cumulative_snapshots[pool_id] = []
+            pool_end_res = compact.get('pool_end_resources', {}).get(pool_id, {})
             self._cumulative_snapshots[pool_id].append({
                 'cumulative_card_counts': cumulative_card_counts,
                 'cumulative_draws': cumulative_draws,
                 'cumulative_pity_draws': cumulative_pity,
                 'cumulative_consumed': cumulative_consumed,
                 'cumulative_gained': cumulative_gained,
+                'pool_end_resource': pool_end_res.get('draw_resource', 0.0),
             })
 
     def _update_transition(self, compact):

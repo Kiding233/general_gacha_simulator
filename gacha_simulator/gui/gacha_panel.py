@@ -33,9 +33,6 @@ class SimulationThread(QThread):
 
     def run(self):
         try:
-            from .._version import __version__
-            print(f"[VERSION] {__version__}")
-
             from .batch_simulator import SimulationEnvBuilder, SimulationEnv
 
             config_store = self.config_store
@@ -68,6 +65,7 @@ class SimulationThread(QThread):
                 ssr_ids=ssr_ids,
                 target_specs=target_specs,
                 initial_resources=env.initial_resources,
+                n_heatmap_bins=max(20, min(100, int(N ** 0.5))),
             )
             collector.add_extractor('draw_sequence', seq_extractor)
 
@@ -93,6 +91,31 @@ class SimulationThread(QThread):
                 ssr_ids=env.ssr_ids,
             )
 
+            no_draw_resource = None
+            no_draw_pool_resources = {}
+            try:
+                no_draw_results = run_batch_parallel(
+                    pools=env.pools,
+                    schedule_mgr=env.schedule_mgr,
+                    end_time=env.end_time,
+                    pity_engine=env.pity_engine,
+                    resource_gain=env.resource_gain,
+                    pity_state_init=env.pity_state_init,
+                    card_defs=card_defs_list,
+                    target_specs=target_specs,
+                    initial_resources=env.initial_resources,
+                    num_simulations=1,
+                    max_workers=1,
+                    seed=seed,
+                    strategy_name='no_draw',
+                    ssr_ids=env.ssr_ids,
+                )
+                if no_draw_results and no_draw_results[0]:
+                    no_draw_resource = no_draw_results[0].get('final_resources', {}).get('draw_resource', None)
+                    no_draw_pool_resources = no_draw_results[0].get('pool_end_resources', {})
+            except Exception:
+                pass
+
             result_bundle = {
                 'aggregate_data': collector.get_extracted('aggregate'),
                 'draw_sequences': seq_extractor.get_kept_sequences(),
@@ -106,6 +129,8 @@ class SimulationThread(QThread):
                 'target_specs': target_specs,
                 'n_results': collector.n_results,
                 'n_requested': N,
+                'no_draw_resource': no_draw_resource,
+                'no_draw_pool_resources': no_draw_pool_resources,
             }
 
             self.finished.emit(result_bundle)

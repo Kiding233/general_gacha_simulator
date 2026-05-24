@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Set
 from dataclasses import dataclass, field
 
 
@@ -115,8 +115,24 @@ class RetreatSearchEngine:
                 return float(list(cost.values())[0])
         return 160
 
-    def search_min_resource(self, target_specs: Dict[str, int]) -> RetreatSearchResult:
+    def search_min_resource(self, target_specs: Dict[str, int],
+                            progress_base: int = 0, progress_span: int = 100) -> RetreatSearchResult:
         self._should_stop = False
+
+        def _emit(msg, pct):
+            self.progress_callback(msg, progress_base + int(progress_span * pct / 100))
+
+        target_specs = self._filter_obtainable_targets(target_specs)
+        if not target_specs:
+            _emit("所有目标卡在截断时间线中均不可获取，搜索终止", 100)
+            result = RetreatSearchResult(
+                from_pool_id=self.from_pool_id,
+                base_resource=self.base_resource,
+                pity_init=dict(self.pity_counter_init),
+                search_mode='resource',
+            )
+            return result
+
         result = RetreatSearchResult(
             from_pool_id=self.from_pool_id,
             base_resource=self.base_resource,
@@ -125,7 +141,7 @@ class RetreatSearchEngine:
         )
 
         env = self._build_truncated_env(target_specs, self.base_resource)
-        
+
         # 没有后续池子的情况，直接返回成功
         if not env.pools:
             result.points.append(RetreatSearchPoint(
@@ -133,13 +149,13 @@ class RetreatSearchEngine:
                 target_specs=dict(target_specs),
                 success_probability=1.0,
             ))
-            self.progress_callback("没有后续池子，已成功", 100)
+            _emit("没有后续池子，已成功", 100)
             return result
-        
+
         cost_per_draw = self._extract_cost_per_draw(env)
         epsilon = cost_per_draw * self.precision_draws
 
-        self.progress_callback("搜索上界...", 5)
+        _emit("搜索上界...", 5)
         r_hi = 0.0
         prob = self._simulate_with_resource(env, target_specs, self.base_resource + r_hi)
 
@@ -160,7 +176,7 @@ class RetreatSearchEngine:
             r_hi *= 2
             prob = self._simulate_with_resource(env, target_specs, self.base_resource + r_hi)
             doubling += 1
-            self.progress_callback(f"上界搜索: +{r_hi:.0f}, P={prob:.2%}", 10 + doubling * 3)
+            _emit(f"上界搜索: +{r_hi:.0f}, P={prob:.2%}", 10 + doubling * 3)
 
         r_lo = 0.0
         binary_iter = 0
@@ -175,7 +191,7 @@ class RetreatSearchEngine:
             else:
                 r_lo = r_mid
             pct = int(30 + 60 * binary_iter / max(self.max_binary_iterations, 1))
-            self.progress_callback(f"二分 #{binary_iter}: +{r_mid:.0f}, P={prob:.2%}", min(pct, 95))
+            _emit(f"二分 #{binary_iter}: +{r_mid:.0f}, P={prob:.2%}", min(pct, 95))
 
         final_prob = self._simulate_with_resource(env, target_specs, self.base_resource + r_hi)
         result.points.append(RetreatSearchPoint(
@@ -183,8 +199,34 @@ class RetreatSearchEngine:
             target_specs=dict(target_specs),
             success_probability=final_prob,
         ))
-        self.progress_callback(f"最少额外资源: +{r_hi:.0f}, P={final_prob:.2%}", 100)
+        _emit(f"最少额外资源: +{r_hi:.0f}, P={final_prob:.2%}", 100)
         return result
+
+    def _get_obtainable_card_ids(self, env) -> Set[str]:
+        """从截断后的环境中收集所有可获取的卡ID"""
+        obtainable = set()
+        for pool in env.pools:
+            if pool.is_exchange:
+                if pool.exchange_card_id:
+                    obtainable.add(pool.exchange_card_id)
+            else:
+                for reward, _ in pool.rewards:
+                    obtainable.add(reward.id)
+        return obtainable
+
+    def _filter_obtainable_targets(self, target_specs: Dict[str, int]) -> Dict[str, int]:
+        """预过滤：移除截断时间线中不可获取的卡，通过 progress_callback 告知用户"""
+        env = self._build_truncated_env(target_specs, self.base_resource)
+        obtainable = self._get_obtainable_card_ids(env)
+
+        unobtainable = [cid for cid in target_specs if cid not in obtainable]
+        if unobtainable:
+            self.progress_callback(
+                f"预过滤：以下卡在截断时间线中不可获取，已自动排除: {', '.join(unobtainable)}",
+                0
+            )
+
+        return {cid: qty for cid, qty in target_specs.items() if cid in obtainable}
 
     def _get_sorted_card_ids(self, target_specs: Dict[str, int]) -> List[str]:
         weights = {}
@@ -194,6 +236,17 @@ class RetreatSearchEngine:
 
     def search_max_targets(self, target_specs: Dict[str, int]) -> RetreatSearchResult:
         self._should_stop = False
+
+        target_specs = self._filter_obtainable_targets(target_specs)
+        if not target_specs:
+            self.progress_callback("所有目标卡在截断时间线中均不可获取，搜索终止", 100)
+            return RetreatSearchResult(
+                from_pool_id=self.from_pool_id,
+                base_resource=self.base_resource,
+                pity_init=dict(self.pity_counter_init),
+                search_mode='target',
+            )
+
         result = RetreatSearchResult(
             from_pool_id=self.from_pool_id,
             base_resource=self.base_resource,
@@ -252,6 +305,17 @@ class RetreatSearchEngine:
 
     def search_pareto(self, target_specs: Dict[str, int]) -> RetreatSearchResult:
         self._should_stop = False
+
+        target_specs = self._filter_obtainable_targets(target_specs)
+        if not target_specs:
+            self.progress_callback("所有目标卡在截断时间线中均不可获取，搜索终止", 100)
+            return RetreatSearchResult(
+                from_pool_id=self.from_pool_id,
+                base_resource=self.base_resource,
+                pity_init=dict(self.pity_counter_init),
+                search_mode='pareto',
+            )
+
         result = RetreatSearchResult(
             from_pool_id=self.from_pool_id,
             base_resource=self.base_resource,
@@ -274,8 +338,8 @@ class RetreatSearchEngine:
         current_specs = dict(target_specs)
         card_ids = self._get_sorted_card_ids(target_specs)
 
-        self.progress_callback("Pareto: 搜索完整目标卡的最少资源...", 5)
-        res_result = self.search_min_resource(current_specs)
+        self.progress_callback("Pareto: 搜索完整目标卡的最少资源...", 0)
+        res_result = self.search_min_resource(current_specs, progress_base=0, progress_span=15)
         if res_result.points:
             result.points.append(res_result.points[-1])
         self._should_stop = False
@@ -288,12 +352,15 @@ class RetreatSearchEngine:
             if not reduced_specs:
                 break
 
-            self.progress_callback(f"Pareto: 移除 {cid}, 搜索剩余 {len(reduced_specs)} 卡的最少资源...", int(10 + 80 * (i + 1) / len(card_ids)))
-            res_result = self.search_min_resource(reduced_specs)
+            base = 15 + i * 85 // len(card_ids)
+            span = max(1, 85 // len(card_ids))
+            self.progress_callback(f"Pareto: 移除 {cid}, 搜索剩余 {len(reduced_specs)} 卡的最少资源...", base)
+            res_result = self.search_min_resource(reduced_specs, progress_base=base, progress_span=span)
             if res_result.points:
                 result.points.append(res_result.points[-1])
             self._should_stop = False
 
             current_specs = reduced_specs
 
+        self.progress_callback("Pareto搜索完成", 100)
         return result

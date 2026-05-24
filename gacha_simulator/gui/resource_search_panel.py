@@ -275,11 +275,18 @@ class ResourceSearchPanel(QWidget):
 
     def set_store(self, store: ConfigStore):
         self._store = store
+        self._refresh_target_display()
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
+        config_panel.config_changed.connect(self._update_strategy_display)
+        self._update_strategy_display()
         self._refresh_target_display()
         self._update_cost_per_draw_default()
+
+    def _update_strategy_display(self):
+        if self._config_panel:
+            self.strategy_label.setText(self._config_panel.strategy_type.currentText())
 
     def _update_cost_per_draw_default(self):
         if not self._store or not self._store.pools:
@@ -319,6 +326,10 @@ class ResourceSearchPanel(QWidget):
 
         params_group = QGroupBox("搜索参数")
         params_layout = QFormLayout(params_group)
+
+        self.strategy_label = QLabel("--")
+        self.strategy_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        params_layout.addRow("当前策略:", self.strategy_label)
 
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
@@ -641,7 +652,7 @@ class ResourceSearchPanel(QWidget):
 
         plt.tight_layout()
         tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight')
+        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
         plt.close()
 
         from PyQt6.QtGui import QPixmap

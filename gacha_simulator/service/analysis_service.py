@@ -18,8 +18,11 @@ class AnalysisService:
         return result
 
     def compute_pmf(
-        self, values: List[float], bins: int = 20
+        self, values: List[float], bins: int = None
     ) -> Dict[str, Any]:
+        if bins is None:
+            from gacha_simulator.core.distribution import freedman_diaconis_bins
+            bins = freedman_diaconis_bins(values)
         hist, edges = np.histogram(values, bins=bins)
         pmf = hist / len(values) if len(values) > 0 else []
         return {
@@ -29,7 +32,7 @@ class AnalysisService:
         }
 
     def compute_cdf(
-        self, values: List[float], bins: int = 20
+        self, values: List[float], bins: int = None
     ) -> Dict[str, Any]:
         sorted_values = sorted(values)
         cdf = np.arange(1, len(sorted_values) + 1) / len(sorted_values)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""命令行版本的抽卡模拟器"""
+"""GachaStat 命令行版本"""
 
 import argparse
 import json
@@ -190,7 +190,7 @@ def run_single_sim(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Gacha Simulator CLI')
+    parser = argparse.ArgumentParser(description='GachaStat CLI')
     parser.add_argument('-c', '--config', default='default_config.json', help='Config file path')
     parser.add_argument('-n', '--num-simulations', type=int, default=1000, help='Number of simulations')
     parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel workers')
@@ -216,7 +216,7 @@ def main():
         }
     
     print("=" * 50)
-    print("Gacha Simulator CLI")
+    print("GachaStat CLI")
     print("=" * 50)
     print(f"Simulations: {args.num_simulations}")
     print(f"Workers: {args.workers}")
