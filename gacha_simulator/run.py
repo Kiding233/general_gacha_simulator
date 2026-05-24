@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gacha Simulator - 抽卡模拟器启动脚本"""
+"""GachaStat 启动脚本"""
 
 import sys
 import os
@@ -18,8 +18,8 @@ def main():
         icon_path = os.path.join(this_dir, 'resources', 'app_icon.png')
         app = QApplication(sys.argv)
         app.setStyle('Fusion')
-        app.setApplicationName("Gacha Simulator")
-        app.setOrganizationName("Gacha Simulator")
+        app.setApplicationName("GachaStat")
+        app.setOrganizationName("GachaStat")
         app.setApplicationVersion("1.0")
         if os.path.exists(icon_path):
             app.setWindowIcon(QIcon(icon_path))

@@ -187,14 +187,15 @@ class GachaService:
                 if _pity_engine and pity_triggered:
                     spec = _pity_engine.get_spec(pool.id)
                     if spec:
+                        triggered_names = []
                         for pname in spec.pity_names:
                             behavior = _pity_engine.behaviors.get(pname)
                             if behavior is None:
                                 continue
                             cv = pity_state.get(pname)
-                            if hasattr(behavior, 'start_at') and cv >= behavior.start_at:
-                                triggered_pity_name = pname
-                                break
+                            if behavior.is_active(cv):
+                                triggered_names.append(pname)
+                        triggered_pity_name = ','.join(triggered_names) if triggered_names else None
 
                 pool_spec = _pity_engine.get_spec(pool.id) if _pity_engine else None
                 pool_counter_max = 0

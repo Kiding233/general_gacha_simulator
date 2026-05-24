@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 
+import os
+import tempfile
 from collections import Counter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QGroupBox, QComboBox, QDoubleSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QTabWidget, QSizePolicy, QProgressBar, QSpinBox,
+    QTabWidget, QSizePolicy, QProgressBar, QSpinBox, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 from ..core.process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
 from ..core.process_analysis import (
     compute_aa, compute_bb, compute_ab, compute_ba,
     EVENT_MODE_MAP, SUCCESS_MODE_MAP,
+    _get_event_label, get_event_type_order, _hashable,
 )
-from ..core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact
+from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact
 
 _gdr_key_to_display = {key: defn.display_name for key, defn in UNIFIED_GDR_REGISTRY.items()}
 
@@ -40,7 +44,10 @@ class ProcessAnalysisPanel(QWidget):
         self._pool_end_times = {}
         self._initial_resources = {}
         self._cumulative_snapshots = {}
+        self._pool_types = {}
         self._traces = []
+        self._ab_results = []
+        self._selected_ab_row = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -58,7 +65,7 @@ class ProcessAnalysisPanel(QWidget):
 
         self.result_tabs.addTab(self._wrap_table(self.aa_table), "事件统计")
         self.result_tabs.addTab(self._build_bb_tab(), "成败统计")
-        self.result_tabs.addTab(self._wrap_table(self.ab_table), "事件→成败")
+        self.result_tabs.addTab(self._build_ab_tab(), "事件→成败")
         self.result_tabs.addTab(self._wrap_table(self.ba_table), "成败→事件")
         self.result_tabs.addTab(self._build_trace_tab(), "轨迹详情")
 
@@ -112,38 +119,16 @@ class ProcessAnalysisPanel(QWidget):
         mode_layout.addWidget(self.event_mode_combo)
 
         self.custom_threshold_widget = QWidget()
-        threshold_layout = QGridLayout(self.custom_threshold_widget)
-        threshold_layout.setContentsMargins(0, 4, 0, 0)
+        self._custom_threshold_layout = QGridLayout(self.custom_threshold_widget)
+        self._custom_threshold_layout.setContentsMargins(0, 4, 0, 0)
 
-        custom_event_labels = {
-            'pity_hit': '保底出',
-            'early_hit': '提前出',
-            'miss': '没出',
-            'skip': '跳过',
-            'ignore': '忽略',
-        }
         self.constraint_ops = {}
         self.constraint_ns = {}
-        op_labels = [('任意', 'any'), ('=', '='), ('≥', '>='), ('≤', '<='), ('>', '>'), ('<', '<')]
-        for i, (key, label_text) in enumerate(custom_event_labels.items()):
-            threshold_layout.addWidget(QLabel(label_text), i, 0)
-            op_combo = _NoWheelComboBox()
-            for display, data in op_labels:
-                op_combo.addItem(display, data)
-            op_combo.setCurrentIndex(0)
-            op_combo.setMaximumWidth(70)
-            self.constraint_ops[key] = op_combo
-            threshold_layout.addWidget(op_combo, i, 1)
-            spin = QSpinBox()
-            spin.setMinimum(0)
-            spin.setMaximum(99)
-            spin.setValue(1)
-            spin.setMaximumWidth(80)
-            self.constraint_ns[key] = spin
-            threshold_layout.addWidget(spin, i, 2)
-            op_combo.currentIndexChanged.connect(
-                lambda idx, s=spin, c=op_combo: s.setEnabled(c.currentData() != 'any')
-            )
+        self._op_labels = [('任意', 'any'), ('=', '='), ('≥', '>='), ('≤', '<='), ('>', '>'), ('<', '<')]
+
+        self._custom_placeholder = QLabel("请先运行一次过程分析")
+        self._custom_placeholder.setStyleSheet("color: #888; padding: 8px;")
+        self._custom_threshold_layout.addWidget(self._custom_placeholder, 0, 0)
 
         self.custom_threshold_widget.setVisible(False)
         mode_layout.addWidget(self.custom_threshold_widget)
@@ -202,6 +187,57 @@ class ProcessAnalysisPanel(QWidget):
         layout.addWidget(self.bb_table)
         return widget
 
+    def _build_ab_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.ab_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.ab_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.ab_table.clicked.connect(self._on_ab_row_clicked)
+        layout.addWidget(self.ab_table)
+
+        self.cond_dist_group = QGroupBox("条件GDR分布")
+        self.cond_dist_group.setCheckable(True)
+        self.cond_dist_group.setChecked(False)
+        self.cond_dist_group.toggled.connect(self._on_cond_dist_toggled)
+        cond_layout = QVBoxLayout(self.cond_dist_group)
+
+        self.cond_event_label = QLabel("当前事件组合: (未选择)")
+        self.cond_event_label.setStyleSheet("font-weight: bold; color: #336;")
+        cond_layout.addWidget(self.cond_event_label)
+
+        ctrl_row = QHBoxLayout()
+        ctrl_row.addWidget(QLabel("GDR指标"))
+        self.cond_gdr_combo = _NoWheelComboBox()
+        for key, defn in UNIFIED_GDR_REGISTRY.items():
+            self.cond_gdr_combo.addItem(defn.display_name, key)
+        self.cond_gdr_combo.currentIndexChanged.connect(self._on_cond_gdr_changed)
+        ctrl_row.addWidget(self.cond_gdr_combo)
+
+        ctrl_row.addWidget(QLabel("条件"))
+        self.cond_filter_combo = _NoWheelComboBox()
+        self.cond_filter_combo.addItem("全部", "all")
+        self.cond_filter_combo.addItem("仅成功", "success")
+        self.cond_filter_combo.addItem("仅失败", "failure")
+        self.cond_filter_combo.currentIndexChanged.connect(self._on_cond_gdr_changed)
+        ctrl_row.addWidget(self.cond_filter_combo)
+        cond_layout.addLayout(ctrl_row)
+
+        self.cond_update_label = QLabel("")
+        self.cond_update_label.setStyleSheet("color: #888; font-size: 11px;")
+        cond_layout.addWidget(self.cond_update_label)
+
+        self.cond_sample_label = QLabel("样本数: -")
+        cond_layout.addWidget(self.cond_sample_label)
+
+        self.cond_chart_label = QLabel()
+        self.cond_chart_label.setMinimumHeight(300)
+        self.cond_chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cond_layout.addWidget(self.cond_chart_label)
+
+        layout.addWidget(self.cond_dist_group)
+        return widget
+
     def _build_trace_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -243,7 +279,8 @@ class ProcessAnalysisPanel(QWidget):
 
     def update_results(self, aggregate_data, target_ids=None, ssr_ids=None,
                        gdr_context=None, target_specs=None, pool_end_times=None,
-                       initial_resources=None, cumulative_snapshots=None):
+                       initial_resources=None, cumulative_snapshots=None,
+                       pool_types=None):
         self._aggregate_data = aggregate_data or []
         self._target_ids = target_ids or set()
         self._ssr_ids = ssr_ids or set()
@@ -252,11 +289,48 @@ class ProcessAnalysisPanel(QWidget):
         self._pool_end_times = pool_end_times or {}
         self._initial_resources = initial_resources or {}
         self._cumulative_snapshots = cumulative_snapshots or {}
+        self._pool_types = pool_types or {}
         self.status_label.setText(f"已加载 {len(self._aggregate_data)} 条模拟数据")
 
     def _on_event_mode_changed(self, index):
         mode = self.event_mode_combo.itemData(index)
         self.custom_threshold_widget.setVisible(mode == 'custom')
+
+    def _rebuild_custom_event_controls(self, event_type_labels):
+        for key in list(self.constraint_ops.keys()):
+            self.constraint_ops[key].deleteLater()
+            self.constraint_ns[key].deleteLater()
+        self.constraint_ops.clear()
+        self.constraint_ns.clear()
+
+        for i in reversed(range(self._custom_threshold_layout.count())):
+            item = self._custom_threshold_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        if hasattr(self, '_custom_placeholder'):
+            self._custom_placeholder = None
+
+        for i, (key, label_text) in enumerate(event_type_labels):
+            label = QLabel(label_text)
+            self._custom_threshold_layout.addWidget(label, i, 0)
+            op_combo = _NoWheelComboBox()
+            for display, data in self._op_labels:
+                op_combo.addItem(display, data)
+            op_combo.setCurrentIndex(0)
+            op_combo.setMaximumWidth(70)
+            self.constraint_ops[key] = op_combo
+            self._custom_threshold_layout.addWidget(op_combo, i, 1)
+            spin = QSpinBox()
+            spin.setMinimum(0)
+            spin.setMaximum(99)
+            spin.setValue(1)
+            spin.setMaximumWidth(80)
+            self.constraint_ns[key] = spin
+            self._custom_threshold_layout.addWidget(spin, i, 2)
+            op_combo.currentIndexChanged.connect(
+                lambda idx, s=spin, c=op_combo: s.setEnabled(c.currentData() != 'any')
+            )
 
     def _on_success_mode_changed(self, index):
         mode = self.success_mode_combo.itemData(index)
@@ -299,6 +373,43 @@ class ProcessAnalysisPanel(QWidget):
         try:
             self._traces = self._build_traces(gdr_key, threshold)
 
+            # 保存当前自定义约束状态
+            saved_constraints = {}
+            for key in self.constraint_ops:
+                saved_constraints[key] = (
+                    self.constraint_ops[key].currentData(),
+                    self.constraint_ns[key].value(),
+                )
+
+            # 动态重建自定义事件控件（收集所有出现的事件类型）
+            all_event_types = set()
+            for t in self._traces:
+                for ev in t.events:
+                    et = ev.event_type
+                    if et == 'pity_hit' and ev.pity_name:
+                        et = f'pity_hit:{ev.pity_name}'
+                    all_event_types.add(et)
+            ordered_types = get_event_type_order(all_event_types)
+            event_type_labels = []
+            for et in ordered_types:
+                label = _get_event_label(et)
+                event_type_labels.append((et, label))
+            self._rebuild_custom_event_controls(event_type_labels)
+
+            # 恢复已保存的约束（新出现的事件类型保持默认「任意」）
+            for key, (op, n) in saved_constraints.items():
+                if key in self.constraint_ops:
+                    idx = self.constraint_ops[key].findData(op)
+                    if idx >= 0:
+                        self.constraint_ops[key].setCurrentIndex(idx)
+                    self.constraint_ns[key].setValue(n)
+
+            # 重新读取约束（含恢复的旧值 + 新类型默认值）
+            if event_mode == 'custom':
+                custom_constraints = self._get_custom_constraints()
+                if not any(op != 'any' for op, _ in custom_constraints.values()):
+                    custom_constraints = None
+
             aa_results = compute_aa(self._traces, event_mode, custom_constraints)
             self._fill_aa_table(aa_results)
 
@@ -336,14 +447,16 @@ class ProcessAnalysisPanel(QWidget):
         )
         initial_resources = self._initial_resources
 
-        for sample_idx, agg in enumerate(self._aggregate_data):
-            val = compute_gdr_from_compact(
-                agg, target_specs, gdr_key,
-                ssr_ids=ssr_ids,
-                weapon_character_map=weapon_character_map,
-            )
+        checker = SuccessChecker(
+            target_specs, gdr_key, gdr_threshold=threshold,
+            ssr_ids=ssr_ids,
+            weapon_character_map=weapon_character_map,
+        )
 
-            pool_events = infer_events(agg, target_ids)
+        for sample_idx, agg in enumerate(self._aggregate_data):
+            val = checker.compute_gdr(agg)
+
+            pool_events = infer_events(agg, target_ids, pool_types=self._pool_types)
             pool_ids_sorted = sorted(pool_events.keys())
 
             events_list = [pool_events[pid] for pid in pool_ids_sorted]
@@ -357,12 +470,12 @@ class ProcessAnalysisPanel(QWidget):
                     weapon_character_map, initial_resources,
                 )
                 pool_gdr_values[pid] = pool_gdr_val if pool_gdr_val is not None else 0.0
-                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= threshold)
+                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= checker.gdr_threshold)
 
             traces.append(SampleTrace(
                 events=events_list,
                 pool_success=pool_success,
-                is_success=val >= threshold,
+                is_success=checker.is_success(agg),
                 gdr_value=val,
                 pool_gdr_values=pool_gdr_values,
             ))
@@ -399,12 +512,12 @@ class ProcessAnalysisPanel(QWidget):
             if not pattern:
                 return '(空)'
             if event_mode == 'count_set':
-                from ..core.process_analysis import EVENT_TYPE_ORDER
-                labels = {'pity_hit': '保底出', 'early_hit': '提前出', 'miss': '没出', 'skip': '跳过', 'ignore': '忽略'}
+                from ..core.process_analysis import _get_event_label
                 parts = []
-                for i, et in enumerate(EVENT_TYPE_ORDER):
-                    if i < len(pattern) and pattern[i] > 0:
-                        parts.append(f'{labels[et]}:{pattern[i]}')
+                for et, cnt in pattern:
+                    if cnt > 0:
+                        label = _get_event_label(et)
+                        parts.append(f'{label}:{cnt}')
                 return ', '.join(parts) if parts else '(无事件)'
             if event_mode == 'set':
                 return ', '.join(str(x) for x in pattern)
@@ -470,8 +583,8 @@ class ProcessAnalysisPanel(QWidget):
 
             detail_text = (
                 f"总样本: {total}\n"
-                f"全部池失败: {all_fail_prob:.4f}\n"
-                f"全部池成功: {all_success_prob:.4f}\n\n"
+                f"全部池失败概率: {all_fail_prob:.4f}\n"
+                f"全部池成功概率: {all_success_prob:.4f}\n\n"
                 f"各池成功率:\n"
             )
             for pid, rate in sorted(pool_rates.items()):
@@ -495,6 +608,8 @@ class ProcessAnalysisPanel(QWidget):
             self.bb_table.setItem(i, 3, QTableWidgetItem(f"{row['cumulative_probability']:.4f}"))
 
     def _fill_ab_table(self, results):
+        self._ab_results = results
+        self._selected_ab_row = None
         self.ab_table.clear()
         self.ab_table.setColumnCount(6)
         self.ab_table.setHorizontalHeaderLabels([
@@ -512,6 +627,128 @@ class ProcessAnalysisPanel(QWidget):
             self.ab_table.setItem(i, 3, QTableWidgetItem(str(row['count'])))
             self.ab_table.setItem(i, 4, QTableWidgetItem(str(row['success_count'])))
             self.ab_table.setItem(i, 5, QTableWidgetItem(str(row['failure_count'])))
+
+    def _on_ab_row_clicked(self, index):
+        row = index.row()
+        if row < 0 or row >= len(self._ab_results):
+            return
+        self._selected_ab_row = row
+        self._update_cond_dist()
+
+    def _on_cond_gdr_changed(self):
+        if self._selected_ab_row is not None:
+            self._update_cond_dist()
+
+    def _on_cond_dist_toggled(self, checked):
+        if checked and self._selected_ab_row is not None:
+            self._update_cond_dist()
+
+    def _update_cond_dist(self):
+        if not self.cond_dist_group.isChecked():
+            return
+        row = self._selected_ab_row
+        if row is None or row >= len(self._ab_results):
+            return
+
+        result = self._ab_results[row]
+        event_pattern = result['event_pattern']
+
+        event_mode = self.event_mode_combo.currentData() or 'sequence'
+        pattern_text = self._format_event_pattern(event_pattern, event_mode)
+        self.cond_event_label.setText(f"当前事件组合: {pattern_text}")
+
+        constraints = self._get_custom_constraints() if event_mode == 'custom' else None
+
+        base_func = EVENT_MODE_MAP.get(event_mode, EVENT_MODE_MAP['sequence'])
+        if event_mode == 'custom' and constraints:
+            event_func = lambda ev: base_func(ev, constraints=constraints)
+        else:
+            event_func = base_func
+
+        cond = self.cond_filter_combo.currentData() or 'all'
+        cond_text = {'all': '全部', 'success': '仅成功', 'failure': '仅失败'}.get(cond, cond)
+
+        gdr_key = self.cond_gdr_combo.currentData() or next(iter(UNIFIED_GDR_REGISTRY), 'target_achievement')
+        gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
+        gdr_name = gdr_def.display_name if gdr_def else gdr_key
+
+        filtered = []
+        for t in self._traces:
+            if _hashable(event_func(t.events)) != _hashable(event_pattern):
+                continue
+            if cond == 'success' and not t.is_success:
+                continue
+            if cond == 'failure' and t.is_success:
+                continue
+            filtered.append(t)
+
+        n = len(filtered)
+        from datetime import datetime
+        self.cond_update_label.setText(f"已更新: {datetime.now().strftime('%H:%M:%S')}  |  GDR: {gdr_name}  |  条件: {cond_text}")
+
+        if n == 0:
+            self.cond_sample_label.setText("样本数: 0")
+            self.cond_chart_label.clear()
+            self.cond_chart_label.setText("无匹配样本")
+            return
+
+        values = [t.gdr_value for t in filtered]
+        self.cond_sample_label.setText(f"样本数: {n}")
+        self._plot_cond_dist(values, gdr_key)
+
+    def _plot_cond_dist(self, values, gdr_key):
+        n = len(values)
+        if n < 10:
+            self.cond_chart_label.setText(f"样本量不足（n={n}），无法显示分布")
+            return
+
+        from gacha_simulator.core.distribution import freedman_diaconis_bins
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from gacha_simulator.visualization.font_config import configure_chinese_font
+        configure_chinese_font()
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
+        display_name = gdr_def.display_name if gdr_def else gdr_key
+
+        try:
+            bins = freedman_diaconis_bins(values)
+        except Exception:
+            bins = 20
+
+        ax.hist(values, bins=bins, density=False, edgecolor='black', alpha=0.7)
+
+        mean_val = sum(values) / n
+        sorted_vals = sorted(values)
+        median_val = sorted_vals[n // 2]
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'均值={mean_val:.3f}')
+        ax.axvline(median_val, color='blue', linestyle=':', linewidth=1, label=f'中位数={median_val:.3f}')
+
+        ax.set_xlabel(display_name)
+        ax.set_ylabel('频次')
+        ax.set_title('条件GDR分布')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+        try:
+            fig.savefig(tmp.name, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            pixmap = QPixmap(tmp.name)
+            self.cond_chart_label.setPixmap(pixmap.scaled(
+                self.cond_chart_label.width(), self.cond_chart_label.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
 
     def _fill_ba_table(self, results):
         self.ba_table.clear()

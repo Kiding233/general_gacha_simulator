@@ -108,7 +108,6 @@ class ResourceSearchWorker(QThread):
 
     def _simulate_with_resource(self, resource_value):
         from .batch_simulator import run_batch_parallel
-        from ..core.strategy import strategy_type_to_key
         ir = dict(self._initial_resources_backup)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
@@ -124,7 +123,7 @@ class ResourceSearchWorker(QThread):
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
-            strategy_name=strategy_type_to_key(self.config_store.strategy_type),
+            strategy_name=self.config_store.strategy_name,
             strategy_params=self.config_store.strategy_params,
             ssr_ids=self._sim_env['ssr_ids'],
         )
@@ -271,15 +270,23 @@ class ResourceSearchPanel(QWidget):
         super().__init__()
         self._store = None
         self._worker = None
+        self._config_panel = None
         self._setup_ui()
 
     def set_store(self, store: ConfigStore):
         self._store = store
         self._refresh_target_display()
-        self._update_cost_per_draw_default()
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
+        config_panel.config_changed.connect(self._update_strategy_display)
+        self._update_strategy_display()
+        self._refresh_target_display()
+        self._update_cost_per_draw_default()
+
+    def _update_strategy_display(self):
+        if self._config_panel:
+            self.strategy_label.setText(self._config_panel.strategy_type.currentText())
 
     def _update_cost_per_draw_default(self):
         if not self._store or not self._store.pools:
@@ -319,6 +326,10 @@ class ResourceSearchPanel(QWidget):
 
         params_group = QGroupBox("搜索参数")
         params_layout = QFormLayout(params_group)
+
+        self.strategy_label = QLabel("--")
+        self.strategy_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        params_layout.addRow("当前策略:", self.strategy_label)
 
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
@@ -421,15 +432,18 @@ class ResourceSearchPanel(QWidget):
         result_layout = QVBoxLayout(result_group)
 
         desc_label = QLabel(
-            "<b>资源搜索</b>：给定目标卡和成功率阈值，二分搜索最少抽卡资源。"
-            "先搜索上界（不够则翻倍），再二分缩小到精度范围内。"
+            "<b>资源搜索</b>：给定目标卡集合和成功率阈值，"
+            "通过二分搜索找到使得成功率≥阈值所需的最少抽卡资源。<br><br>"
+            "搜索分两阶段：<br>"
+            "1. <b>搜索上界</b>：从初始资源开始，若不够则翻倍，直到成功率≥阈值<br>"
+            "2. <b>二分搜索</b>：在 [0, 上界] 区间二分，逐步缩小到精度范围内"
         )
         desc_label.setWordWrap(True)
         result_layout.addWidget(desc_label)
 
         self.result_label = QLabel("")
         self.result_label.setWordWrap(True)
-        self.result_label.setStyleSheet("padding: 6px; background: #f5f5f5; border-radius: 4px; font-size: 13px; line-height: 1.4;")
+        self.result_label.setStyleSheet("padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 13px;")
         result_layout.addWidget(self.result_label)
 
         right_layout.addWidget(result_group)
@@ -488,7 +502,7 @@ class ResourceSearchPanel(QWidget):
         desire_weights = None
         miss_cost_weights = None
         card_value_weights = None
-        if hasattr(self, '_config_panel') and self._config_panel:
+        if self._config_panel:
             desire_weights = self._config_panel.get_desire_weights()
             miss_cost_weights = self._config_panel.get_miss_cost_weights()
             card_value_weights = self._config_panel.get_card_value_weights()
@@ -540,19 +554,14 @@ class ResourceSearchPanel(QWidget):
 
         r = result.min_resource
         draws = r / result.cost_per_draw if result.cost_per_draw > 0 else 0
-        precision_val = result.cost_per_draw * self.precision_spin.value()
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
-        _skey = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
         self.result_label.setText(
-            f"<b>使用策略:</b> {_sname}<br>"
-            f"<b>最少所需资源:</b> {r:.0f} &nbsp;|&nbsp; "
-            f"<b>约等于:</b> {draws:.1f} 抽 &nbsp;|&nbsp; "
-            f"<b>对应成功率:</b> {result.final_success_probability:.2%}<br>"
-            f"<b>单抽成本:</b> {result.cost_per_draw:.0f} &nbsp;|&nbsp; "
-            f"<b>搜索精度:</b> ±{precision_val:.0f} 资源 &nbsp;|&nbsp; "
-            f"<b>总迭代次数:</b> {result.total_iterations}<br>"
-            f"<b>目标规格:</b> {result.target_specs}"
+            f"<p><b>最少所需资源:</b> {r:.0f}</p>"
+            f"<p><b>约等于:</b> {draws:.1f} 抽</p>"
+            f"<p><b>对应成功率:</b> {result.final_success_probability:.2%}</p>"
+            f"<p><b>单抽成本:</b> {result.cost_per_draw:.0f}</p>"
+            f"<p><b>搜索精度:</b> ±{result.cost_per_draw * self.precision_spin.value():.0f} 资源</p>"
+            f"<p><b>总迭代次数:</b> {result.total_iterations}</p>"
+            f"<p><b>目标规格:</b> {result.target_specs}</p>"
         )
 
         self.steps_table.setRowCount(len(result.steps))
@@ -643,7 +652,7 @@ class ResourceSearchPanel(QWidget):
 
         plt.tight_layout()
         tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight')
+        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
         plt.close()
 
         from PyQt6.QtGui import QPixmap

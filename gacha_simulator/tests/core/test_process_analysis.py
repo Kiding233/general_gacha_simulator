@@ -338,8 +338,8 @@ class TestComputeBB:
         ]
         results = compute_bb(traces, 'count')
         assert results['total'] == 3
-        assert results['never_fail_prob'] == pytest.approx(1 / 3)
-        assert results['never_success_prob'] == pytest.approx(1 / 3)
+        assert results['all_success_prob'] == pytest.approx(1 / 3)
+        assert results['all_fail_prob'] == pytest.approx(1 / 3)
         assert results['pool_success_rates']['a'] == pytest.approx(2 / 3)
         assert results['pool_success_rates']['b'] == pytest.approx(1 / 3)
 

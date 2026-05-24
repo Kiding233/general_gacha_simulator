@@ -72,31 +72,15 @@ class WorstImpactResult:
 class DrawTargetStrategy(Strategy):
     lookahead = None
 
-    def __init__(self, target_card_ids: Set[str], pool_id: str,
-                 quantity_needed: int = 1):
+    def __init__(self, target_card_ids: Set[str], pool_id: str):
         self.target_card_ids = target_card_ids
         self.pool_id = pool_id
-        self.quantity_needed = quantity_needed
 
     @classmethod
     def description(cls) -> str:
-        return "最差影响分析：从目标池抽卡，抽到后等待下一池"
+        return "最差影响分析：从目标池抽卡"
 
     def select_action(self, ctx: StrategyContext):
-        for cid in self.target_card_ids:
-            if ctx.acquired.get(cid, 0) < self.quantity_needed:
-                break
-        else:
-            wait_time = 86400
-            for pool in ctx.current_pools:
-                if (pool.available_until is not None
-                        and pool.available_until > ctx.state.real_time
-                        and pool.id != self.pool_id):
-                    wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
-            if wait_time <= 0 or wait_time == 86400:
-                wait_time = 3600
-            return WaitAction(duration=wait_time)
-
         for pool in ctx.current_pools:
             if pool.id == self.pool_id and ctx.state.can_afford(pool.cost):
                 return DrawAction(pool_id=pool.id)
@@ -112,44 +96,6 @@ class DrawTargetStrategy(Strategy):
 
 
 STRATEGY_REGISTRY['draw_target']['class'] = DrawTargetStrategy
-
-
-class SequentialDrawTargetStrategy(Strategy):
-    lookahead = None
-
-    def __init__(self, pool_targets: Dict[str, str], quantity_needed: int = 1):
-        self.pool_targets = pool_targets
-        self.quantity_needed = quantity_needed
-
-    @classmethod
-    def description(cls) -> str:
-        return "最差影响分析：顺序抽取每池目标卡，抽到后等待下一池"
-
-    def select_action(self, ctx: StrategyContext):
-        for pool in ctx.current_pools:
-            target_cid = self.pool_targets.get(pool.id)
-            if target_cid is None:
-                continue
-            if ctx.acquired.get(target_cid, 0) < self.quantity_needed:
-                if ctx.state.can_afford(pool.cost):
-                    return DrawAction(pool_id=pool.id)
-
-        wait_time = 86400
-        for pool in ctx.current_pools:
-            if (pool.available_until is not None
-                    and pool.available_until > ctx.state.real_time):
-                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
-        if wait_time <= 0:
-            wait_time = 3600
-        return WaitAction(duration=wait_time)
-
-
-STRATEGY_REGISTRY['sequential_draw_target'] = {
-    'display_name': '顺序池目标策略',
-    'description': '最差影响分析专用：按池子顺序抽取目标卡',
-    'class': SequentialDrawTargetStrategy,
-    'internal': True,
-}
 
 
 class WorstImpactAnalyzer:
@@ -209,11 +155,6 @@ class WorstImpactAnalyzer:
         collector = SharedResultCollector()
         collector.add_extractor('aggregate', extract_aggregate)
 
-        strategy = SequentialDrawTargetStrategy(
-            pool_targets=sim_config['pool_targets'],
-            quantity_needed=1,
-        )
-
         from gacha_simulator.service.batch_simulator import run_batch_parallel
 
         run_batch_parallel(
@@ -232,10 +173,11 @@ class WorstImpactAnalyzer:
             progress_callback=lambda done, total: progress_callback(
                 f"模拟中: {done}/{total}", int(done / total * 100)
             ) if progress_callback else None,
+            strategy_name='smart',
+            strategy_params={},
             on_result=collector.on_result,
             ssr_ids=sim_config['ssr_ids'],
             stop_condition=sim_config['stop_condition'],
-            strategy=strategy,
         )
 
         aggregate_data = collector.get_extracted('aggregate')

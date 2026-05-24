@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""抽卡模拟器主窗口"""
+"""GachaStat 主窗口"""
 
 import sys
 import os
@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gacha Simulator - 抽卡模拟器")
+        self.setWindowTitle("GachaStat")
         self.setGeometry(100, 100, 1400, 900)
         if os.path.exists(_ICON_PATH):
             self.setWindowIcon(QIcon(_ICON_PATH))
@@ -79,7 +79,6 @@ class MainWindow(QMainWindow):
 
         self.worst_impact_panel = WorstImpactPanel()
         self.worst_impact_panel.set_store(self._store)
-        self.worst_impact_panel.set_config_panel(self.config_panel)
 
         self.process_analysis_panel = ProcessAnalysisPanel()
 
@@ -91,8 +90,8 @@ class MainWindow(QMainWindow):
         self.sensitivity_layout.addStretch()
 
         self.config_panel.set_store(self._store)
-        self.gacha_panel.set_store(self._store)
         self.gacha_panel.set_config_panel(self.config_panel)
+        self.analysis_panel.set_store(self._store)
         self.strategy_panel.set_store(self._store)
         self.strategy_panel.set_config_panel(self.config_panel)
         self.resource_search_panel.set_store(self._store)
@@ -102,6 +101,7 @@ class MainWindow(QMainWindow):
         self.retreat_search_panel.set_store(self._store)
         self.retreat_search_panel.set_config_panel(self.config_panel)
         self.strategy_comparison_panel.set_store(self._store)
+        self.worst_impact_panel.set_config_panel(self.config_panel)
 
         self.tabs.addTab(self.config_panel, "配置")
         self.tabs.addTab(self.gacha_panel, "批量模拟")
@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
 
     def _on_config_changed(self, config):
         self.config_panel.apply_to_store()
-        self.gacha_panel.set_store(self._store)
         self.strategy_panel.set_store(self._store)
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
@@ -301,6 +300,9 @@ class MainWindow(QMainWindow):
 
         self.simulation_results = aggregate_data
 
+        no_draw_resource = result_bundle.get('no_draw_resource') if isinstance(result_bundle, dict) else None
+        no_draw_pool_resources = result_bundle.get('no_draw_pool_resources', {}) if isinstance(result_bundle, dict) else {}
+
         self.analysis_panel.update_results(
             aggregate_data,
             draw_sequences=draw_sequences,
@@ -311,6 +313,8 @@ class MainWindow(QMainWindow):
             ssr_ids=ssr_ids,
             gdr_context=gdr_context,
             pool_end_times=pool_end_times,
+            no_draw_resource=no_draw_resource,
+            no_draw_pool_resources=no_draw_pool_resources,
         )
 
         if not target_specs:
@@ -319,7 +323,12 @@ class MainWindow(QMainWindow):
                 target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
         self.worst_impact_panel.set_simulation_results(aggregate_data, target_specs)
         self.worst_impact_panel._load_last_pool_config()
-        self.retreat_panel.set_simulation_results(aggregate_data, target_specs)
+        self.retreat_panel.set_simulation_results(aggregate_data, target_specs, no_draw_resource=no_draw_resource, no_draw_pool_resources=no_draw_pool_resources)
+
+        pool_types = {}
+        for pe in self._store.pools:
+            pool_type = pe.bindings.get('type', '角色') if pe.bindings else '角色'
+            pool_types[pe.pool_id] = pool_type
 
         self.process_analysis_panel.update_results(
             aggregate_data,
@@ -330,6 +339,7 @@ class MainWindow(QMainWindow):
             pool_end_times=pool_end_times,
             initial_resources=getattr(gdr_context, 'initial_resources', {}) if gdr_context else {},
             cumulative_snapshots=cumulative_snapshots,
+            pool_types=pool_types,
         )
 
         self.tabs.setCurrentIndex(2)
@@ -358,8 +368,8 @@ def main():
     from PyQt6.QtGui import QIcon
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    app.setApplicationName("Gacha Simulator")
-    app.setOrganizationName("Gacha Simulator")
+    app.setApplicationName("GachaStat")
+    app.setOrganizationName("GachaStat")
     app.setApplicationVersion("1.9.0")
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))

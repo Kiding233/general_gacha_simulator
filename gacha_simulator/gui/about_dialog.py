@@ -11,7 +11,7 @@ from PyQt6.QtGui import QFont
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("关于 Gacha Simulator")
+        self.setWindowTitle("关于 GachaStat")
         self.setMinimumSize(700, 550)
         self.resize(750, 600)
         self._setup_ui()
@@ -20,7 +20,7 @@ class AboutDialog(QDialog):
         layout = QVBoxLayout(self)
 
         header = QHBoxLayout()
-        title_label = QLabel("Gacha Simulator")
+        title_label = QLabel("GachaStat")
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)
@@ -58,7 +58,7 @@ class AboutDialog(QDialog):
         browser = QTextBrowser()
         browser.setOpenExternalLinks(True)
         browser.setHtml("""
-        <h3>Gacha Simulator</h3>
+        <h3>GachaStat</h3>
         <p>一个灵活的蒙特卡洛抽卡模拟与多维分析工具，支持多种保底机制、策略配置和统计分析。</p>
 
         <h4>核心功能</h4>
@@ -203,7 +203,7 @@ day: 天数 | resource_id: 数量, resource_id: 数量</pre>
             <li><b>简单目标达成率</b>：已获得目标卡数 / 需求总数</li>
             <li><b>目标卡收集率</b>：已收集的目标卡种数 / 目标卡总种数</li>
             <li><b>全部目标达成</b>：是否获得全部目标卡（0/1）</li>
-            <li><b>SSR收集率</b>：SSR 收集数 / 总抽卡数</li>
+            <li><b>SSR收集率</b>：已收集SSR种数 / SSR总种数</li>
             <li><b>资源剩余</b>：初始 + 获得 - 消耗</li>
             <li><b>额外目标卡</b>：超出需求的目标卡数</li>
             <li><b>非保底抽卡数</b>：非保底触发的抽卡次数</li>

@@ -13,6 +13,11 @@ from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import Pool as MPPool
 from dataclasses import dataclass, field as dc_field
 
+from gacha_simulator.core.stop_condition import StopCondition, AllPoolsEndCondition
+from gacha_simulator.core.strategy import (
+    STRATEGY_REGISTRY, create_strategy,
+)
+
 
 @dataclass
 class SimulationEnv:
@@ -165,7 +170,6 @@ _wk_strategy_name = 'smart'
 _wk_strategy_params = {}
 _wk_ssr_ids = set()
 _wk_stop_condition = None
-_wk_strategy = None
 
 
 def _wk_init(
@@ -180,11 +184,10 @@ def _wk_init(
     strategy_params,
     ssr_ids=None,
     stop_condition=None,
-    strategy=None,
 ):
     global _wk_pools, _wk_schedule_mgr, _wk_end_time
     global _wk_pity_engine, _wk_resource_gain, _wk_pity_state_init, _wk_card_defs
-    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids, _wk_stop_condition, _wk_strategy
+    global _wk_strategy_name, _wk_strategy_params, _wk_ssr_ids, _wk_stop_condition
     _wk_pools = pools
     _wk_schedule_mgr = schedule_mgr
     _wk_end_time = end_time
@@ -196,7 +199,6 @@ def _wk_init(
     _wk_strategy_params = strategy_params
     _wk_ssr_ids = ssr_ids or set()
     _wk_stop_condition = stop_condition
-    _wk_strategy = strategy
 
 
 # --- 单次模拟执行 ---
@@ -208,8 +210,6 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
     seed, target_specs, initial_resources = args
     try:
         from gacha_simulator.core import GachaState, TargetCard, TargetCardSet
-        from gacha_simulator.core.strategy import create_strategy
-        from gacha_simulator.core.stop_condition import AllPoolsEndCondition
         from gacha_simulator.service import GachaService
 
         random.seed(seed)
@@ -221,10 +221,7 @@ def _wk_run_single(args) -> Optional[Dict[str, Any]]:
             targets.append(TargetCard(card_id=card_id, pool_ids=pools, quantity_needed=qty))
 
         target_set = TargetCardSet(targets)
-        if _wk_strategy is not None:
-            strategy = _wk_strategy
-        else:
-            strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
+        strategy = create_strategy(_wk_strategy_name, _wk_strategy_params)
         if _wk_stop_condition is not None:
             stop_cond = _wk_stop_condition
         else:
@@ -273,17 +270,15 @@ def run_batch_parallel(
     on_result: Optional[Callable[[Dict[str, Any]], None]] = None,
     ssr_ids: Optional[set] = None,
     stop_condition=None,
-    strategy=None,
 ) -> List[Optional[Dict[str, Any]]]:
-    _init_args = (
-        pools, schedule_mgr, end_time, pity_engine,
-        resource_gain, pity_state_init, card_defs,
-        strategy_name, strategy_params or {}, ssr_ids,
-        stop_condition, strategy,
-    )
-
     if max_workers <= 1:
-        _wk_init(*_init_args)
+        _wk_init(
+            pools, schedule_mgr, end_time, pity_engine,
+            resource_gain, pity_state_init, card_defs,
+            strategy_name, strategy_params or {},
+            ssr_ids=ssr_ids,
+            stop_condition=stop_condition,
+        )
         results = [] if on_result is None else None
         n_failed = 0
         for i in range(num_simulations):
@@ -307,36 +302,14 @@ def run_batch_parallel(
 
     chunksize = max(1, num_simulations // (max_workers * 4))
 
-    try:
-        with MPPool(
-            processes=max_workers,
-            initializer=_wk_init,
-            initargs=_init_args,
-        ) as mp_pool:
-            results = [] if on_result is None else None
-            n_failed = 0
-            for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
-                if on_result is not None:
-                    if result is not None:
-                        on_result(result)
-                    else:
-                        n_failed += 1
-                else:
-                    results.append(result)
-                if progress_callback:
-                    progress_callback(i + 1, num_simulations)
-            if n_failed > 0:
-                print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
-
-        return results if on_result is None else []
-    except (OSError, PermissionError) as e:
-        print(f"[WARNING] multiprocessing failed ({e}), falling back to single-thread")
-        _wk_init(*_init_args)
+    with MPPool(
+        processes=max_workers,
+        initializer=_wk_init,
+        initargs=(pools, schedule_mgr, end_time, pity_engine, resource_gain, pity_state_init, card_defs, strategy_name, strategy_params or {}, ssr_ids, stop_condition),
+    ) as mp_pool:
         results = [] if on_result is None else None
         n_failed = 0
-        for i in range(num_simulations):
-            s = seeds[i]
-            result = _wk_run_single((s, target_specs, initial_resources))
+        for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
             if on_result is not None:
                 if result is not None:
                     on_result(result)
@@ -348,7 +321,8 @@ def run_batch_parallel(
                 progress_callback(i + 1, num_simulations)
         if n_failed > 0:
             print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
-        return results if on_result is None else []
+
+    return results if on_result is None else []
 
 
 class SimulationEnvBuilder:

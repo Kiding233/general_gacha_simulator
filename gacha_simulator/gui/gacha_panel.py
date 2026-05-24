@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""抽卡面板 - 批量模拟"""
 
 import traceback
 from PyQt6.QtWidgets import (
@@ -16,26 +17,22 @@ if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
 
+
+
 class SimulationThread(QThread):
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
-    def __init__(self, config_store, parent=None):
+    def __init__(self, config_store, simulation_count=1000, max_workers=4, seed=42, parent=None):
         super().__init__(parent)
         self.config_store = config_store
-        self._simulation_count = 1000
-        self._max_workers = 1
-        self._seed = 42
-
-    def stop(self):
-        pass
+        self.simulation_count = simulation_count
+        self.max_workers = max_workers
+        self.seed = seed
 
     def run(self):
         try:
-            from .._version import __version__
-            print(f"[VERSION] {__version__}")
-
             from .batch_simulator import SimulationEnvBuilder, SimulationEnv
 
             config_store = self.config_store
@@ -48,9 +45,9 @@ class SimulationThread(QThread):
             self._pool_end_times = env.pool_end_times
             self._gdr_context = env.gdr_context
 
-            N = self._simulation_count
-            max_workers = self._max_workers
-            seed = self._seed
+            N = self.simulation_count
+            max_workers = self.max_workers
+            seed = self.seed
 
             from .batch_simulator import run_batch_parallel
             from ..core.streaming import SharedResultCollector, extract_aggregate, DrawSequenceExtractor
@@ -68,13 +65,11 @@ class SimulationThread(QThread):
                 ssr_ids=ssr_ids,
                 target_specs=target_specs,
                 initial_resources=env.initial_resources,
+                n_heatmap_bins=max(20, min(100, int(N ** 0.5))),
             )
             collector.add_extractor('draw_sequence', seq_extractor)
 
-            from ..core.strategy import strategy_type_to_key
-
-            strategy_key = strategy_type_to_key(config_store.strategy_type)
-            self._strategy_key = strategy_key
+            strategy_key = config_store.strategy_name
 
             run_batch_parallel(
                 pools=env.pools,
@@ -96,6 +91,31 @@ class SimulationThread(QThread):
                 ssr_ids=env.ssr_ids,
             )
 
+            no_draw_resource = None
+            no_draw_pool_resources = {}
+            try:
+                no_draw_results = run_batch_parallel(
+                    pools=env.pools,
+                    schedule_mgr=env.schedule_mgr,
+                    end_time=env.end_time,
+                    pity_engine=env.pity_engine,
+                    resource_gain=env.resource_gain,
+                    pity_state_init=env.pity_state_init,
+                    card_defs=card_defs_list,
+                    target_specs=target_specs,
+                    initial_resources=env.initial_resources,
+                    num_simulations=1,
+                    max_workers=1,
+                    seed=seed,
+                    strategy_name='no_draw',
+                    ssr_ids=env.ssr_ids,
+                )
+                if no_draw_results and no_draw_results[0]:
+                    no_draw_resource = no_draw_results[0].get('final_resources', {}).get('draw_resource', None)
+                    no_draw_pool_resources = no_draw_results[0].get('pool_end_resources', {})
+            except Exception:
+                pass
+
             result_bundle = {
                 'aggregate_data': collector.get_extracted('aggregate'),
                 'draw_sequences': seq_extractor.get_kept_sequences(),
@@ -109,6 +129,8 @@ class SimulationThread(QThread):
                 'target_specs': target_specs,
                 'n_results': collector.n_results,
                 'n_requested': N,
+                'no_draw_resource': no_draw_resource,
+                'no_draw_pool_resources': no_draw_pool_resources,
             }
 
             self.finished.emit(result_bundle)
@@ -130,12 +152,8 @@ class GachaPanel(QWidget):
         self.ssr_ids = set()
         self.gdr_context = None
         self.pool_end_times = {}
-        self._store = None
         self._config_panel = None
         self._setup_ui()
-
-    def set_store(self, store):
-        self._store = store
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
@@ -219,32 +237,38 @@ class GachaPanel(QWidget):
         layout.addStretch()
 
     def start_simulation(self):
-        if not self._store:
-            if self._config_panel:
-                self._store = self._config_panel.get_store()
-            if not self._store:
-                self._log("错误: 无法获取配置")
-                return
+        config_panel = self._config_panel
+        if not config_panel:
+            self._log("错误: 无法获取配置面板")
+            return
 
-        self._store.simulation_count = self.sim_count.value()
-        self._store.max_workers = self.max_workers.value()
-        self._store.seed = self.seed.value()
+        config_panel.apply_to_store()
+        config_store = config_panel.get_store()
+        if config_store is None:
+            self._log("错误: 配置存储为空")
+            return
+
+        sim_count = self.sim_count.value()
+        max_workers = self.max_workers.value()
+        seed = self.seed.value()
+
+        config_store.simulation_count = sim_count
+        config_store.max_workers = max_workers
+        config_store.seed = seed
 
         self.status_label.setText("运行中...")
         self.run_btn.setEnabled(False)
         self.progress_bar.setValue(0)
 
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
-        _skey = strategy_type_to_key(self._store.strategy_type)
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
-        self._log(f"开始模拟: {self.sim_count.value()} 次")
-        self._log(f"使用策略: {_sname}")
-        self._log(f"并行进程: {self.max_workers.value()}")
+        self._log(f"开始模拟: {sim_count} 次")
+        self._log(f"并行进程: {max_workers}")
 
-        self.simulation_thread = SimulationThread(self._store)
-        self.simulation_thread._simulation_count = self.sim_count.value()
-        self.simulation_thread._max_workers = self.max_workers.value()
-        self.simulation_thread._seed = self.seed.value()
+        self.simulation_thread = SimulationThread(
+            config_store,
+            simulation_count=sim_count,
+            max_workers=max_workers,
+            seed=seed,
+        )
         self.simulation_thread.finished.connect(self.on_simulation_finished)
         self.simulation_thread.error.connect(self.on_simulation_error)
         self.simulation_thread.progress.connect(self.on_simulation_progress)
@@ -271,9 +295,6 @@ class GachaPanel(QWidget):
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
 
-        from gacha_simulator.core.strategy import STRATEGY_REGISTRY, strategy_type_to_key
-        _skey = strategy_type_to_key(self._store.strategy_type) if self._store else 'smart'
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey)
         self._log(f"模拟完成，共 {n_results} 次")
 
         if isinstance(result_bundle, dict):

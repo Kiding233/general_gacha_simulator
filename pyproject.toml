@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gacha_simulator"
 version = "1.6.0"
-description = "A flexible gacha simulation system"
+description = "GachaStat — A flexible gacha simulation and statistical analysis system"
 requires-python = ">=3.10"
 dependencies = [
     "PyQt6>=6.0",
     "numpy>=1.20",
     "matplotlib>=3.5",
+    "statsmodels>=0.14",
 ]
 
 [project.optional-dependencies]

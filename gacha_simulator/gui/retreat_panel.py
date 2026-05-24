@@ -41,6 +41,8 @@ class RetreatWorker(QThread):
         desire_weights=None,
         miss_cost_weights=None,
         card_value_weights=None,
+        no_draw_resource=None,
+        no_draw_pool_resources=None,
     ):
         super().__init__()
         self.simulation_results = simulation_results
@@ -54,6 +56,8 @@ class RetreatWorker(QThread):
         self.desire_weights = desire_weights
         self.miss_cost_weights = miss_cost_weights
         self.card_value_weights = card_value_weights
+        self.no_draw_resource = no_draw_resource
+        self.no_draw_pool_resources = no_draw_pool_resources or {}
 
     def run(self):
         try:
@@ -76,7 +80,7 @@ class RetreatWorker(QThread):
             self.progress.emit("正在生成图表...", 60)
             from gacha_simulator.core.vulnerability import plot_vulnerability, plot_vulnerability_ridge
 
-            ridge_path = plot_vulnerability_ridge(analysis, pool_names=self.pool_names)
+            ridge_path = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
 
             charts = {}
             for pr in analysis.pool_results:
@@ -107,6 +111,7 @@ class RetreatPanel(QWidget):
         self._results = None
         self._simulation_results = None
         self._target_specs = None
+        self._config_panel = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -188,9 +193,11 @@ class RetreatPanel(QWidget):
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
 
-    def set_simulation_results(self, results, target_specs=None):
+    def set_simulation_results(self, results, target_specs=None, no_draw_resource=None, no_draw_pool_resources=None):
         self._simulation_results = results
         self._target_specs = target_specs
+        self._no_draw_resource = no_draw_resource
+        self._no_draw_pool_resources = no_draw_pool_resources or {}
         if results:
             self.status_label.setText(f"已接收 {len(results)} 条模拟结果")
 
@@ -236,7 +243,7 @@ class RetreatPanel(QWidget):
         desire_weights = None
         miss_cost_weights = None
         card_value_weights = None
-        if hasattr(self, '_config_panel') and self._config_panel:
+        if self._config_panel:
             desire_weights = self._config_panel.get_desire_weights()
             miss_cost_weights = self._config_panel.get_miss_cost_weights()
             card_value_weights = self._config_panel.get_card_value_weights()
@@ -253,6 +260,8 @@ class RetreatPanel(QWidget):
             desire_weights=desire_weights,
             miss_cost_weights=miss_cost_weights,
             card_value_weights=card_value_weights,
+            no_draw_resource=getattr(self, '_no_draw_resource', None),
+            no_draw_pool_resources=getattr(self, '_no_draw_pool_resources', {}),
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
@@ -288,6 +297,7 @@ class RetreatPanel(QWidget):
         if ridge_chart:
             from PyQt6.QtGui import QPixmap
             ridge_scroll = QScrollArea()
+            ridge_scroll.verticalScrollBar().setSingleStep(15)
             ridge_scroll.setWidgetResizable(True)
             ridge_content = QWidget()
             ridge_layout = QVBoxLayout(ridge_content)
@@ -307,6 +317,7 @@ class RetreatPanel(QWidget):
         for pr in analysis.pool_results:
             pname = pool_names.get(pr.pool_id, pr.pool_id)
             scroll = QScrollArea()
+            scroll.verticalScrollBar().setSingleStep(15)
             scroll.setWidgetResizable(True)
             tab_content = QWidget()
             tab_layout = QVBoxLayout(tab_content)

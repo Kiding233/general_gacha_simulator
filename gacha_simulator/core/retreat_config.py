@@ -80,10 +80,6 @@ class RetreatConfigBuilder:
                     gains=dict(dor.gains),
                 ))
 
-        remaining_pool_ids = {p.pool_id for p in truncated.pools}
-        available_card_ids = {cd.card_id for cd in original_store.card_defs
-                             if set(cd.pools) & remaining_pool_ids}
-
         truncated.target_cards = [
             TargetCardEntry(
                 card_id=tc.card_id,
@@ -91,7 +87,6 @@ class RetreatConfigBuilder:
                 pool_ids=list(tc.pool_ids),
             )
             for tc in original_store.target_cards
-            if tc.card_id in available_card_ids
         ]
 
         truncated.card_defs = [
@@ -102,11 +97,11 @@ class RetreatConfigBuilder:
                 pools=list(cd.pools),
             )
             for cd in original_store.card_defs
-            if set(cd.pools) & remaining_pool_ids
         ]
 
         truncated.resource_defs = dict(original_store.resource_defs)
         truncated.strategy_type = original_store.strategy_type
+        truncated.strategy_name = original_store.strategy_name
         truncated.auto_wait = original_store.auto_wait
 
         return truncated

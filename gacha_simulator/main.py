@@ -9,7 +9,6 @@ if parent_dir not in sys.path:
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from gacha_simulator.gui import MainWindow
-
 from gacha_simulator._version import __version__
 
 _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.png')
@@ -17,9 +16,18 @@ _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.pn
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Gacha Simulator")
-    app.setOrganizationName("Gacha Simulator")
+    app.setApplicationName("GachaStat")
+    app.setOrganizationName("GachaStat")
     app.setApplicationVersion(__version__)
+    app.setStyleSheet("""
+        QTableWidget::item:hover:!selected {
+            background-color: #d6e8f5;
+        }
+        QTableWidget::item:selected {
+            background-color: #308cc6;
+            color: white;
+        }
+    """)
     if os.path.exists(_ICON_PATH):
         app.setWindowIcon(QIcon(_ICON_PATH))
     window = MainWindow()

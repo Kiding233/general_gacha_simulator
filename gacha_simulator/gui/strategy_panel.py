@@ -21,7 +21,6 @@ if _parent not in sys.path:
 
 from gacha_simulator.core.config_store import ConfigStore
 from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
-from gacha_simulator.core.strategy import strategy_type_to_key, STRATEGY_REGISTRY
 
 
 class StrategyWorker(QThread):
@@ -99,7 +98,7 @@ class StrategyWorker(QThread):
             current_specs[card_id] = self.target_qty
 
             from .batch_simulator import run_batch_parallel
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
+            _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],
@@ -162,7 +161,7 @@ class StrategyWorker(QThread):
         self.progress.emit("后退法: 初始完整集合模拟", 5)
 
         from .batch_simulator import run_batch_parallel
-        _skey = strategy_type_to_key(self.config_store.strategy_type)
+        _skey = self.config_store.strategy_name
         _sparams = self.config_store.strategy_params
         initial_histories = run_batch_parallel(
             pools=self._sim_env['pools'],
@@ -218,7 +217,7 @@ class StrategyWorker(QThread):
             del temp_specs[card_id]
 
             from .batch_simulator import run_batch_parallel
-            _skey = strategy_type_to_key(self.config_store.strategy_type)
+            _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
                 pools=self._sim_env['pools'],
@@ -312,6 +311,7 @@ class StrategyPanel(QWidget):
         self._store = None
         self._worker = None
         self._weights = {}
+        self._config_panel = None
         self._setup_ui()
 
     def set_store(self, store: ConfigStore):
@@ -320,6 +320,12 @@ class StrategyPanel(QWidget):
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
+        config_panel.config_changed.connect(self._update_strategy_display)
+        self._update_strategy_display()
+
+    def _update_strategy_display(self):
+        if self._config_panel:
+            self.strategy_label.setText(self._config_panel.strategy_type.currentText())
 
     def _load_weights(self):
         if self._store and self._store.target_cards:
@@ -394,6 +400,10 @@ class StrategyPanel(QWidget):
 
         params_group = QGroupBox("分析参数")
         params_layout = QFormLayout(params_group)
+
+        self.strategy_label = QLabel("--")
+        self.strategy_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        params_layout.addRow("当前策略:", self.strategy_label)
 
         self.method_combo = QComboBox()
         self.method_combo.addItems(["前进法", "后退法"])
@@ -564,7 +574,7 @@ class StrategyPanel(QWidget):
         desire_weights, miss_cost_weights = self._get_weights()
 
         card_value_weights = None
-        if hasattr(self, '_config_panel') and self._config_panel:
+        if self._config_panel:
             card_value_weights = self._config_panel.get_card_value_weights()
 
         gdr_key = self.gdr_combo.currentData() or 'target_achievement'
@@ -617,9 +627,7 @@ class StrategyPanel(QWidget):
         self.status_update.emit("分析完成")
 
     def _display_forward_result(self, result):
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self._store.strategy_type)) else 'smart'
         self.result_label.setText(f"""
-<p><b>使用策略:</b> {_sname}</p>
 <p><b>最终目标卡集合:</b> {', '.join(sorted(result.final_target_set)) if result.final_target_set else '(空)'}</p>
 <p><b>最终成功率:</b> {result.final_success_probability:.2%}</p>
 <p><b>目标规格:</b> {result.final_target_specs}</p>
@@ -634,9 +642,7 @@ class StrategyPanel(QWidget):
         self._draw_strategy_chart(result, 'forward')
 
     def _display_backward_result(self, result):
-        _sname = STRATEGY_REGISTRY.get(_skey, {}).get('display_name', _skey) if (_skey := strategy_type_to_key(self._store.strategy_type)) else 'smart'
         self.result_label.setText(f"""
-<p><b>使用策略:</b> {_sname}</p>
 <p><b>最终目标卡集合:</b> {', '.join(sorted(result.final_target_set)) if result.final_target_set else '(空)'}</p>
 <p><b>最终成功率:</b> {result.final_success_probability:.2%}</p>
 <p><b>目标规格:</b> {result.final_target_specs}</p>
@@ -701,7 +707,7 @@ class StrategyPanel(QWidget):
 
         plt.tight_layout()
         tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight')
+        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
         plt.close()
 
         from PyQt6.QtGui import QPixmap

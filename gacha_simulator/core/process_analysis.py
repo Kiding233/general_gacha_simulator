@@ -6,20 +6,19 @@ from typing import Dict, List, Optional, Tuple
 from .process_trace import SampleTrace, PoolEvent
 
 
+def _resolve_event_type(ev: PoolEvent) -> str:
+    et = ev.event_type
+    if et == 'pity_hit' and ev.pity_name:
+        return f'pity_hit:{ev.pity_name}'
+    return et
+
+
 def to_event_type_sequence(events: List[PoolEvent]) -> Tuple[str, ...]:
-    return tuple(ev.event_type for ev in events)
+    return tuple(_resolve_event_type(ev) for ev in events)
 
 
 def to_event_type_set(events: List[PoolEvent]) -> Tuple[str, ...]:
-    return tuple(sorted(set(ev.event_type for ev in events)))
-
-
-EVENT_TYPE_ORDER = ('pity_hit', 'early_hit', 'miss', 'skip', 'ignore')
-
-
-def to_event_count_set(events: List[PoolEvent]) -> Tuple[int, ...]:
-    counts = Counter(ev.event_type for ev in events)
-    return tuple(counts.get(et, 0) for et in EVENT_TYPE_ORDER)
+    return tuple(sorted(set(_resolve_event_type(ev) for ev in events)))
 
 
 EVENT_TYPE_LABELS = {
@@ -28,7 +27,52 @@ EVENT_TYPE_LABELS = {
     'miss': '没出',
     'skip': '跳过',
     'ignore': '忽略',
+    'exchange': '兑换',
+    'no_exchange': '未兑换',
 }
+
+
+def _build_dynamic_labels(counts) -> Dict[str, str]:
+    labels = {}
+    for et in counts:
+        if et == 'pity_hit':
+            labels[et] = '保底出'
+        elif et.startswith('pity_hit:'):
+            pity_name = et.split(':', 1)[1]
+            labels[et] = f'保底出:{pity_name}'
+        elif et in EVENT_TYPE_LABELS:
+            labels[et] = EVENT_TYPE_LABELS[et]
+        else:
+            labels[et] = et
+    return labels
+
+
+def _get_event_label(event_type: str) -> str:
+    if event_type == 'pity_hit':
+        return '保底出'
+    if event_type.startswith('pity_hit:'):
+        return f'保底出:{event_type.split(":", 1)[1]}'
+    return EVENT_TYPE_LABELS.get(event_type, event_type)
+
+
+def get_event_type_order(event_types) -> list:
+    base, pity = [], []
+    for et in event_types:
+        if et.startswith('pity_hit:'):
+            pity.append(et)
+        else:
+            base.append(et)
+    base_order = ['early_hit', 'miss', 'skip', 'ignore', 'exchange', 'no_exchange']
+    base_sorted = [et for et in base_order if et in base] + sorted(set(base) - set(base_order))
+    return base_sorted + sorted(pity)
+
+
+def to_event_count_set(events: List[PoolEvent]) -> Tuple[Tuple[str, int], ...]:
+    counts = Counter()
+    for ev in events:
+        counts[_resolve_event_type(ev)] += 1
+    keys = get_event_type_order(counts.keys())
+    return tuple((k, counts[k]) for k in keys)
 
 CUSTOM_OPS = ('any', '=', '>=', '<=', '>', '<')
 
@@ -38,12 +82,15 @@ def to_custom_pattern(events: List[PoolEvent],
     if constraints is None:
         constraints = {}
 
-    raw_counts = Counter(ev.event_type for ev in events)
+    raw_counts = Counter()
+    for ev in events:
+        raw_counts[_resolve_event_type(ev)] += 1
 
     constrained_types = {et for et, (op, _) in constraints.items() if op != 'any'}
+    dynamic_labels = _build_dynamic_labels(raw_counts)
 
     result = {}
-    for event_type, label in EVENT_TYPE_LABELS.items():
+    for event_type, label in dynamic_labels.items():
         count = raw_counts.get(event_type, 0)
 
         if constrained_types and event_type not in constrained_types:
@@ -74,14 +121,14 @@ def to_custom_pattern(events: List[PoolEvent],
 
 
 def _enumerate_custom_combinations(constraints: Dict[str, Tuple[str, int]]) -> List[Dict[str, str]]:
-    constrained_types = [et for et in EVENT_TYPE_ORDER if et in constraints and constraints[et][0] != 'any']
+    constrained_types = [et for et in constraints if constraints[et][0] != 'any']
     if not constrained_types:
         return []
 
     bucket_pairs = []
     for event_type in constrained_types:
         op, n = constraints[event_type]
-        label = EVENT_TYPE_LABELS[event_type]
+        label = _get_event_label(event_type)
         if op == '>=':
             bucket_pairs.append([(event_type, f'{label}≥{n}'), (event_type, f'{label}<{n}')])
         elif op == '=':

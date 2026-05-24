@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
     QLabel, QCheckBox, QScrollArea, QFrame, QSplitter,
     QListWidget, QListWidgetItem, QStyledItemDelegate, QStyleOptionViewItem,
-    QDialog, QDialogButtonBox, QMessageBox, QAbstractItemView
+    QDialog, QDialogButtonBox, QMessageBox, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor
@@ -311,6 +311,7 @@ class ConfigPanel(QWidget):
         self.left_tabs.addTab(card_def_tab, "卡牌定义")
 
         resource_tab_scroll = QScrollArea()
+        resource_tab_scroll.verticalScrollBar().setSingleStep(15)
         resource_tab_scroll.setWidgetResizable(True)
         resource_tab_content = QWidget()
         resource_tab_layout = QVBoxLayout(resource_tab_content)
@@ -319,6 +320,7 @@ class ConfigPanel(QWidget):
         self.left_tabs.addTab(resource_tab_scroll, "资源管理")
 
         pool_tab_scroll = QScrollArea()
+        pool_tab_scroll.verticalScrollBar().setSingleStep(15)
         pool_tab_scroll.setWidgetResizable(True)
         pool_tab_content = QWidget()
         pool_tab_layout = QVBoxLayout(pool_tab_content)
@@ -328,6 +330,7 @@ class ConfigPanel(QWidget):
         self.left_tabs.addTab(pool_tab_scroll, "卡池配置")
 
         pity_tab_scroll = QScrollArea()
+        pity_tab_scroll.verticalScrollBar().setSingleStep(15)
         pity_tab_scroll.setWidgetResizable(True)
         pity_tab_content = QWidget()
         pity_tab_layout = QVBoxLayout(pity_tab_content)
@@ -337,6 +340,7 @@ class ConfigPanel(QWidget):
         self.left_tabs.addTab(pity_tab_scroll, "保底机制")
 
         strategy_tab_scroll = QScrollArea()
+        strategy_tab_scroll.verticalScrollBar().setSingleStep(15)
         strategy_tab_scroll.setWidgetResizable(True)
         strategy_tab_content = QWidget()
         strategy_tab_layout = QVBoxLayout(strategy_tab_content)
@@ -346,6 +350,7 @@ class ConfigPanel(QWidget):
         self.left_tabs.addTab(strategy_tab_scroll, "策略与目标")
 
         weight_tab_scroll = QScrollArea()
+        weight_tab_scroll.verticalScrollBar().setSingleStep(15)
         weight_tab_scroll.setWidgetResizable(True)
         weight_tab_content = QWidget()
         weight_tab_layout = QVBoxLayout(weight_tab_content)
@@ -368,8 +373,8 @@ class ConfigPanel(QWidget):
         template_layout = QVBoxLayout(template_group)
 
         self.pool_template_table = QTableWidget()
-        self.pool_template_table.setColumnCount(5)
-        self.pool_template_table.setHorizontalHeaderLabels(["模板ID", "类型", "持续(天)", "单抽消耗", "分布"])
+        self.pool_template_table.setColumnCount(6)
+        self.pool_template_table.setHorizontalHeaderLabels(["模板ID", "类型", "持续(天)", "单抽消耗", "分布", "分布编辑"])
         t_header = self.pool_template_table.horizontalHeader()
         t_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         t_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
@@ -379,6 +384,7 @@ class ConfigPanel(QWidget):
         self.pool_template_table.setColumnWidth(1, 70)
         self.pool_template_table.setColumnWidth(2, 70)
         self.pool_template_table.setColumnWidth(3, 120)
+        self.pool_template_table.setColumnWidth(5, 80)
         self.pool_template_table.verticalHeader().setVisible(False)
         self.pool_template_table.setAlternatingRowColors(True)
         self.pool_template_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -447,9 +453,9 @@ class ConfigPanel(QWidget):
         layout.addLayout(filter_layout)
 
         self.pool_table = QTableWidget()
-        self.pool_table.setColumnCount(8)
+        self.pool_table.setColumnCount(9)
         self.pool_table.setHorizontalHeaderLabels([
-            "启用", "ID", "名称", "类型", "开始(天)", "持续(天)", "单抽消耗", "备注"
+            "启用", "ID", "名称", "类型", "开始(天)", "持续(天)", "单抽消耗", "备注", "分布编辑"
         ])
         header = self.pool_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -460,11 +466,13 @@ class ConfigPanel(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         self.pool_table.setColumnWidth(0, 40)
         self.pool_table.setColumnWidth(3, 70)
         self.pool_table.setColumnWidth(4, 70)
         self.pool_table.setColumnWidth(5, 70)
         self.pool_table.setColumnWidth(6, 120)
+        self.pool_table.setColumnWidth(8, 80)
         self.pool_table.verticalHeader().setVisible(False)
         self.pool_table.setAlternatingRowColors(True)
         self.pool_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -489,6 +497,10 @@ class ConfigPanel(QWidget):
         btn_layout.addWidget(clear_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
+
+        hint_label = QLabel("提示：类型列只有「角色」「武器」「兑换」「资源」四种类型会被后续分析识别")
+        hint_label.setStyleSheet("color: #888; font-size: 11px; padding: 2px;")
+        layout.addWidget(hint_label)
 
         parent.addWidget(group)
         self._all_pool_rows = []
@@ -543,6 +555,9 @@ class ConfigPanel(QWidget):
             dist = tmpl.get('distribution', [])
             dist_str = ', '.join(f"{d['card_id']}({d['probability']}%)" for d in dist) if dist else '(空)'
             self.pool_template_table.setItem(i, 4, QTableWidgetItem(dist_str))
+            edit_item = QTableWidgetItem("...双击编辑")
+            edit_item.setFlags(edit_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.pool_template_table.setItem(i, 5, edit_item)
         self.pool_template_table.blockSignals(False)
 
     def _add_pool_template(self):
@@ -575,6 +590,8 @@ class ConfigPanel(QWidget):
         self._refresh_template_table()
 
     def _edit_template_distribution(self, row, col):
+        if col != 5:
+            return
         tid_item = self.pool_template_table.item(row, 0)
         if not tid_item:
             return
@@ -650,6 +667,9 @@ class ConfigPanel(QWidget):
             self.pool_table.setItem(r, 5, QTableWidgetItem(str(p['duration'])))
             self.pool_table.setItem(r, 6, QTableWidgetItem(p['cost']))
             self.pool_table.setItem(r, 7, QTableWidgetItem(p.get('note', '')))
+            edit_item = QTableWidgetItem("...双击编辑")
+            edit_item.setFlags(edit_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.pool_table.setItem(r, 8, edit_item)
             self._pool_distributions[p['id']] = p['distribution']
 
             inferred = self._infer_pool_type(p['id'], p['type'], p.get('note', ''))
@@ -697,6 +717,9 @@ class ConfigPanel(QWidget):
             else:
                 note = p.get('note', '')
             self.pool_table.setItem(i, 7, QTableWidgetItem(note))
+            edit_item = QTableWidgetItem("...双击编辑")
+            edit_item.setFlags(edit_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.pool_table.setItem(i, 8, edit_item)
 
             inferred = self._infer_pool_type(pool_id, p.get('type', ''), note)
             row_bg = self._pool_row_bg(inferred, note)
@@ -746,6 +769,9 @@ class ConfigPanel(QWidget):
         self.pool_table.setItem(row, 5, QTableWidgetItem("21"))
         self.pool_table.setItem(row, 6, QTableWidgetItem("draw_resource:160"))
         self.pool_table.setItem(row, 7, QTableWidgetItem(""))
+        edit_item = QTableWidgetItem("...双击编辑")
+        edit_item.setFlags(edit_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.pool_table.setItem(row, 8, edit_item)
         self._all_pool_rows.append(row)
         self._ensure_resource_registered('draw_resource', '抽卡资源')
         self._sync_card_defs_from_pools()
@@ -774,6 +800,9 @@ class ConfigPanel(QWidget):
                         new_item = QTableWidgetItem(src_item.text())
                         new_item.setBackground(src_item.background())
                         self.pool_table.setItem(new_row, col, new_item)
+            edit_item = QTableWidgetItem("...双击编辑")
+            edit_item.setFlags(edit_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.pool_table.setItem(new_row, 8, edit_item)
             id_item = self.pool_table.item(new_row, 1)
             if id_item:
                 id_item.setText(f"{id_item.text()}_copy")
@@ -787,6 +816,8 @@ class ConfigPanel(QWidget):
         self._update_preview()
 
     def _edit_pool_distribution(self, row, col):
+        if col != 8:
+            return
         pool_id_item = self.pool_table.item(row, 1)
         if not pool_id_item:
             return
@@ -1962,6 +1993,7 @@ class ConfigPanel(QWidget):
             },
             'strategy': {
                 'type': store.strategy_type,
+                'name': store.strategy_name,
                 'params': dict(store.strategy_params),
                 'auto_wait': store.auto_wait,
             },
@@ -2065,6 +2097,7 @@ class ConfigPanel(QWidget):
         else:
             strategy_type_resolved = strategy_type_raw
         store.strategy_type = strategy_type_resolved
+        store.strategy_name = strategy.get('name', None) or strategy_type_to_key(strategy_type_resolved)
         store.strategy_params = strategy.get('params', {})
         store.auto_wait = strategy.get('auto_wait', True)
 
@@ -2444,6 +2477,7 @@ class ConfigPanel(QWidget):
     def apply_to_store(self):
         if self._store is None or self._refreshing:
             return
+        from gacha_simulator.core.strategy import strategy_type_to_key
         store = self._store
 
         store.pools = []
@@ -2507,6 +2541,7 @@ class ConfigPanel(QWidget):
         store.pity.counter_init = {pd['name']: pd.get('counter_init', 0) for pd in self._pity_defs}
 
         store.strategy_type = self.strategy_type.currentText()
+        store.strategy_name = strategy_type_to_key(store.strategy_type)
         store.strategy_params = self._get_strategy_params_from_widgets()
         store.stop_condition_type = self.stop_condition_type.currentText()
         store.stop_condition_params = {}

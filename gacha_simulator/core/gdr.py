@@ -733,12 +733,16 @@ def compute_gdr_from_cumulative(cum_snapshot, target_specs, gdr_key,
                                  initial_resources=None):
     cum_consumed = cum_snapshot.get('cumulative_consumed', {})
     cum_gained = cum_snapshot.get('cumulative_gained', {})
-    pseudo_final_resources = {}
-    if initial_resources:
-        for k, v in initial_resources.items():
-            pseudo_final_resources[k] = v
-    for k in set(list(cum_consumed.keys()) + list(cum_gained.keys())):
-        pseudo_final_resources[k] = pseudo_final_resources.get(k, 0) + cum_gained.get(k, 0) - cum_consumed.get(k, 0)
+    pool_end_resource = cum_snapshot.get('pool_end_resource')
+    if pool_end_resource is not None:
+        pseudo_final_resources = {'draw_resource': pool_end_resource}
+    else:
+        pseudo_final_resources = {}
+        if initial_resources:
+            for k, v in initial_resources.items():
+                pseudo_final_resources[k] = v
+        for k in set(list(cum_consumed.keys()) + list(cum_gained.keys())):
+            pseudo_final_resources[k] = pseudo_final_resources.get(k, 0) + cum_gained.get(k, 0) - cum_consumed.get(k, 0)
 
     pseudo_compact = {
         'card_counts': cum_snapshot.get('cumulative_card_counts', {}),

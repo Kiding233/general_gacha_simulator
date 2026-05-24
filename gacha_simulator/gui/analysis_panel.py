@@ -267,11 +267,53 @@ class ResultUnit(QFrame):
         return self._image_path
 
 
+def _compute_transition_flags(draw_sequences, sorted_pools, criteria, ctx, ssr_ids, target_specs):
+    target_ids_trans = set(ctx.target_specs.keys())
+    total_needed = sum(target_specs.values()) or 1
+    success_flags_per_sim = []
+
+    for seq in draw_sequences:
+        card_ids = seq.get('draw_card_ids', [])
+        pool_ids_seq = seq.get('draw_pool_ids', [])
+        times = seq.get('draw_times', [])
+        flags = []
+        for pool_id, end_time in sorted_pools:
+            if criteria == 'any_ssr':
+                success = False
+                for i, cid in enumerate(card_ids):
+                    if i < len(times) and times[i] > end_time:
+                        break
+                    if cid in ssr_ids:
+                        success = True
+                        break
+                flags.append(success)
+            elif criteria == 'per_pool_target':
+                success = False
+                for i, cid in enumerate(card_ids):
+                    if i < len(times) and times[i] > end_time:
+                        break
+                    if i < len(pool_ids_seq) and pool_ids_seq[i] == pool_id and cid in target_ids_trans:
+                        success = True
+                        break
+                flags.append(success)
+            else:
+                obtained = 0
+                for i, cid in enumerate(card_ids):
+                    if i < len(times) and times[i] > end_time:
+                        break
+                    if cid in target_ids_trans:
+                        obtained += 1
+                flags.append(obtained >= total_needed)
+        success_flags_per_sim.append(flags)
+
+    return success_flags_per_sim
+
+
 class AnalysisWorker(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(str, int)
 
-    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_selections=None, best_case_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None):
+    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_cond_selections=None, best_case_cond_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None, use_draw_units=False, cost_per_draw=160, no_draw_resource=None, no_draw_pool_resources=None):
         super().__init__()
         self.results = results
         self.ctx = ctx
@@ -287,12 +329,16 @@ class AnalysisWorker(QThread):
         self.best_primary_gdr = best_primary_gdr
         self.gdr_dist_selections = gdr_dist_selections or {}
         self.cumulative_by_pool_selections = cumulative_by_pool_selections or set()
-        self.worst_case_selections = worst_case_selections or set()
-        self.best_case_selections = best_case_selections or set()
+        self.worst_case_cond_selections = worst_case_cond_selections or set()
+        self.best_case_cond_selections = best_case_cond_selections or set()
         self.draw_sequences = draw_sequences or []
         self.heatmap_data = heatmap_data or {}
         self.cumulative_snapshots = cumulative_snapshots or {}
         self.transition_flags = transition_flags or []
+        self.use_draw_units = use_draw_units
+        self.cost_per_draw = cost_per_draw
+        self.no_draw_resource = no_draw_resource
+        self.no_draw_pool_resources = no_draw_pool_resources or {}
 
     def _emit(self, msg, pct):
         self.progress.emit(msg, pct)
@@ -385,6 +431,14 @@ class AnalysisWorker(QThread):
                     pass
             step_done('GDR分布计算完成')
 
+        if self.use_draw_units and self.cost_per_draw > 0:
+            _resource_gdr_keys = {'resource_remaining'}
+            for _key in _resource_gdr_keys:
+                if _key in gdr_dists:
+                    _orig = gdr_dists[_key]
+                    _converted = [v / self.cost_per_draw for v in _orig.samples]
+                    gdr_dists[_key] = EmpiricalDistribution(_converted)
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         if 'gdr_dist' in self.selected and self.gdr_dist_selections:
@@ -401,14 +455,27 @@ class AnalysisWorker(QThread):
                 else:
                     fig, axes = plt.subplots(1, n_subplots, figsize=(7 * n_subplots, 6))
                 ax_idx = 0
+                no_draw_ref = None
+                if metric_key == 'resource_remaining' and self.no_draw_resource is not None:
+                    no_draw_ref = self.no_draw_resource
+                    if self.use_draw_units and self.cost_per_draw > 0:
+                        no_draw_ref = no_draw_ref / self.cost_per_draw
+
+                _unit_suffix = ''
+                if metric_key == 'resource_remaining' and self.use_draw_units:
+                    _unit_suffix = ' (抽)'
+
                 if 'hist' in chart_types:
                     ax = axes[ax_idx]
-                    ax.hist(dist.samples, bins=30, density=True, edgecolor='black', alpha=0.7)
+                    from gacha_simulator.core.distribution import freedman_diaconis_bins
+                    ax.hist(dist.samples, bins=freedman_diaconis_bins(dist.samples), density=True, edgecolor='black', alpha=0.7)
                     ax.axvline(dist.mean(), color='red', linestyle='--', label=f'均值: {dist.mean():.3f}')
                     ax.axvline(dist.var(alpha), color='orange', linestyle=':', label=f'VaR({alpha}): {dist.var(alpha):.3f}')
-                    ax.set_xlabel(metric_name)
+                    if no_draw_ref is not None:
+                        ax.axvline(no_draw_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {no_draw_ref:.1f}')
+                    ax.set_xlabel(f'{metric_name}{_unit_suffix}')
                     ax.set_ylabel('概率密度')
-                    ax.set_title(f'{metric_name} 分布')
+                    ax.set_title(f'{metric_name}{_unit_suffix} 分布')
                     ax.legend(fontsize=10)
                     ax.grid(alpha=0.3)
                     ax_idx += 1
@@ -418,16 +485,19 @@ class AnalysisWorker(QThread):
                     cdf_y = [(i + 1) / len(sorted_v) for i in range(len(sorted_v))]
                     ax.plot(sorted_v, cdf_y, linewidth=2)
                     ax.axhline(alpha, color='orange', linestyle=':', alpha=0.5)
-                    ax.set_xlabel(metric_name)
+                    if no_draw_ref is not None:
+                        ax.axvline(no_draw_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {no_draw_ref:.1f}')
+                        ax.legend(fontsize=10)
+                    ax.set_xlabel(f'{metric_name}{_unit_suffix}')
                     ax.set_ylabel('累积概率')
-                    ax.set_title(f'{metric_name} 累积分布')
+                    ax.set_title(f'{metric_name}{_unit_suffix} 累积分布')
                     ax.grid(alpha=0.3)
                     ax.set_ylim(0, 1.05)
                     ax_idx += 1
                 plt.tight_layout()
                 safe_name = metric_name.replace('/', '_').replace(' ', '_')
                 p = str(self.output_dir / f'gdr_dist_{safe_name}.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts[f'gdr_dist_{metric_name}'] = p
             step_done('GDR分布')
@@ -438,8 +508,11 @@ class AnalysisWorker(QThread):
             for name, dist in gdr_dists.items():
                 if dist.n < 2:
                     continue
+                _display_name = _key_to_display.get(name, name)
+                if name == 'resource_remaining' and self.use_draw_units:
+                    _display_name = f'{_display_name} (抽)'
                 rows.append({
-                    'name': _key_to_display.get(name, name),
+                    'name': _display_name,
                     'VaR': dist.var(alpha),
                     'CVaR': dist.cvar(alpha),
                     'VaR-均值差': dist.var_mean_diff(alpha),
@@ -480,8 +553,12 @@ class AnalysisWorker(QThread):
                     cond_dist = joint.conditional_second(lambda f: f <= var_val)
                     if cond_dist.n > 0:
                         g_mean = dist.mean()
+                        g_var = dist.var(alpha)
+                        _wc_display = _key_to_display.get(name, name)
+                        if name == 'resource_remaining' and self.use_draw_units:
+                            _wc_display = f'{_wc_display} (抽)'
                         table_rows.append([
-                            _key_to_display.get(name, name),
+                            _wc_display,
                             f"{cond_dist.n}",
                             f"{g_mean:.4f}",
                             f"{cond_dist.mean():.4f}",
@@ -489,13 +566,13 @@ class AnalysisWorker(QThread):
                             f"{cond_dist.median():.4f}",
                             f"{cond_dist.std():.4f}",
                             f"{cond_dist.var(alpha):.4f}",
-                            f"{cond_dist.quantile(0.25):.4f}",
-                            f"{cond_dist.quantile(0.75):.4f}",
+                            f"{g_var - g_mean:.4f}",
+                            f"{g_var - dist.median():.4f}",
                             f"{cond_dist.min_val():.4f}",
                             f"{cond_dist.max_val():.4f}",
                         ])
                 if table_rows:
-                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'Q25', 'Q75', '最小值', '最大值']
+                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
                     charts['risk_worst_case'] = ('table', headers, table_rows)
 
                 fig, ax = plt.subplots(figsize=(12, 7))
@@ -519,7 +596,7 @@ class AnalysisWorker(QThread):
                 ax.grid(alpha=0.3)
                 plt.tight_layout()
                 p = str(self.output_dir / 'risk_worst_case.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['risk_worst_case_chart'] = p
 
@@ -527,7 +604,7 @@ class AnalysisWorker(QThread):
                     if name == primary_key or dist.n < 2:
                         continue
                     display = _key_to_display.get(name, name)
-                    if self.worst_case_selections and display not in self.worst_case_selections:
+                    if display not in self.worst_case_cond_selections:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
                     cond = joint.conditional_second(lambda f: f <= var_val)
@@ -546,7 +623,10 @@ class AnalysisWorker(QThread):
                     else:
                         hpb = AnalysisPanel._hist_params(cond.samples, 'red', 0.6, f'{display}(最差条件, n={cond.n})')
                         ax2.hist(cond.samples, **hpb)
-                    ax2.set_xlabel(display)
+                    _wc_xlabel = display
+                    if name == 'resource_remaining' and self.use_draw_units:
+                        _wc_xlabel = f'{display} (抽)'
+                    ax2.set_xlabel(_wc_xlabel)
                     ax2.set_ylabel('频次' if AnalysisPanel._is_discrete(dist.samples) else '密度')
                     ax2.set_title(f'最差情形: {display} | {primary_name}≤VaR({alpha})')
                     ax2.legend(fontsize=11)
@@ -554,7 +634,7 @@ class AnalysisWorker(QThread):
                     plt.tight_layout()
                     safe_name = name.replace('/', '_').replace(' ', '_')
                     p2 = str(self.output_dir / f'risk_worst_case_{safe_name}.png')
-                    plt.savefig(p2, dpi=400, bbox_inches='tight')
+                    plt.savefig(p2, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts[f'risk_worst_case_{name}'] = p2
             step_done('最差情形分析')
@@ -580,6 +660,9 @@ class AnalysisWorker(QThread):
                     if cond_dist.n > 0:
                         g_mean = dist.mean()
                         display = _key_to_display.get(name, name)
+                        if name == 'resource_remaining' and self.use_draw_units:
+                            display = f'{display} (抽)'
+                        g_var = dist.var(alpha)
                         table_rows.append([
                             display,
                             f"{cond_dist.n}",
@@ -589,13 +672,13 @@ class AnalysisWorker(QThread):
                             f"{cond_dist.median():.4f}",
                             f"{cond_dist.std():.4f}",
                             f"{cond_dist.var(alpha):.4f}",
-                            f"{cond_dist.quantile(0.25):.4f}",
-                            f"{cond_dist.quantile(0.75):.4f}",
+                            f"{g_var - g_mean:.4f}",
+                            f"{g_var - dist.median():.4f}",
                             f"{cond_dist.min_val():.4f}",
                             f"{cond_dist.max_val():.4f}",
                         ])
                 if table_rows:
-                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'Q25', 'Q75', '最小值', '最大值']
+                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
                     charts['risk_best_case'] = ('table', headers, table_rows)
 
                 fig, ax = plt.subplots(figsize=(12, 7))
@@ -619,7 +702,7 @@ class AnalysisWorker(QThread):
                 ax.grid(alpha=0.3)
                 plt.tight_layout()
                 p = str(self.output_dir / 'risk_best_case.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['risk_best_case_chart'] = p
 
@@ -627,7 +710,7 @@ class AnalysisWorker(QThread):
                     if name == primary_key or dist.n < 2:
                         continue
                     display = _key_to_display.get(name, name)
-                    if self.best_case_selections and display not in self.best_case_selections:
+                    if display not in self.best_case_cond_selections:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
                     cond = joint.conditional_second(lambda f: f >= upper_val)
@@ -646,7 +729,10 @@ class AnalysisWorker(QThread):
                     else:
                         hpb = AnalysisPanel._hist_params(cond.samples, 'green', 0.6, f'{display}(最好条件, n={cond.n})')
                         ax2.hist(cond.samples, **hpb)
-                    ax2.set_xlabel(display)
+                    _bc_xlabel = display
+                    if name == 'resource_remaining' and self.use_draw_units:
+                        _bc_xlabel = f'{display} (抽)'
+                    ax2.set_xlabel(_bc_xlabel)
                     ax2.set_ylabel('频次' if AnalysisPanel._is_discrete(dist.samples) else '密度')
                     ax2.set_title(f'最好情形: {display} | {primary_name}≥上{1-alpha:.2f}分位')
                     ax2.legend(fontsize=11)
@@ -654,7 +740,7 @@ class AnalysisWorker(QThread):
                     plt.tight_layout()
                     safe_name = name.replace('/', '_').replace(' ', '_')
                     p2 = str(self.output_dir / f'risk_best_case_{safe_name}.png')
-                    plt.savefig(p2, dpi=400, bbox_inches='tight')
+                    plt.savefig(p2, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts[f'risk_best_case_{name}'] = p2
             step_done('最好情形分析')
@@ -669,6 +755,10 @@ class AnalysisWorker(QThread):
             if cond_key and target_key:
                 cond_values = [compute_gdr_from_compact(agg, target_specs, cond_key, ssr_ids=ssr_ids) for agg in aggregate_data]
                 target_values = [compute_gdr_from_compact(agg, target_specs, target_key, ssr_ids=ssr_ids) for agg in aggregate_data]
+                _target_unit_suffix = ''
+                if target_key == 'resource_remaining' and self.use_draw_units and self.cost_per_draw > 0:
+                    target_values = [v / self.cost_per_draw for v in target_values]
+                    _target_unit_suffix = ' (抽)'
                 joint = JointSamples(list(zip(cond_values, target_values)))
                 cond_dist = joint.first_distribution()
                 if cond_dist.n > 0:
@@ -695,20 +785,29 @@ class AnalysisWorker(QThread):
                         charts['conditional_dist'] = ('table', headers, table_rows)
 
                     fig, ax = plt.subplots(figsize=(12, 7))
+                    from gacha_simulator.core.distribution import freedman_diaconis_bins
                     if all_target.n > 0:
-                        ax.hist(all_target.samples, bins=30, density=True, edgecolor='black', alpha=0.3, label='全部')
+                        ax.hist(all_target.samples, bins=freedman_diaconis_bins(all_target.samples), density=True, edgecolor='black', alpha=0.3, label='全部')
                     if success_target.n > 0:
-                        ax.hist(success_target.samples, bins=20, density=True, edgecolor='green', alpha=0.5, label=f'条件≥{success_threshold:.4f}(n={success_target.n})')
+                        ax.hist(success_target.samples, bins=freedman_diaconis_bins(success_target.samples), density=True, edgecolor='green', alpha=0.5, label=f'条件≥{success_threshold:.4f}(n={success_target.n})')
                     if fail_target.n > 0:
-                        ax.hist(fail_target.samples, bins=20, density=True, edgecolor='red', alpha=0.5, label=f'条件<{success_threshold:.4f}(n={fail_target.n})')
-                    ax.set_xlabel(target_name)
+                        ax.hist(fail_target.samples, bins=freedman_diaconis_bins(fail_target.samples), density=True, edgecolor='red', alpha=0.5, label=f'条件<{success_threshold:.4f}(n={fail_target.n})')
+                    if target_key == 'resource_remaining' and self.no_draw_resource is not None:
+                        _ref = self.no_draw_resource
+                        if self.use_draw_units and self.cost_per_draw > 0:
+                            _ref = _ref / self.cost_per_draw
+                        ax.axvline(_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {_ref:.1f}')
+                    _cond_unit_suffix = ''
+                    if target_key == 'resource_remaining' and self.use_draw_units:
+                        _cond_unit_suffix = ' (抽)'
+                    ax.set_xlabel(f'{target_name}{_cond_unit_suffix}')
                     ax.set_ylabel('密度')
-                    ax.set_title(f'条件分布: {target_name} | {cond_name} (阈值={success_threshold:.4f})')
+                    ax.set_title(f'条件分布: {target_name}{_target_unit_suffix} | {cond_name} (阈值={success_threshold:.4f})')
                     ax.legend(fontsize=11)
                     ax.grid(alpha=0.3)
                     plt.tight_layout()
                     p = str(self.output_dir / 'conditional_dist.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts['conditional_dist_chart'] = p
             step_done('条件分布')
@@ -737,7 +836,7 @@ class AnalysisWorker(QThread):
                 ax.grid(alpha=0.3)
                 plt.tight_layout()
                 p = str(self.output_dir / 'time_series.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['time_series'] = p
             step_done('时间序列')
@@ -751,10 +850,17 @@ class AnalysisWorker(QThread):
                 n_sims = len(aggregate_data)
                 max_draw_steps = 40
 
+                if isinstance(self.heatmap_data, dict) and 'data' in self.heatmap_data:
+                    heatmap_raw = self.heatmap_data['data']
+                    heatmap_bins = self.heatmap_data.get('bins', {})
+                else:
+                    heatmap_raw = self.heatmap_data
+                    heatmap_bins = {}
+
                 gdr_configs = [
                     ('目标达成率', 'achievement', 0, 1.05, 25),
                     ('资源剩余', 'resource', None, None, 25),
-                    ('SSR收集率', 'ssr_rate', 0, 1.05, 25),
+                    ('SSR出数', 'ssr_count', None, None, 25),
                 ]
 
                 fig, axes = plt.subplots(len(gdr_configs), 1, figsize=(12, 4 * len(gdr_configs)),
@@ -764,24 +870,22 @@ class AnalysisWorker(QThread):
                 for row_idx, (gdr_name, gdr_key, vmin_default, vmax_default, n_gdr_bins) in enumerate(gdr_configs):
                     ax = axes[row_idx, 0]
                     time_gdr_data = {}
+                    is_prebinned = gdr_key in heatmap_bins
 
-                    if gdr_key in ('achievement', 'resource') and self.heatmap_data:
-                        for step_idx, step_data in self.heatmap_data.items():
+                    if gdr_key in ('achievement', 'resource') and heatmap_raw:
+                        for step_idx, step_data in heatmap_raw.items():
                             if gdr_key in step_data:
                                 time_gdr_data[step_idx] = step_data[gdr_key]
-                    elif gdr_key == 'ssr_rate' and self.draw_sequences:
+                    elif gdr_key == 'ssr_count' and self.draw_sequences:
                         for seq in self.draw_sequences:
                             card_ids = seq.get('draw_card_ids', [])
                             ssr_so_far = 0
-                            total_draws_so_far = 0
                             for i, cid in enumerate(card_ids):
-                                total_draws_so_far += 1
                                 if cid in ssr_ids:
                                     ssr_so_far += 1
-                                val = ssr_so_far / max(total_draws_so_far, 1)
                                 if i not in time_gdr_data:
                                     time_gdr_data[i] = []
-                                    time_gdr_data[i].append(val)
+                                time_gdr_data[i].append(ssr_so_far)
 
                     if not time_gdr_data:
                         continue
@@ -796,44 +900,58 @@ class AnalysisWorker(QThread):
                     else:
                         sampled_draws = sorted_draws
 
-                    y_all = []
-                    for d in sampled_draws:
-                        y_all.extend(time_gdr_data[d])
-                    y_valid = [v for v in y_all if np.isfinite(v)]
-                    if len(y_valid) == 0:
-                        continue
-
-                    y_lo = float(np.min(y_valid)) if vmin_default is None else vmin_default
-                    y_hi = float(np.max(y_valid)) if vmax_default is None else vmax_default
-                    if abs(y_hi - y_lo) < 1e-9:
-                        y_hi = y_lo + 1.0
-
-                    gdr_bin_edges = np.linspace(y_lo, y_hi, n_gdr_bins + 1)
-                    density_matrix = np.zeros((n_gdr_bins, len(sampled_draws)))
-                    for ci, d in enumerate(sampled_draws):
-                        col_vals = np.array(time_gdr_data[d])
-                        col_valid = col_vals[np.isfinite(col_vals)]
-                        if len(col_valid) == 0:
+                    if is_prebinned:
+                        gdr_bin_edges = heatmap_bins[gdr_key]
+                        n_bins = len(gdr_bin_edges) - 1
+                        density_matrix = np.zeros((n_bins, len(sampled_draws)))
+                        for ci, d in enumerate(sampled_draws):
+                            counts = np.array(time_gdr_data[d], dtype=np.float64)
+                            total = max(counts.sum(), 1)
+                            density_matrix[:, ci] = counts / total
+                        y_lo = gdr_bin_edges[0]
+                        y_hi = gdr_bin_edges[-1]
+                    else:
+                        y_all = []
+                        for d in sampled_draws:
+                            y_all.extend(time_gdr_data[d])
+                        y_valid = [v for v in y_all if np.isfinite(v)]
+                        if len(y_valid) == 0:
                             continue
-                        counts, _ = np.histogram(col_valid, bins=gdr_bin_edges)
-                        density_matrix[:, ci] = counts / max(len(col_valid), 1)
+
+                        y_lo = float(np.min(y_valid)) if vmin_default is None else vmin_default
+                        y_hi = float(np.max(y_valid)) if vmax_default is None else vmax_default
+                        if abs(y_hi - y_lo) < 1e-9:
+                            y_hi = y_lo + 1.0
+
+                        gdr_bin_edges = np.linspace(y_lo, y_hi, n_gdr_bins + 1)
+                        density_matrix = np.zeros((n_gdr_bins, len(sampled_draws)))
+                        for ci, d in enumerate(sampled_draws):
+                            col_vals = np.array(time_gdr_data[d])
+                            col_valid = col_vals[np.isfinite(col_vals)]
+                            if len(col_valid) == 0:
+                                continue
+                            counts, _ = np.histogram(col_valid, bins=gdr_bin_edges)
+                            density_matrix[:, ci] = counts / max(len(col_valid), 1)
+
+                    n_yticks = min(7, len(gdr_bin_edges) - 1)
+                    y_tick_pos = np.linspace(0, len(gdr_bin_edges) - 2, n_yticks).astype(int)
+                    y_tick_vals = np.linspace(y_lo, y_hi, n_yticks)
+                    if gdr_key == 'achievement':
+                        y_tick_labels = [f'{v:.0%}' for v in y_tick_vals]
+                    elif gdr_key == 'ssr_count':
+                        y_tick_labels = [f'{v:.0f}' for v in y_tick_vals]
+                    elif gdr_key == 'resource':
+                        y_tick_labels = [f'{v:.0f}' for v in y_tick_vals]
+                    else:
+                        y_tick_labels = [f'{v:.2f}' for v in y_tick_vals]
 
                     im = ax.imshow(density_matrix, aspect='auto', origin='lower',
-                                   cmap='YlOrRd', interpolation='bilinear',
+                                   cmap='YlOrRd', interpolation='nearest',
                                    vmin=0, vmax=np.max(density_matrix) if np.max(density_matrix) > 0 else 1)
                     x_tick_step = max(1, len(sampled_draws) // 10)
                     ax.set_xticks(range(0, len(sampled_draws), x_tick_step))
                     ax.set_xticklabels([f'{sampled_draws[i]}' for i in range(0, len(sampled_draws), x_tick_step)],
                                        rotation=45, ha='right', fontsize=8)
-                    n_yticks = min(7, n_gdr_bins)
-                    y_tick_pos = np.linspace(0, n_gdr_bins - 1, n_yticks).astype(int)
-                    y_tick_vals = np.linspace(y_lo, y_hi, n_yticks)
-                    if gdr_key == 'achievement' or gdr_key == 'ssr_rate':
-                        y_tick_labels = [f'{v:.0%}' for v in y_tick_vals]
-                    elif gdr_key == 'resource':
-                        y_tick_labels = [f'{v:.0f}' for v in y_tick_vals]
-                    else:
-                        y_tick_labels = [f'{v:.2f}' for v in y_tick_vals]
                     ax.set_yticks(y_tick_pos)
                     ax.set_yticklabels(y_tick_labels, fontsize=8)
                     ax.set_xlabel('抽卡次数')
@@ -846,7 +964,7 @@ class AnalysisWorker(QThread):
                     plt.suptitle(f'GDR 时间演化热力图 ({n_sims} 次模拟)', fontsize=14, y=1.01)
                     plt.tight_layout()
                     p = str(self.output_dir / 'time_heatmap.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts['time_heatmap'] = p
                 else:
@@ -899,7 +1017,7 @@ class AnalysisWorker(QThread):
                 ax3d.set_title('3D瀑布图')
                 ax3d.view_init(elev=25, azim=-60)
                 p = str(self.output_dir / 'waterfall_3d.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['waterfall_3d'] = p
             step_done('3D瀑布图')
@@ -947,7 +1065,7 @@ class AnalysisWorker(QThread):
                 ax.set_title('2D瀑布图')
                 ax.grid(alpha=0.3)
                 p = str(self.output_dir / 'waterfall_2d.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['waterfall_2d'] = p
             step_done('2D瀑布图')
@@ -987,7 +1105,7 @@ class AnalysisWorker(QThread):
                     ax.grid(alpha=0.3, axis='x')
                     plt.tight_layout()
                     p = str(self.output_dir / 'per_pool_draws.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts['per_pool_draws'] = p
 
@@ -999,7 +1117,7 @@ class AnalysisWorker(QThread):
                     ax.grid(alpha=0.3, axis='x')
                     plt.tight_layout()
                     p = str(self.output_dir / 'per_pool_target_rate.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts['per_pool_target_rate'] = p
 
@@ -1011,7 +1129,7 @@ class AnalysisWorker(QThread):
                     ax.grid(alpha=0.3, axis='x')
                     plt.tight_layout()
                     p = str(self.output_dir / 'per_pool_pity_rate.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts['per_pool_pity_rate'] = p
 
@@ -1035,10 +1153,7 @@ class AnalysisWorker(QThread):
                     target_achievement_rates.append(achieved / total_target_qty if total_target_qty > 0 else 0.0)
                     collected_ssr = sum(1 for cid in ssr_ids if cum_card_counts.get(cid, 0) > 0)
                     ssr_collection_rates.append(collected_ssr / len(ssr_ids) if ssr_ids else 0.0)
-                    cum_consumed = snap.get('cumulative_consumed', {})
-                    cum_gained = snap.get('cumulative_gained', {})
-                    initial_r = ctx.initial_resources.get('draw_resource', 0) if ctx else 0
-                    res_rem = initial_r + cum_gained.get('draw_resource', 0) - cum_consumed.get('draw_resource', 0)
+                    res_rem = snap.get('pool_end_resource', 0.0)
                     resource_remainings.append(res_rem)
                     cumulative_draws_list.append(float(snap.get('cumulative_draws', 0)))
                     cumulative_pity_list.append(float(snap.get('cumulative_pity_draws', 0)))
@@ -1067,6 +1182,7 @@ class AnalysisWorker(QThread):
                     metric_key = _gdr_key_by_name.get(metric_name)
                     if metric_key is None:
                         continue
+
                     pool_dists = []
                     for pid in pool_ids:
                         if metric_name in _cum_data_keys:
@@ -1082,6 +1198,19 @@ class AnalysisWorker(QThread):
                                     pass
                         pool_dists.append(raw)
 
+                    if metric_key == 'resource_remaining' and self.use_draw_units and self.cost_per_draw > 0:
+                        pool_dists = [[v / self.cost_per_draw for v in d] for d in pool_dists]
+
+                    per_pool_baselines = {}
+                    if metric_key == 'resource_remaining' and self.no_draw_pool_resources:
+                        for pid in pool_ids:
+                            pool_res = self.no_draw_pool_resources.get(pid, {})
+                            if 'draw_resource' in pool_res:
+                                baseline = float(pool_res['draw_resource'])
+                                if self.use_draw_units and self.cost_per_draw > 0:
+                                    baseline = baseline / self.cost_per_draw
+                                per_pool_baselines[pid] = baseline
+
                     n_pools = len(pool_ids)
                     fig, axes = plt.subplots(n_pools, 1, figsize=(10, 1.8 * n_pools), sharex=True)
                     if n_pools == 1:
@@ -1096,9 +1225,19 @@ class AnalysisWorker(QThread):
                     else:
                         x_min, x_max = 0, 1
 
-                    num_bins = 30
+                    from gacha_simulator.core.distribution import freedman_diaconis_bins
+                    num_bins = freedman_diaconis_bins(all_vals)
                     bin_edges = np.linspace(x_min, x_max, num_bins + 1)
                     colors = plt.cm.viridis(np.linspace(0.2, 0.9, n_pools))
+
+                    # 计算全局最大频次，避免每池独立归一化导致分布形状不可比
+                    global_max_count = 0
+                    for dist in pool_dists:
+                        if dist:
+                            counts, _ = np.histogram(dist, bins=bin_edges)
+                            global_max_count = max(global_max_count, max(counts))
+                    if global_max_count == 0:
+                        global_max_count = 1
 
                     for idx, (ax, dist, sid) in enumerate(zip(axes, pool_dists, short_ids)):
                         if not dist:
@@ -1113,17 +1252,23 @@ class AnalysisWorker(QThread):
                             continue
 
                         counts, _ = np.histogram(dist, bins=bin_edges)
-                        max_count = max(counts) if max(counts) > 0 else 1
-                        density = counts / max_count
+                        density = counts / global_max_count
+                        y_pad = np.append(density, density[-1])
 
-                        ax.step(bin_edges[:-1], density, where='post',
+                        ax.step(bin_edges, y_pad, where='post',
                                 color=colors[idx], linewidth=1.2)
-                        ax.fill_between(bin_edges[:-1], density, step='post',
+                        ax.fill_between(bin_edges, y_pad, step='post',
                                         alpha=0.45, color=colors[idx])
 
                         mean_val = np.mean(dist)
                         ax.axvline(x=mean_val, color='red', linestyle='--',
                                    linewidth=1, alpha=0.7)
+
+                        _pid = pool_ids[idx]
+                        _pool_baseline = per_pool_baselines.get(_pid)
+                        if _pool_baseline is not None:
+                            ax.axvline(x=_pool_baseline, color='green', linestyle='--',
+                                       linewidth=1.5, alpha=0.7)
 
                         ax.set_ylim(0, 1.25)
                         ax.set_yticks([])
@@ -1137,12 +1282,18 @@ class AnalysisWorker(QThread):
                             ax.spines['bottom'].set_visible(False)
                             ax.tick_params(labelbottom=False)
 
-                    axes[-1].set_xlabel(metric_name, fontsize=11)
-                    fig.suptitle(f'{metric_name} (截止每池)', fontsize=13, fontweight='bold', y=0.995)
+                    _xlabel = metric_name
+                    if metric_key == 'resource_remaining' and self.use_draw_units:
+                        _xlabel = f'{metric_name} (抽)'
+                    axes[-1].set_xlabel(_xlabel, fontsize=11)
+                    _cum_title = f'{metric_name} (截止每池)'
+                    if metric_key == 'resource_remaining' and self.use_draw_units:
+                        _cum_title = f'{metric_name} (抽, 截止每池)'
+                    fig.suptitle(_cum_title, fontsize=13, fontweight='bold', y=0.995)
                     plt.tight_layout()
                     safe_name = metric_name.replace('/', '_').replace(' ', '_')
                     p = str(self.output_dir / f'cumulative_by_pool_{safe_name}.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight')
+                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                     plt.close()
                     charts[f'cumulative_by_pool_{metric_name}'] = p
                 step_done('截止每池的GDR分布')
@@ -1160,7 +1311,7 @@ class AnalysisWorker(QThread):
                 ax.grid(alpha=0.3)
                 plt.tight_layout()
                 p = str(self.output_dir / 'draws_vs_gdr.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['draws_vs_gdr'] = p
             step_done('抽卡数-目标达成率散点图')
@@ -1185,7 +1336,7 @@ class AnalysisWorker(QThread):
                 ax.set_title('GDR指标相关性')
                 plt.tight_layout()
                 p = str(self.output_dir / 'correlation.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['correlation'] = p
             step_done('相关性分析')
@@ -1203,42 +1354,10 @@ class AnalysisWorker(QThread):
                 success_flags_per_sim = self.transition_flags
                 n_sims = len(success_flags_per_sim)
             else:
-                success_flags_per_sim = []
-                target_ids_trans = set(ctx.target_specs.keys())
-                for seq in self.draw_sequences:
-                    card_ids = seq.get('draw_card_ids', [])
-                    pool_ids_seq = seq.get('draw_pool_ids', [])
-                    times = seq.get('draw_times', [])
-                    flags = []
-                    for pool_id, end_time in sorted_pools:
-                        if criteria == 'any_ssr':
-                            success = False
-                            for i, cid in enumerate(card_ids):
-                                if i < len(times) and times[i] > end_time:
-                                    break
-                                if cid in ssr_ids:
-                                    success = True
-                                    break
-                            flags.append(success)
-                        elif criteria == 'per_pool_target':
-                            success = False
-                            for i, cid in enumerate(card_ids):
-                                if i < len(times) and times[i] > end_time:
-                                    break
-                                if i < len(pool_ids_seq) and pool_ids_seq[i] == pool_id and cid in target_ids_trans:
-                                    success = True
-                                    break
-                            flags.append(success)
-                        else:
-                            obtained = 0
-                            total_needed = sum(target_specs.values())
-                            for i, cid in enumerate(card_ids):
-                                if i < len(times) and times[i] > end_time:
-                                    break
-                                if cid in target_ids_trans:
-                                    obtained += 1
-                            flags.append(obtained >= total_needed)
-                    success_flags_per_sim.append(flags)
+                success_flags_per_sim = _compute_transition_flags(
+                    self.draw_sequences, sorted_pools, criteria,
+                    ctx, ssr_ids, target_specs,
+                )
                 n_sims = len(success_flags_per_sim)
 
             trans = []
@@ -1310,7 +1429,7 @@ class AnalysisWorker(QThread):
 
                 plt.tight_layout()
                 p = str(self.output_dir / 'transition_analysis.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight')
+                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
                 plt.close()
                 charts['transition_analysis'] = p
             step_done('转变分析')
@@ -1332,9 +1451,33 @@ class AnalysisPanel(QWidget):
         self._result_units = {}
         self._computed_conditions = {}
         self._summary_data = {}
+        self._store = None
         self.output_dir = Path(os.getcwd()) / 'output' / 'analysis'
         self._worker = None
         self._setup_ui()
+
+    def set_store(self, store):
+        self._store = store
+        self._update_cost_per_draw_default()
+
+    def _extract_cost_per_draw(self):
+        if self._store is None or not self._store.pools:
+            return 160
+        for pe in self._store.pools:
+            cost_str = getattr(pe, 'cost', '')
+            if not cost_str:
+                continue
+            try:
+                parts = cost_str.split(':')
+                if len(parts) == 2:
+                    return int(float(parts[1]))
+            except (ValueError, IndexError):
+                continue
+        return 160
+
+    def _update_cost_per_draw_default(self):
+        if hasattr(self, 'cost_per_draw_spin'):
+            self.cost_per_draw_spin.setValue(self._extract_cost_per_draw())
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -1350,15 +1493,30 @@ class AnalysisPanel(QWidget):
         splitter.setSizes([280, 920])
 
     def _build_options_panel(self):
+        outer = QWidget()
+        outer.setMinimumWidth(240)
+        outer.setMaximumWidth(340)
+        outer_layout = QVBoxLayout(outer)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(4)
+
         scroll = QScrollArea()
+        scroll.verticalScrollBar().setSingleStep(15)
         scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(240)
-        scroll.setMaximumWidth(340)
 
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
+
+        btn_layout = QHBoxLayout()
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.clicked.connect(self._select_all)
+        btn_layout.addWidget(self.select_all_btn)
+        self.deselect_all_btn = QPushButton("全不选")
+        self.deselect_all_btn.clicked.connect(self._deselect_all)
+        btn_layout.addWidget(self.deselect_all_btn)
+        layout.addLayout(btn_layout)
 
         param_group = QGroupBox("全局参数")
         param_layout = QGridLayout(param_group)
@@ -1371,12 +1529,27 @@ class AnalysisPanel(QWidget):
         param_layout.addWidget(self.alpha_spin, 0, 1)
         layout.addWidget(param_group)
 
+        unit_group = QGroupBox("图表单位")
+        unit_layout = QGridLayout(unit_group)
+        self.draw_unit_cb = QCheckBox("以抽数为单位")
+        self.draw_unit_cb.setToolTip("将资源类指标（如资源剩余）除以单抽消耗，以抽数显示")
+        unit_layout.addWidget(self.draw_unit_cb, 0, 0, 1, 2)
+        unit_layout.addWidget(QLabel("单抽消耗:"), 1, 0)
+        self.cost_per_draw_spin = QSpinBox()
+        self.cost_per_draw_spin.setRange(1, 999999)
+        self.cost_per_draw_spin.setValue(self._extract_cost_per_draw())
+        self.cost_per_draw_spin.setSingleStep(10)
+        unit_layout.addWidget(self.cost_per_draw_spin, 1, 1)
+        layout.addWidget(unit_group)
+
         from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY as _UNIFIED_GDR_REGISTRY
         _gdr_names = [defn.display_name for defn in _UNIFIED_GDR_REGISTRY.values()]
 
         self._items = {}
         self._gdr_dist_checks = {}
         self._cumulative_by_pool_checks = {}
+        self._worst_case_cond_checks = {}
+        self._best_case_cond_checks = {}
 
         for category, items in ANALYSIS_CATEGORIES.items():
             cat_label = QLabel(f"── {category} ──")
@@ -1419,20 +1592,25 @@ class AnalysisPanel(QWidget):
                         self.primary_gdr_combo.setCurrentIndex(_i_star)
                         item_w.add_config_row("主指标:", self.primary_gdr_combo)
 
-                        wc_widget = QWidget()
-                        wc_layout = QVBoxLayout(wc_widget)
-                        wc_layout.setContentsMargins(0, 0, 0, 0)
-                        wc_layout.setSpacing(2)
-                        wc_hint = QLabel("选择绘制哪些GDR的条件分布图:")
-                        wc_hint.setStyleSheet("font-size: 11px; color: #555;")
-                        wc_layout.addWidget(wc_hint)
-                        self._worst_case_checks = {}
+                        wc_cond_widget = QWidget()
+                        wc_cond_layout = QVBoxLayout(wc_cond_widget)
+                        wc_cond_layout.setContentsMargins(0, 0, 0, 0)
+                        wc_cond_layout.setSpacing(2)
                         for gdr_name in _gdr_names:
-                            cb = QCheckBox(gdr_name)
+                            row = QHBoxLayout()
+                            row.setSpacing(4)
+                            name_lbl = QLabel(gdr_name)
+                            name_lbl.setStyleSheet("font-size: 11px;")
+                            name_lbl.setMinimumWidth(90)
+                            row.addWidget(name_lbl)
+                            cb = QCheckBox("条件分布")
+                            cb.setChecked(False)
                             cb.setStyleSheet("font-size: 11px;")
-                            wc_layout.addWidget(cb)
-                            self._worst_case_checks[gdr_name] = cb
-                        item_w.add_config_widget(wc_widget)
+                            row.addWidget(cb)
+                            row.addStretch()
+                            wc_cond_layout.addLayout(row)
+                            self._worst_case_cond_checks[gdr_name] = cb
+                        item_w.add_config_row("条件分布指标:", wc_cond_widget)
 
                     if key == 'risk_best_case':
                         self.best_primary_gdr_combo = _NoWheelComboBox()
@@ -1442,20 +1620,25 @@ class AnalysisPanel(QWidget):
                         self.best_primary_gdr_combo.setCurrentIndex(_i_star2)
                         item_w.add_config_row("主指标:", self.best_primary_gdr_combo)
 
-                        bc_widget = QWidget()
-                        bc_layout = QVBoxLayout(bc_widget)
-                        bc_layout.setContentsMargins(0, 0, 0, 0)
-                        bc_layout.setSpacing(2)
-                        bc_hint = QLabel("选择绘制哪些GDR的条件分布图:")
-                        bc_hint.setStyleSheet("font-size: 11px; color: #555;")
-                        bc_layout.addWidget(bc_hint)
-                        self._best_case_checks = {}
+                        bc_cond_widget = QWidget()
+                        bc_cond_layout = QVBoxLayout(bc_cond_widget)
+                        bc_cond_layout.setContentsMargins(0, 0, 0, 0)
+                        bc_cond_layout.setSpacing(2)
                         for gdr_name in _gdr_names:
-                            cb = QCheckBox(gdr_name)
+                            row = QHBoxLayout()
+                            row.setSpacing(4)
+                            name_lbl = QLabel(gdr_name)
+                            name_lbl.setStyleSheet("font-size: 11px;")
+                            name_lbl.setMinimumWidth(90)
+                            row.addWidget(name_lbl)
+                            cb = QCheckBox("条件分布")
+                            cb.setChecked(False)
                             cb.setStyleSheet("font-size: 11px;")
-                            bc_layout.addWidget(cb)
-                            self._best_case_checks[gdr_name] = cb
-                        item_w.add_config_widget(bc_widget)
+                            row.addWidget(cb)
+                            row.addStretch()
+                            bc_cond_layout.addLayout(row)
+                            self._best_case_cond_checks[gdr_name] = cb
+                        item_w.add_config_row("条件分布指标:", bc_cond_widget)
 
                     if key == 'conditional_dist':
                         self.cond_gdr_combo = _NoWheelComboBox()
@@ -1534,14 +1717,15 @@ class AnalysisPanel(QWidget):
                     self._items[key] = cb
                     layout.addWidget(cb)
 
-        btn_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("全选")
-        self.select_all_btn.clicked.connect(self._select_all)
-        btn_layout.addWidget(self.select_all_btn)
-        self.deselect_all_btn = QPushButton("全不选")
-        self.deselect_all_btn.clicked.connect(self._deselect_all)
-        btn_layout.addWidget(self.deselect_all_btn)
-        layout.addLayout(btn_layout)
+        layout.addStretch()
+        scroll.setWidget(container)
+        outer_layout.addWidget(scroll, stretch=1)
+
+        bottom_bar = QWidget()
+        sb_width = scroll.verticalScrollBar().sizeHint().width() + 2  # 滚动条宽度 + 边框余量
+        bottom_layout = QVBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(0, 0, sb_width, 0)
+        bottom_layout.setSpacing(4)
 
         action_layout = QHBoxLayout()
         self.run_btn = QPushButton("运行分析")
@@ -1552,7 +1736,7 @@ class AnalysisPanel(QWidget):
         self.clear_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; padding: 8px; }")
         self.clear_btn.clicked.connect(self._clear_results)
         action_layout.addWidget(self.clear_btn)
-        layout.addLayout(action_layout)
+        bottom_layout.addLayout(action_layout)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -1561,18 +1745,18 @@ class AnalysisPanel(QWidget):
         self.progress_bar.setFormat('%p%')
         self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.progress_bar.setMaximumHeight(20)
-        layout.addWidget(self.progress_bar)
+        bottom_layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("就绪")
         self.status_label.setStyleSheet("color: #666;")
-        layout.addWidget(self.status_label)
+        bottom_layout.addWidget(self.status_label)
 
-        layout.addStretch()
-        scroll.setWidget(container)
-        return scroll
+        outer_layout.addWidget(bottom_bar)
+        return outer
 
     def _build_results_panel(self):
         self._results_scroll = QScrollArea()
+        self._results_scroll.verticalScrollBar().setSingleStep(15)
         self._results_scroll.setWidgetResizable(True)
         self._results_scroll.setStyleSheet("QScrollArea { background: #f5f5f5; border: none; }")
 
@@ -1640,7 +1824,8 @@ class AnalysisPanel(QWidget):
         if span > 0 and iqr / span < 0.05:
             nbins = max(50, min(200, int(len(samples) / 20)))
         else:
-            nbins = 30
+            from gacha_simulator.core.distribution import freedman_diaconis_bins
+            nbins = freedman_diaconis_bins(samples)
         return {'bins': nbins, 'density': True, 'edgecolor': color, 'alpha': alpha_val, 'label': label}
 
     def _on_preset_threshold(self, preset_type):
@@ -1696,11 +1881,11 @@ class AnalysisPanel(QWidget):
     def _get_cumulative_by_pool_selections(self):
         return {name for name, cb in self._cumulative_by_pool_checks.items() if cb.isChecked()}
 
-    def _get_worst_case_selections(self):
-        return {name for name, cb in self._worst_case_checks.items() if cb.isChecked()}
+    def _get_worst_case_cond_selections(self):
+        return {name for name, cb in self._worst_case_cond_checks.items() if cb.isChecked()}
 
-    def _get_best_case_selections(self):
-        return {name for name, cb in self._best_case_checks.items() if cb.isChecked()}
+    def _get_best_case_cond_selections(self):
+        return {name for name, cb in self._best_case_cond_checks.items() if cb.isChecked()}
 
     def _get_conditions_for_key(self, key):
         cond = {'alpha': self.alpha_spin.value()}
@@ -1712,15 +1897,17 @@ class AnalysisPanel(QWidget):
             cond['cond_threshold'] = self.threshold_spin.value()
         if key in ('risk_worst_case', 'risk_worst_case_chart'):
             cond['primary_gdr'] = self.primary_gdr_combo.currentText()
-            cond['worst_case_selections'] = frozenset(self._get_worst_case_selections())
+            cond['worst_case_cond_selections'] = frozenset(self._get_worst_case_cond_selections())
         if key in ('risk_best_case', 'risk_best_case_chart'):
             cond['primary_gdr'] = self.best_primary_gdr_combo.currentText()
-            cond['best_case_selections'] = frozenset(self._get_best_case_selections())
+            cond['best_case_cond_selections'] = frozenset(self._get_best_case_cond_selections())
         if key.startswith('gdr_dist_') or key == 'gdr_dist':
             sel = self._get_gdr_dist_selections()
             cond['gdr_dist_selections'] = frozenset((k, frozenset(v)) for k, v in sel.items())
         if key.startswith('cumulative_by_pool_') or key == 'cumulative_by_pool':
             cond['cumulative_by_pool_selections'] = frozenset(self._get_cumulative_by_pool_selections())
+        cond['use_draw_units'] = self.draw_unit_cb.isChecked()
+        cond['cost_per_draw'] = self.cost_per_draw_spin.value()
         return cond
 
     def _needs_computation(self, key):
@@ -1763,12 +1950,16 @@ class AnalysisPanel(QWidget):
                 best_primary_gdr=self.best_primary_gdr_combo.currentText(),
                 gdr_dist_selections=self._get_gdr_dist_selections(),
                 cumulative_by_pool_selections=self._get_cumulative_by_pool_selections(),
-                worst_case_selections=self._get_worst_case_selections(),
-                best_case_selections=self._get_best_case_selections(),
+                worst_case_cond_selections=self._get_worst_case_cond_selections(),
+                best_case_cond_selections=self._get_best_case_cond_selections(),
                 draw_sequences=self._draw_sequences,
                 heatmap_data=self._heatmap_data,
                 cumulative_snapshots=self._cumulative_snapshots,
                 transition_flags=self._transition_flags,
+                use_draw_units=self.draw_unit_cb.isChecked(),
+                cost_per_draw=self.cost_per_draw_spin.value(),
+                no_draw_resource=self._no_draw_resource,
+                no_draw_pool_resources=self._no_draw_pool_resources,
             )
             self._worker.progress.connect(self._on_progress)
             self._worker.finished.connect(self._on_analysis_done)
@@ -1857,24 +2048,37 @@ class AnalysisPanel(QWidget):
         target_specs = self._gdr_context.target_specs if self._gdr_context else {}
         ssr_ids = self._gdr_context.ssr_ids if self._gdr_context else set()
 
-        headers = ["指标", "均值", "中位数", "标准差"]
+        headers = ["指标", "均值", "中位数", "标准差", f"VaR({self.alpha_spin.value():.0%})"]
         rows = []
         self._summary_data = {}
 
+        use_draw_units = self.draw_unit_cb.isChecked()
+        cost_per_draw = self.cost_per_draw_spin.value()
+
+        from gacha_simulator.core.distribution import EmpiricalDistribution
         for key, defn in UNIFIED_GDR_REGISTRY.items():
             try:
                 vals = []
                 for r in self.results:
                     v = compute_gdr_from_compact(r, target_specs, key, ssr_ids=ssr_ids)
                     vals.append(v)
+                if key == 'resource_remaining' and use_draw_units and cost_per_draw > 0:
+                    vals = [v / cost_per_draw for v in vals]
                 mean_val = np.mean(vals)
                 median_val = np.median(vals)
                 std_val = np.std(vals)
-                rows.append([defn.display_name, f"{mean_val:.4f}", f"{median_val:.4f}", f"{std_val:.4f}"])
-                self._summary_data[defn.display_name] = {'mean': f"{mean_val:.4f}"}
+                var_val = EmpiricalDistribution(vals).var(self.alpha_spin.value())
+                _display_name = defn.display_name
+                if key == 'resource_remaining' and use_draw_units:
+                    _display_name = f'{_display_name} (抽)'
+                rows.append([_display_name, f"{mean_val:.4f}", f"{median_val:.4f}", f"{std_val:.4f}", f"{var_val:.4f}"])
+                self._summary_data[_display_name] = {'mean': f"{mean_val:.4f}"}
             except Exception:
-                rows.append([defn.display_name, "-", "-", "-"])
-                self._summary_data[defn.display_name] = {'mean': "-"}
+                _display_name = defn.display_name
+                if key == 'resource_remaining' and use_draw_units:
+                    _display_name = f'{_display_name} (抽)'
+                rows.append([_display_name, "-", "-", "-"])
+                self._summary_data[_display_name] = {'mean': "-"}
 
         key = 'gdr_statistics'
         title = _KEY_TITLE_MAP.get(key, 'GDR指标统计')
@@ -1931,7 +2135,8 @@ class AnalysisPanel(QWidget):
         self.progress_bar.setValue(0)
 
     def update_results(self, results, target_ids=None, ssr_ids=None, gdr_context=None, pool_end_times=None,
-                       draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None):
+                       draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None,
+                       no_draw_resource=None, no_draw_pool_resources=None):
         self.results = results
         self._gdr_context = gdr_context
         self._pool_end_times = pool_end_times or {}
@@ -1939,6 +2144,8 @@ class AnalysisPanel(QWidget):
         self._heatmap_data = heatmap_data or {}
         self._cumulative_snapshots = cumulative_snapshots or {}
         self._transition_flags = transition_flags or []
+        self._no_draw_resource = no_draw_resource
+        self._no_draw_pool_resources = no_draw_pool_resources or {}
         self._clear_results()
         self.status_label.setText(f"已加载 {len(results)} 条模拟结果，请选择分析项并运行")
 
