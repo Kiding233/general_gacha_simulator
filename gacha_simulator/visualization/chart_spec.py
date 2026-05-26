@@ -36,11 +36,28 @@ class BoxplotData:
 
 
 @dataclass
-class ScatterData:
-    """散点/折线图数据。"""
+class ScatterTrace:
+    """散点图单条轨迹。"""
     x: np.ndarray
     y: np.ndarray
-    mode: Literal["markers", "lines", "lines+markers"] = "markers"
+    mode: str = "markers"
+    name: str = ""
+    marker_symbol: str = "circle"
+    marker_size: int = 7
+    marker_color: str | None = None
+    line_color: str | None = None
+
+
+@dataclass
+class ScatterData:
+    """散点/折线图数据。支持单轨迹（x/y）和多轨迹（traces）两种模式。"""
+    x: np.ndarray | None = None
+    y: np.ndarray | None = None
+    mode: str = "markers"
+    traces: list[ScatterTrace] | None = None     # 多轨迹模式
+    color_values: np.ndarray | None = None       # 颜色映射值（散点着色用）
+    colorscale: str = "RdYlGn"                    # 颜色映射名称
+    colorbar_title: str = ""                      # 颜色条标题
 
 
 @dataclass
@@ -184,12 +201,53 @@ def scatter(
     title: str = "",
     xlabel: str = "",
     ylabel: str = "",
-    mode: Literal["markers", "lines", "lines+markers"] = "markers",
+    mode: str = "markers",
     **layout_hints,
 ) -> ChartSpec:
     return ChartSpec(
         chart_type="scatter",
-        data=ScatterData(x, y, mode=mode),
+        data=ScatterData(x=x, y=y, mode=mode),
+        title=title, xlabel=xlabel, ylabel=ylabel,
+        layout_hints=layout_hints,
+    )
+
+
+def scatter_multi(
+    traces: list[ScatterTrace],
+    title: str = "",
+    xlabel: str = "",
+    ylabel: str = "",
+    **layout_hints,
+) -> ChartSpec:
+    """多轨迹散点图，每个 ScatterTrace 为一条独立轨迹。"""
+    return ChartSpec(
+        chart_type="scatter",
+        data=ScatterData(traces=traces),
+        title=title, xlabel=xlabel, ylabel=ylabel,
+        layout_hints=layout_hints,
+    )
+
+
+def scatter_colored(
+    x: np.ndarray,
+    y: np.ndarray,
+    color_values: np.ndarray,
+    title: str = "",
+    xlabel: str = "",
+    ylabel: str = "",
+    colorscale: str = "RdYlGn",
+    colorbar_title: str = "",
+    mode: str = "markers",
+    **layout_hints,
+) -> ChartSpec:
+    """带颜色映射的散点图。"""
+    return ChartSpec(
+        chart_type="scatter",
+        data=ScatterData(
+            x=x, y=y, mode=mode,
+            color_values=color_values, colorscale=colorscale,
+            colorbar_title=colorbar_title,
+        ),
         title=title, xlabel=xlabel, ylabel=ylabel,
         layout_hints=layout_hints,
     )

@@ -19,6 +19,7 @@ from .chart_spec import (
     HistogramData,
     RidgeData,
     ScatterData,
+    ScatterTrace,
     Waterfall3DData,
 )
 
@@ -269,12 +270,36 @@ class PlotlyRenderer:
 
     def _build_scatter(self, s: ChartSpec) -> go.Figure:
         d: ScatterData = s.data
-        color = s.layout_hints.get("color", "#1f77b4")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=d.x, y=d.y, mode=d.mode, marker_color=color,
-            hovertemplate="x: %{x:.2f}<br>y: %{y:.2f}<extra></extra>",
-        ))
+
+        if d.traces:
+            for tr in d.traces:
+                fig.add_trace(go.Scatter(
+                    x=tr.x, y=tr.y, mode=tr.mode, name=tr.name,
+                    marker=dict(
+                        symbol=tr.marker_symbol, size=tr.marker_size,
+                        color=tr.marker_color,
+                    ),
+                    line=dict(color=tr.line_color) if tr.line_color else None,
+                    hovertemplate=f"{tr.name}<br>x: %{{x:.2f}}<br>y: %{{y:.2f}}<extra></extra>",
+                ))
+        elif d.color_values is not None:
+            fig.add_trace(go.Scatter(
+                x=d.x, y=d.y, mode=d.mode,
+                marker=dict(
+                    color=d.color_values, colorscale=d.colorscale,
+                    colorbar=dict(title=d.colorbar_title) if d.colorbar_title else None,
+                    showscale=True, size=10,
+                    line=dict(width=0.5, color="black"),
+                ),
+                hovertemplate="x: %{x:.2f}<br>y: %{y:.2f}<br>color: %{marker.color:.3f}<extra></extra>",
+            ))
+        else:
+            color = s.layout_hints.get("color", "#1f77b4")
+            fig.add_trace(go.Scatter(
+                x=d.x, y=d.y, mode=d.mode, marker_color=color,
+                hovertemplate="x: %{x:.2f}<br>y: %{y:.2f}<extra></extra>",
+            ))
         return fig
 
     def _build_bar(self, s: ChartSpec) -> go.Figure:

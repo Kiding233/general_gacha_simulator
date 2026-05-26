@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import os
-import tempfile
 from collections import Counter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
@@ -10,7 +8,8 @@ from PyQt6.QtWidgets import (
     QTabWidget, QSizePolicy, QProgressBar, QSpinBox, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap
+
+from .chart_webview import ChartWebView
 
 from ..core.process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
 from ..core.process_analysis import (
@@ -18,9 +17,14 @@ from ..core.process_analysis import (
     EVENT_MODE_MAP, SUCCESS_MODE_MAP,
     _get_event_label, get_event_type_order, _hashable,
 )
-from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact
+from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact, populate_gdr_combo, get_default_threshold
 
-_gdr_key_to_display = {key: defn.display_name for key, defn in UNIFIED_GDR_REGISTRY.items()}
+_gdr_key_to_display = {}
+def _refresh_gdr_display_map():
+    _gdr_key_to_display.clear()
+    for key, defn in UNIFIED_GDR_REGISTRY.items():
+        _gdr_key_to_display[key] = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+_refresh_gdr_display_map()
 
 
 class _NoWheelComboBox(QComboBox):
@@ -84,9 +88,7 @@ class ProcessAnalysisPanel(QWidget):
 
         gdr_layout.addWidget(QLabel("GDR 指标"))
         self.gdr_combo = _NoWheelComboBox()
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            display = defn.display_name
-            self.gdr_combo.addItem(display, key)
+        populate_gdr_combo(self.gdr_combo)
         gdr_layout.addWidget(self.gdr_combo)
 
         gdr_layout.addWidget(QLabel("成功阈值"))
@@ -209,8 +211,7 @@ class ProcessAnalysisPanel(QWidget):
         ctrl_row = QHBoxLayout()
         ctrl_row.addWidget(QLabel("GDR指标"))
         self.cond_gdr_combo = _NoWheelComboBox()
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            self.cond_gdr_combo.addItem(defn.display_name, key)
+        populate_gdr_combo(self.cond_gdr_combo)
         self.cond_gdr_combo.currentIndexChanged.connect(self._on_cond_gdr_changed)
         ctrl_row.addWidget(self.cond_gdr_combo)
 
@@ -230,10 +231,8 @@ class ProcessAnalysisPanel(QWidget):
         self.cond_sample_label = QLabel("样本数: -")
         cond_layout.addWidget(self.cond_sample_label)
 
-        self.cond_chart_label = QLabel()
-        self.cond_chart_label.setMinimumHeight(300)
-        self.cond_chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cond_layout.addWidget(self.cond_chart_label)
+        self.cond_chart_webview = ChartWebView()
+        cond_layout.addWidget(self.cond_chart_webview)
 
         layout.addWidget(self.cond_dist_group)
         return widget
@@ -348,7 +347,6 @@ class ProcessAnalysisPanel(QWidget):
         return self.success_n_spin.value()
 
     def _on_gdr_changed(self, index):
-        from gacha_simulator.core.gdr import get_default_threshold
         key = self.gdr_combo.currentData()
         default = get_default_threshold(key)
         self.threshold_spin.setValue(default)
@@ -470,7 +468,12 @@ class ProcessAnalysisPanel(QWidget):
                     weapon_character_map, initial_resources,
                 )
                 pool_gdr_values[pid] = pool_gdr_val if pool_gdr_val is not None else 0.0
-                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= checker.gdr_threshold)
+                if pool_gdr_val is None:
+                    pool_success[pid] = False
+                elif checker.lower_is_better:
+                    pool_success[pid] = pool_gdr_val <= checker.gdr_threshold
+                else:
+                    pool_success[pid] = pool_gdr_val >= checker.gdr_threshold
 
             traces.append(SampleTrace(
                 events=events_list,
@@ -688,8 +691,9 @@ class ProcessAnalysisPanel(QWidget):
 
         if n == 0:
             self.cond_sample_label.setText("样本数: 0")
-            self.cond_chart_label.clear()
-            self.cond_chart_label.setText("无匹配样本")
+            self.cond_chart_webview.setHtml(
+                "<p style='text-align:center;color:#888;padding:40px;'>无匹配样本</p>"
+            )
             return
 
         values = [t.gdr_value for t in filtered]
@@ -699,56 +703,32 @@ class ProcessAnalysisPanel(QWidget):
     def _plot_cond_dist(self, values, gdr_key):
         n = len(values)
         if n < 10:
-            self.cond_chart_label.setText(f"样本量不足（n={n}），无法显示分布")
+            self.cond_chart_webview.setHtml(
+                f"<p style='text-align:center;color:#888;padding:40px;'>"
+                f"样本量不足（n={n}），无法显示分布</p>"
+            )
             return
 
-        from gacha_simulator.core.distribution import freedman_diaconis_bins
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
+        from ..visualization.chart_spec import histogram, ChartAnnotation
+        import numpy as np
 
-        fig, ax = plt.subplots(figsize=(8, 5))
-
+        from ..core.gdr import UNIFIED_GDR_REGISTRY
         gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
         display_name = gdr_def.display_name if gdr_def else gdr_key
 
-        try:
-            bins = freedman_diaconis_bins(values)
-        except Exception:
-            bins = 20
+        samples = np.array(values, dtype=float)
+        mean_val = float(np.mean(samples))
+        median_val = float(np.median(samples))
 
-        ax.hist(values, bins=bins, density=False, edgecolor='black', alpha=0.7)
-
-        mean_val = sum(values) / n
-        sorted_vals = sorted(values)
-        median_val = sorted_vals[n // 2]
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'均值={mean_val:.3f}')
-        ax.axvline(median_val, color='blue', linestyle=':', linewidth=1, label=f'中位数={median_val:.3f}')
-
-        ax.set_xlabel(display_name)
-        ax.set_ylabel('频次')
-        ax.set_title('条件GDR分布')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        try:
-            fig.savefig(tmp.name, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-
-            pixmap = QPixmap(tmp.name)
-            self.cond_chart_label.setPixmap(pixmap.scaled(
-                self.cond_chart_label.width(), self.cond_chart_label.height(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
-        finally:
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
+        spec = histogram(
+            samples=samples,
+            title="条件GDR分布",
+            xlabel=display_name,
+            ylabel="频次",
+            mean_line=True,
+            quantile_lines=[0.5],
+        )
+        self.cond_chart_webview.set_chart(spec)
 
     def _fill_ba_table(self, results):
         self.ba_table.clear()
@@ -763,7 +743,10 @@ class ProcessAnalysisPanel(QWidget):
         for i, row in enumerate(results):
             text = self._format_event_pattern(row['event_pattern'], event_mode)
             ratio = row['ratio']
-            ratio_text = f"{ratio:.2f}" if ratio != float('inf') else "∞"
+            if ratio is None or ratio == float('inf'):
+                ratio_text = "∞"
+            else:
+                ratio_text = f"{ratio:.2f}"
             self.ba_table.setItem(i, 0, QTableWidgetItem(text))
             self.ba_table.setItem(i, 1, QTableWidgetItem(f"{row['p_given_success']:.4f}"))
             self.ba_table.setItem(i, 2, QTableWidgetItem(f"{row['p_given_failure']:.4f}"))

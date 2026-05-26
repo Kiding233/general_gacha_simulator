@@ -1,4 +1,3 @@
-import tempfile
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
@@ -7,9 +6,10 @@ from PyQt6.QtWidgets import (
     QSplitter, QLineEdit,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen
+from PyQt6.QtGui import QPainter, QColor, QPen
 from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
 from .config_panel import PoolDistributionDialog
+from .chart_webview import ChartWebView
 
 
 class CoverageBar(QWidget):
@@ -309,13 +309,8 @@ class WorstImpactPanel(QWidget):
         dist_box = QGroupBox("新池子数分布")
         dist_layout = QVBoxLayout(dist_box)
         dist_layout.setContentsMargins(2, 6, 2, 2)
-        self.chart_label_dist = QLabel()
-        self.chart_label_dist.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label_dist.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self.chart_label_dist.setMinimumHeight(200)
-        dist_layout.addWidget(self.chart_label_dist)
+        self.chart_webview = ChartWebView()
+        dist_layout.addWidget(self.chart_webview)
         right_layout.addWidget(dist_box, 2)
 
         table_group = QGroupBox("详细数据")
@@ -451,54 +446,28 @@ class WorstImpactPanel(QWidget):
         if not result.pool_distribution:
             return
 
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from ..visualization.font_config import configure_chinese_font
-        configure_chinese_font()
+        from ..visualization.chart_spec import bar, ChartAnnotation
+        import numpy as np
 
-        dist_w = max(self.chart_label_dist.width(), 400) / 100
-        dist_h = max(self.chart_label_dist.height(), 250) / 100
-        fig, ax = plt.subplots(figsize=(dist_w, dist_h))
         ks = sorted(result.pool_distribution.keys())
         probs = [result.pool_distribution[k] for k in ks]
-        bars = ax.bar(ks, probs, color='coral')
-        ax.set_xlabel('成功抽取新池子数 k', fontsize=11)
-        ax.set_ylabel('P(X = k)', fontsize=11)
-        ax.set_title(f'新池子数分布 (E[X] = {result.expected_pools:.2f})', fontsize=12)
-        ax.set_xticks(ks)
-        ax.axvline(x=result.expected_pools, color='red', linestyle='--',
-                  label=f'期望 = {result.expected_pools:.2f}')
-        ax.legend(fontsize=9)
-        for bar, prob in zip(bars, probs):
-            if prob > 0.01:
-                ax.text(bar.get_x() + bar.get_width()/2,
-                       bar.get_height() + 0.005,
-                       f'{prob:.1%}', ha='center', va='bottom', fontsize=9)
-        plt.tight_layout()
 
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight', pad_inches=0.15)
-        plt.close(fig)
-        pixmap = QPixmap(tmp.name)
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(
-                self.chart_label_dist.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.chart_label_dist.setPixmap(scaled)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        pixmap = self.chart_label_dist.pixmap()
-        if pixmap and not pixmap.isNull():
-            scaled = pixmap.scaled(
-                self.chart_label_dist.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.chart_label_dist.setPixmap(scaled)
+        spec = bar(
+            labels=[str(k) for k in ks],
+            values=np.array(probs, dtype=float),
+            title=f"新池子数分布 (E[X] = {result.expected_pools:.2f})",
+            xlabel="成功抽取新池子数 k",
+            ylabel="P(X = k)",
+            color="coral",
+            annotations=[
+                ChartAnnotation(
+                    type="vline", value=float(result.expected_pools),
+                    color="#ff4444", dash="dash",
+                    text=f"期望 = {result.expected_pools:.2f}",
+                ),
+            ],
+        )
+        self.chart_webview.set_chart(spec)
 
     def _on_error(self, err):
         self.run_btn.setEnabled(True)

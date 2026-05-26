@@ -1,7 +1,6 @@
 import sys
 import os
 import traceback
-import tempfile
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
@@ -10,7 +9,9 @@ from PyQt6.QtWidgets import (
     QLineEdit, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor
+from PyQt6.QtGui import QColor
+
+from .chart_webview import ChartWebView
 
 _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
@@ -227,55 +228,29 @@ class RetreatSearchPanel(QWidget):
         return dict(self._miss_cost_weights)
 
     def _plot_pareto_chart(self, result):
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
+        """构造 ChartSpec 并直接渲染到 ChartWebView，不再写临时文件。"""
+        from ..visualization.chart_spec import scatter_colored
+        import numpy as np
 
         if not result.points:
-            return None
+            self.chart_webview.setHtml(
+                "<p style='text-align:center;color:#888;padding:40px;'>无数据可绘制</p>"
+            )
+            return
 
-        extra_resources = [pt.extra_resource for pt in result.points]
-        target_counts = [sum(pt.target_specs.values()) for pt in result.points]
-        probs = [pt.success_probability for pt in result.points]
+        extra_resources = np.array([pt.extra_resource for pt in result.points], dtype=float)
+        target_counts = np.array([sum(pt.target_specs.values()) for pt in result.points], dtype=float)
+        probs = np.array([pt.success_probability for pt in result.points], dtype=float)
 
-        # 根据点数决定图表尺寸，保持紧凑
-        n = len(result.points)
-        fig_w = max(5, min(n * 0.8 + 3, 10))
-        fig_h = 5.5
-
-        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-        scatter = ax.scatter(extra_resources, target_counts, c=probs, cmap='RdYlGn',
-                            s=80, edgecolors='black', linewidth=0.5, zorder=3)
-        cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
-        cbar.set_label('成功率')
-
-        if len(extra_resources) > 1:
-            sorted_pairs = sorted(zip(extra_resources, target_counts))
-            sx = [p[0] for p in sorted_pairs]
-            sy = [p[1] for p in sorted_pairs]
-            ax.plot(sx, sy, '--', color='gray', alpha=0.5, linewidth=1, zorder=2)
-
-        for i, pt in enumerate(result.points):
-            specs_str = ', '.join(f"{k}" for k in pt.target_specs.keys())
-            if specs_str:
-                ax.annotate(specs_str, (pt.extra_resource, target_counts[i]),
-                           textcoords="offset points", xytext=(3, 3),
-                           fontsize=6, alpha=0.7)
-
-        ax.set_xlabel('额外资源')
-        ax.set_ylabel('目标卡数量')
-        mode_labels = {'resource': '最少额外资源', 'target': '最多目标卡', 'pareto': 'Pareto前沿'}
-        ax.set_title(f'退路方案搜索 — {mode_labels.get(result.search_mode, result.search_mode)}')
-        ax.grid(True, alpha=0.3)
-        ax.margins(y=0.1)
-
-        plt.tight_layout()
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight', pad_inches=0.3)
-        plt.close(fig)
-        return tmp.name
+        mode_labels = {"resource": "最少额外资源", "target": "最多目标卡", "pareto": "Pareto前沿"}
+        spec = scatter_colored(
+            x=extra_resources, y=target_counts,
+            color_values=probs, colorscale="RdYlGn", colorbar_title="成功率",
+            title=f"退路方案搜索 — {mode_labels.get(result.search_mode, result.search_mode)}",
+            xlabel="额外资源",
+            ylabel="目标卡数量",
+        )
+        self.chart_webview.set_chart(spec)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -441,10 +416,8 @@ class RetreatSearchPanel(QWidget):
 
         chart_group = QGroupBox("Pareto前沿图")
         chart_layout = QVBoxLayout(chart_group)
-        self.chart_label = QLabel()
-        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label.setMinimumHeight(200)
-        chart_layout.addWidget(self.chart_label)
+        self.chart_webview = ChartWebView()
+        chart_layout.addWidget(self.chart_webview)
         right_layout.addWidget(chart_group)
 
         detail_group = QGroupBox("详细结果")
@@ -577,24 +550,7 @@ class RetreatSearchPanel(QWidget):
 
         self.result_label.setText('<br>'.join(lines))
 
-        chart_path = self._plot_pareto_chart(result)
-        if chart_path:
-            self._chart_path = chart_path
-            pixmap = QPixmap(chart_path)
-            if not pixmap.isNull():
-                # 按比例缩放以适应标签宽度，保持宽高比
-                max_w = self.chart_label.width() - 20
-                max_h = 400
-                scaled = pixmap.scaled(
-                    max_w, max_h,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.chart_label.setPixmap(scaled)
-            else:
-                self.chart_label.setText("图表生成失败")
-        else:
-            self.chart_label.setText("无数据可绘制")
+        self._plot_pareto_chart(result)
 
         self.detail_table.setRowCount(len(result.points))
         for i, pt in enumerate(result.points):

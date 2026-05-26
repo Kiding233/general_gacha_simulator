@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
 
+from .chart_webview import ChartWebView
+
 _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
@@ -64,18 +66,7 @@ class StrategyWorker(QThread):
 
     def _build_simulation_env(self):
         from .batch_simulator import SimulationEnvBuilder
-        env = SimulationEnvBuilder.from_config_store(self.config_store)
-        self._sim_env = {
-            'pools': env.pools,
-            'schedule_mgr': env.schedule_mgr,
-            'end_time': env.end_time,
-            'pity_engine': env.pity_engine,
-            'resource_gain': env.resource_gain,
-            'pity_state_init': env.pity_state_init,
-            'card_defs': env.card_defs,
-            'initial_resources': env.initial_resources,
-            'ssr_ids': env.ssr_ids,
-        }
+        self._sim_env = SimulationEnvBuilder.from_config_store(self.config_store)
 
     def _forward_method(self):
         from gacha_simulator.core.forward_backward import ForwardStep, ForwardResult
@@ -101,21 +92,14 @@ class StrategyWorker(QThread):
             _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
-                pools=self._sim_env['pools'],
-                schedule_mgr=self._sim_env['schedule_mgr'],
-                end_time=self._sim_env['end_time'],
-                pity_engine=self._sim_env['pity_engine'],
-                resource_gain=self._sim_env['resource_gain'],
-                pity_state_init=self._sim_env['pity_state_init'],
-                card_defs=self._sim_env['card_defs'],
+                env=self._sim_env,
                 target_specs=current_specs,
-                initial_resources=self._sim_env['initial_resources'],
+                initial_resources=self._sim_env.initial_resources,
                 num_simulations=self.num_simulations,
                 max_workers=self.max_workers,
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             prob = compute_success_probability(histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -164,21 +148,14 @@ class StrategyWorker(QThread):
         _skey = self.config_store.strategy_name
         _sparams = self.config_store.strategy_params
         initial_histories = run_batch_parallel(
-            pools=self._sim_env['pools'],
-            schedule_mgr=self._sim_env['schedule_mgr'],
-            end_time=self._sim_env['end_time'],
-            pity_engine=self._sim_env['pity_engine'],
-            resource_gain=self._sim_env['resource_gain'],
-            pity_state_init=self._sim_env['pity_state_init'],
-            card_defs=self._sim_env['card_defs'],
+            env=self._sim_env,
             target_specs=dict(current_specs),
-            initial_resources=self._sim_env['initial_resources'],
+            initial_resources=self._sim_env.initial_resources,
             num_simulations=self.num_simulations,
             max_workers=self.max_workers,
             seed=0,
             strategy_name=_skey,
             strategy_params=_sparams,
-            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         initial_prob = compute_success_probability(initial_histories, current_specs, self.gdr_key, self.gdr_threshold,
@@ -220,21 +197,14 @@ class StrategyWorker(QThread):
             _skey = self.config_store.strategy_name
             _sparams = self.config_store.strategy_params
             histories = run_batch_parallel(
-                pools=self._sim_env['pools'],
-                schedule_mgr=self._sim_env['schedule_mgr'],
-                end_time=self._sim_env['end_time'],
-                pity_engine=self._sim_env['pity_engine'],
-                resource_gain=self._sim_env['resource_gain'],
-                pity_state_init=self._sim_env['pity_state_init'],
-                card_defs=self._sim_env['card_defs'],
+                env=self._sim_env,
                 target_specs=temp_specs,
-                initial_resources=self._sim_env['initial_resources'],
+                initial_resources=self._sim_env.initial_resources,
                 num_simulations=self.num_simulations,
                 max_workers=self.max_workers,
                 seed=0,
                 strategy_name=_skey,
                 strategy_params=_sparams,
-                ssr_ids=self._sim_env['ssr_ids'],
             )
             from gacha_simulator.core.gdr import compute_success_probability
             temp_prob = compute_success_probability(histories, temp_specs, self.gdr_key, self.gdr_threshold,
@@ -513,10 +483,8 @@ class StrategyPanel(QWidget):
 
         self.chart_group = QGroupBox("成功率趋势")
         chart_layout = QVBoxLayout(self.chart_group)
-        self.chart_label = QLabel("运行分析后显示图表")
-        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label.setMinimumHeight(300)
-        chart_layout.addWidget(self.chart_label)
+        self.chart_webview = ChartWebView()
+        chart_layout.addWidget(self.chart_webview)
         right_layout.addWidget(self.chart_group)
 
         splitter.addWidget(left_panel)
@@ -657,65 +625,40 @@ class StrategyPanel(QWidget):
         self._draw_strategy_chart(result, 'backward')
 
     def _draw_strategy_chart(self, result, method):
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        import tempfile
-        import os
-
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
-
         if not result or not result.steps:
-            self.chart_label.setText("无数据")
+            self.chart_webview.setHtml(
+                "<p style='text-align:center;color:#888;padding:40px;'>无数据</p>"
+            )
             return
 
+        from ..visualization.chart_spec import scatter, ChartAnnotation
+        import numpy as np
+
         steps = result.steps
-        if method == 'forward':
+        if method == "forward":
             x_labels = [f"+{s.added_card_id}" for s in steps]
             x_title = "步骤（添加目标卡）"
         else:
             x_labels = [f"-{s.removed_card_id}" for s in steps]
             x_title = "步骤（移除目标卡）"
 
-        x = list(range(1, len(steps) + 1))
-        y = [s.success_probability for s in steps]
+        x = np.arange(1, len(steps) + 1)
+        y = np.array([s.success_probability for s in steps], dtype=float)
         target_counts = [len(s.target_set) for s in steps]
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        ax.plot(x, y, 'o-', color='#2196F3', linewidth=2.5, markersize=10, label='成功率')
-
-        for i, (xi, yi, tc) in enumerate(zip(x, y, target_counts)):
-            ax.annotate(f'{tc}张\n{yi:.1%}', (xi, yi),
-                        textcoords="offset points", xytext=(0, 18),
-                        ha='center', fontsize=14)
-
         threshold = self.success_threshold_spin.value()
-        ax.axhline(y=threshold, color='#F44336', linestyle='--', linewidth=1.5,
-                   label=f'阈值 {threshold:.0%}')
-
-        ax.set_xlabel(x_title, fontsize=19)
-        ax.set_ylabel('成功率', fontsize=19)
-        ax.set_title('成功率随目标卡变化趋势', fontsize=22, pad=40)
-        ax.set_xticks(x)
-        ax.set_xticklabels(x_labels, rotation=30, ha='right', fontsize=14)
-        ax.set_ylim(-0.05, 1.25)
-        ax.legend(loc='best', fontsize=15)
-        ax.grid(True, alpha=0.3)
-        ax.tick_params(axis='both', labelsize=15)
-
-        plt.tight_layout()
-        tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
-        plt.close()
-
-        from PyQt6.QtGui import QPixmap
-        pixmap = QPixmap(tmp)
-        self.chart_label.setPixmap(pixmap.scaled(
-            self.chart_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation))
-        os.unlink(tmp)
+        spec = scatter(
+            x=x, y=y, mode="lines+markers",
+            title="成功率随目标卡变化趋势",
+            xlabel=x_title,
+            ylabel="成功率",
+            color="#2196F3",
+            annotations=[
+                ChartAnnotation(type="hline", value=threshold, color="#F44336",
+                              text=f"阈值 {threshold:.0%}"),
+            ],
+        )
+        self.chart_webview.set_chart(spec)
 
     def _on_error(self, e):
         self.run_btn.setEnabled(True)

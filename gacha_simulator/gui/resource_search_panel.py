@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
     QSplitter, QComboBox, QTextEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+from .chart_webview import ChartWebView
 from PyQt6.QtGui import QColor
 
 _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,21 +61,10 @@ class ResourceSearchWorker(QThread):
 
     def _build_simulation_env(self):
         from .batch_simulator import SimulationEnvBuilder
-        env = SimulationEnvBuilder.from_config_store(self.config_store)
-        self._sim_env = {
-            'pools': env.pools,
-            'schedule_mgr': env.schedule_mgr,
-            'end_time': env.end_time,
-            'pity_engine': env.pity_engine,
-            'resource_gain': env.resource_gain,
-            'pity_state_init': env.pity_state_init,
-            'card_defs': env.card_defs,
-            'initial_resources': env.initial_resources,
-            'ssr_ids': env.ssr_ids,
-        }
-        self._actual_cost_per_draw = self._extract_cost_per_draw(env.pools)
+        self._sim_env = SimulationEnvBuilder.from_config_store(self.config_store)
+        self._actual_cost_per_draw = self._extract_cost_per_draw(self._sim_env.pools)
         self._display_cost_per_draw = self.cost_per_draw_override if self.cost_per_draw_override else self._actual_cost_per_draw
-        self._initial_resources_backup = dict(env.initial_resources)
+        self._initial_resources_backup = dict(self._sim_env.initial_resources)
 
 
     @staticmethod
@@ -111,13 +102,7 @@ class ResourceSearchWorker(QThread):
         ir = dict(self._initial_resources_backup)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
-            pools=self._sim_env['pools'],
-            schedule_mgr=self._sim_env['schedule_mgr'],
-            end_time=self._sim_env['end_time'],
-            pity_engine=self._sim_env['pity_engine'],
-            resource_gain=self._sim_env['resource_gain'],
-            pity_state_init=self._sim_env['pity_state_init'],
-            card_defs=self._sim_env['card_defs'],
+            env=self._sim_env,
             target_specs=self.target_specs,
             initial_resources=ir,
             num_simulations=self.num_simulations,
@@ -125,7 +110,6 @@ class ResourceSearchWorker(QThread):
             seed=0,
             strategy_name=self.config_store.strategy_name,
             strategy_params=self.config_store.strategy_params,
-            ssr_ids=self._sim_env['ssr_ids'],
         )
         from gacha_simulator.core.gdr import compute_success_probability
         return compute_success_probability(histories, self.target_specs, self.gdr_key, self.gdr_threshold,
@@ -473,10 +457,8 @@ class ResourceSearchPanel(QWidget):
 
         self.chart_group = QGroupBox("成功率-资源趋势")
         chart_layout = QVBoxLayout(self.chart_group)
-        self.chart_label = QLabel("运行搜索后显示图表")
-        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label.setMinimumHeight(300)
-        chart_layout.addWidget(self.chart_label)
+        self.chart_webview = ChartWebView()
+        chart_layout.addWidget(self.chart_webview)
         right_layout.addWidget(self.chart_group)
 
         splitter.addWidget(left_panel)
@@ -589,18 +571,14 @@ class ResourceSearchPanel(QWidget):
         self.status_update.emit("资源搜索完成")
 
     def _draw_resource_chart(self, result):
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        import tempfile
-        import os
-
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
-
         if not result or not result.steps:
-            self.chart_label.setText("无数据")
+            self.chart_webview.setHtml(
+                "<p style='text-align:center;color:#888;padding:40px;'>无数据</p>"
+            )
             return
+
+        from ..visualization.chart_spec import scatter_multi, ScatterTrace, ChartAnnotation
+        import numpy as np
 
         steps = result.steps
         cost = result.cost_per_draw if result.cost_per_draw > 0 else 160
@@ -609,58 +587,55 @@ class ResourceSearchPanel(QWidget):
         probs = [s.success_probability for s in steps]
         phases = [s.phase for s in steps]
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-
+        traces = []
         search_mask = [p.startswith('搜索') for p in phases]
         binary_mask = [p.startswith('二分') for p in phases]
         final_mask = [p == '最终验证' for p in phases]
 
-        sr = [r for r, m in zip(resources, search_mask) if m]
-        sp = [p for p, m in zip(probs, search_mask) if m]
-        br = [r for r, m in zip(resources, binary_mask) if m]
-        bp = [p for p, m in zip(probs, binary_mask) if m]
-        fr = [r for r, m in zip(resources, final_mask) if m]
-        fp = [p for p, m in zip(probs, final_mask) if m]
+        sr_x = [r for r, m in zip(resources, search_mask) if m]
+        sr_y = [p for p, m in zip(probs, search_mask) if m]
+        if sr_x:
+            traces.append(ScatterTrace(
+                x=np.array(sr_x), y=np.array(sr_y), mode="markers",
+                name="搜索上界", marker_symbol="square", marker_size=9,
+                marker_color="#FF9800",
+            ))
 
-        if sr:
-            ax.plot(sr, sp, 's', color='#FF9800', markersize=9, label='搜索上界', zorder=3)
-        if br:
-            ax.plot(br, bp, 'o', color='#2196F3', markersize=7, label='二分搜索', zorder=3)
-        if fr:
-            ax.plot(fr, fp, 'D', color='#4CAF50', markersize=6, label='最终验证', zorder=4)
+        br_x = [r for r, m in zip(resources, binary_mask) if m]
+        br_y = [p for p, m in zip(probs, binary_mask) if m]
+        if br_x:
+            traces.append(ScatterTrace(
+                x=np.array(br_x), y=np.array(br_y), mode="markers",
+                name="二分搜索", marker_symbol="circle", marker_size=7,
+                marker_color="#2196F3",
+            ))
+
+        fr_x = [r for r, m in zip(resources, final_mask) if m]
+        fr_y = [p for p, m in zip(probs, final_mask) if m]
+        if fr_x:
+            traces.append(ScatterTrace(
+                x=np.array(fr_x), y=np.array(fr_y), mode="markers",
+                name="最终验证", marker_symbol="diamond", marker_size=6,
+                marker_color="#4CAF50",
+            ))
 
         threshold = self.success_threshold_spin.value()
-        ax.axhline(y=threshold, color='#F44336', linestyle='--', linewidth=1.5,
-                   label=f'阈值 {threshold:.0%}')
-
         min_r = result.min_resource / cost
-        ax.axvline(x=min_r, color='#4CAF50', linestyle=':', linewidth=1.5,
-                   label=f'最少资源 ≈{min_r:.1f}抽')
+        annotations = [
+            ChartAnnotation(type="hline", value=threshold, color="#F44336",
+                          text=f"阈值 {threshold:.0%}"),
+            ChartAnnotation(type="vline", value=min_r, color="#4CAF50", dash="dot",
+                          text=f"最少资源 ≈{min_r:.1f}抽"),
+        ]
 
-        if len(steps) > 1:
-            last_step = steps[-1]
-            ax.fill_betweenx([0, 1.05], last_step.lo_bound / cost, last_step.hi_bound / cost,
-                             alpha=0.1, color='#2196F3', label='最终搜索区间')
-
-        ax.set_xlabel('资源量（抽数）', fontsize=19)
-        ax.set_ylabel('成功率', fontsize=19)
-        ax.set_title('成功率随资源量变化趋势', fontsize=22, pad=40)
-        ax.set_ylim(-0.05, 1.25)
-        ax.legend(loc='best', fontsize=15)
-        ax.grid(True, alpha=0.3)
-        ax.tick_params(axis='both', labelsize=15)
-
-        plt.tight_layout()
-        tmp = tempfile.mktemp(suffix='.png')
-        plt.savefig(tmp, dpi=400, bbox_inches='tight', pad_inches=0.15)
-        plt.close()
-
-        from PyQt6.QtGui import QPixmap
-        pixmap = QPixmap(tmp)
-        self.chart_label.setPixmap(pixmap.scaled(
-            self.chart_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation))
-        os.unlink(tmp)
+        spec = scatter_multi(
+            traces=traces,
+            title="成功率随资源量变化趋势",
+            xlabel="资源量（抽数）",
+            ylabel="成功率",
+        )
+        spec.annotations = annotations
+        self.chart_webview.set_chart(spec)
 
     def _on_error(self, e):
         self.run_btn.setEnabled(True)
