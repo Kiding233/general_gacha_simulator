@@ -6,6 +6,7 @@ parent_dir = os.path.dirname(this_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from gacha_simulator.gui import MainWindow
@@ -15,6 +16,7 @@ _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.pn
 
 
 def main():
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("GachaStat")
     app.setOrganizationName("GachaStat")
