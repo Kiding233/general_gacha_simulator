@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QFrame, QAbstractItemView, QComboBox
+    QSplitter, QFrame, QAbstractItemView, QComboBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -488,7 +488,11 @@ class StrategyPanel(QWidget):
         right_layout.addWidget(self.chart_group)
 
         splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right_panel)
+        splitter.addWidget(right_scroll)
         splitter.setSizes([350, 650])
 
     def _on_weight_changed(self, row, col):
@@ -626,9 +630,7 @@ class StrategyPanel(QWidget):
 
     def _draw_strategy_chart(self, result, method):
         if not result or not result.steps:
-            self.chart_webview.setHtml(
-                "<p style='text-align:center;color:#888;padding:40px;'>无数据</p>"
-            )
+            self.chart_webview.show_message("无数据")
             return
 
         from ..visualization.chart_spec import scatter, ChartAnnotation

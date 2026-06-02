@@ -11,7 +11,7 @@ dependencies = [
     "PyQt6>=6.0",
     "numpy>=1.20",
     "matplotlib>=3.5",
-    "statsmodels>=0.14",
+    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]

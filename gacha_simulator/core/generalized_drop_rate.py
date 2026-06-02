@@ -83,7 +83,7 @@ class DropRateBetweenT1T2(GeneralizedDropRate):
 
     def compute(self, t: int, history: List['InfoVector']) -> float:
         start = max(0, self.t1)
-        end = min(len(history), self.t2)
+        end = min(len(history), t)
         if end <= start:
             return 0
         count = sum(1 for iv in history[start:end] if iv.card_id == self.target_id)

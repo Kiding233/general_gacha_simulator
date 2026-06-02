@@ -60,6 +60,7 @@ def _load_cards(dir_path: str, store: ConfigStore):
             name=card_def.name,
             rarity=card_def.rarity,
             pools=list(card_def.pools),
+            initial_count=getattr(card_def, 'initial_count', 0),
         ))
 
 
@@ -78,12 +79,16 @@ def _load_schedule(dir_path: str, store: ConfigStore):
                     existing.pools.append(pid)
             if not existing.name or existing.name == existing.card_id:
                 existing.name = card_def.name
+            ic = getattr(card_def, 'initial_count', 0)
+            if ic > 0:
+                existing.initial_count = max(existing.initial_count, ic)
         else:
             store.card_defs.append(CardDefEntry(
                 card_id=card_def.card_id,
                 name=card_def.name,
                 rarity=card_def.rarity,
                 pools=list(card_def.pools),
+                initial_count=getattr(card_def, 'initial_count', 0),
             ))
 
     store.pools = []
@@ -121,6 +126,9 @@ def _load_schedule(dir_path: str, store: ConfigStore):
                     rarity=rarity,
                     featured=reward.id in featured_ids,
                     resources_gained=rg if isinstance(rg, dict) else {},
+                    first_time_bonus=dict(getattr(reward, 'first_time_bonus', {}) or {}),
+                    nth_time_bonus=dict(getattr(reward, 'nth_time_bonus', {}) or {}),
+                    excess_bonus=dict(getattr(reward, 'excess_bonus', {}) or {}),
                 ))
 
         pool_entry = PoolEntry(
@@ -336,10 +344,13 @@ def _save_cards(dir_path: str, store: ConfigStore):
     filepath = os.path.join(dir_path, 'cards.txt')
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write("# Card Definitions\n")
-        f.write("# Format: card_id | name | rarity\n\n")
+        f.write("# Format: card_id | name | rarity | [initial_count]\n\n")
         for cd in store.card_defs:
             pools_str = ','.join(cd.pools) if cd.pools else ''
-            f.write(f"{cd.card_id} | {cd.name} | {cd.rarity}\n")
+            if getattr(cd, 'initial_count', 0) > 0:
+                f.write(f"{cd.card_id} | {cd.name} | {cd.rarity} | {cd.initial_count}\n")
+            else:
+                f.write(f"{cd.card_id} | {cd.name} | {cd.rarity}\n")
 
 
 def _save_schedule(dir_path: str, store: ConfigStore):
@@ -459,6 +470,22 @@ def _save_distributions(dir_path: str, store: ConfigStore):
                 if entry.resources_gained:
                     rg_str = ', '.join(f"{k}:{v}" for k, v in entry.resources_gained.items())
                     f.write(f" | {rg_str}")
+                elif entry.first_time_bonus or entry.nth_time_bonus or entry.excess_bonus:
+                    f.write(" | ")
+                if getattr(entry, 'first_time_bonus', None):
+                    ft_str = ', '.join(f"{k}:{v}" for k, v in entry.first_time_bonus.items())
+                    f.write(f" | ft:{ft_str}")
+                if getattr(entry, 'nth_time_bonus', None):
+                    parts = []
+                    for nth, res in sorted(entry.nth_time_bonus.items()):
+                        res_str = ','.join(f"{k}:{v}" for k, v in res.items())
+                        parts.append(f"{nth}={res_str}")
+                    f.write(f" | nth:{';'.join(parts)}")
+                if getattr(entry, 'excess_bonus', None):
+                    threshold = entry.excess_bonus.get('threshold', 999999)
+                    res = entry.excess_bonus.get('resources', {})
+                    res_str = ','.join(f"{k}:{v}" for k, v in res.items())
+                    f.write(f" | xs:{threshold}>{res_str}")
                 f.write('\n')
 
 

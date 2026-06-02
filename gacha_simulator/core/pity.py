@@ -62,13 +62,16 @@ class SoftPityBehavior(PityBehavior):
     def _apply_targeted(self, progress: float,
                         probabilities: Dict[str, float],
                         resolved: Dict[str, float]) -> Dict[str, float]:
-        total_target_weight = sum(resolved.values())
+        present = {tid: w for tid, w in resolved.items() if tid in probabilities}
+        if not present:
+            return probabilities.copy()
+        total_target_weight = sum(present.values())
         if total_target_weight <= 0:
             return probabilities.copy()
 
         current_target_prob = sum(
             probabilities.get(tid, 0.0)
-            for tid in resolved
+            for tid in present
         )
         other_prob = 1.0 - current_target_prob
         new_target_prob = min(current_target_prob + progress * other_prob, 1.0)
@@ -77,8 +80,8 @@ class SoftPityBehavior(PityBehavior):
 
         result = {}
         for rid, prob in probabilities.items():
-            if rid in resolved:
-                w = resolved[rid] / total_target_weight
+            if rid in present:
+                w = present[rid] / total_target_weight
                 result[rid] = new_target_prob * w
             else:
                 result[rid] = prob * scale
@@ -124,13 +127,15 @@ class HardPityBehavior(PityBehavior):
             resolved = extra['resolved_targets']
 
         if resolved:
-            total = sum(resolved.values())
+            present = {tid: w for tid, w in resolved.items() if tid in probabilities}
+            if not present:
+                return probabilities.copy()
+            total = sum(present.values())
             if total <= 0:
                 return probabilities.copy()
             result = {k: 0.0 for k in probabilities}
-            for tid, w in resolved.items():
-                if tid in result:
-                    result[tid] = w / total
+            for tid, w in present.items():
+                result[tid] = w / total
             return result
 
         result = {k: 0.0 for k in probabilities}
@@ -195,14 +200,12 @@ class PityEngine:
         self.pity_defs = pity_defs
         self.behaviors = behaviors
 
-    def before_draw(self, pool_id: str, state: PityState,
-                    base_probabilities: Dict[str, float]) -> Dict[str, float]:
+    def get_probabilities(self, pool_id: str, state: PityState,
+                          base_probabilities: Dict[str, float]) -> Dict[str, float]:
+        """查询保底调整后的概率分布，不修改保底计数器。"""
         spec = self.pool_specs.get(pool_id)
         if spec is None:
             return base_probabilities.copy()
-
-        for pname in spec.pity_names:
-            state.increment(pname)
 
         adjusted = base_probabilities.copy()
         for pname in spec.pity_names:
@@ -220,6 +223,17 @@ class PityEngine:
             adjusted = behavior.apply(counter_value, adjusted, extra if extra else None)
 
         return adjusted
+
+    def before_draw(self, pool_id: str, state: PityState,
+                    base_probabilities: Dict[str, float]) -> Dict[str, float]:
+        spec = self.pool_specs.get(pool_id)
+        if spec is None:
+            return base_probabilities.copy()
+
+        for pname in spec.pity_names:
+            state.increment(pname)
+
+        return self.get_probabilities(pool_id, state, base_probabilities)
 
     def after_draw(self, pool_id: str, state: PityState, reward_id: str):
         spec = self.pool_specs.get(pool_id)

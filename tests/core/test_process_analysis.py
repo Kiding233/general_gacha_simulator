@@ -6,6 +6,7 @@ from gacha_simulator.core.process_analysis import (
     to_custom_pattern,
     to_raw_trajectory, to_success_sequence, to_success_set, to_success_count,
     to_success_custom,
+    wilson_ci,
     _hashable, _unhashable,
 )
 
@@ -372,6 +373,66 @@ class TestComputeAB:
         assert early_hit_row['count'] == 3
         assert early_hit_row['success_count'] == 2
         assert early_hit_row['overall_success_prob'] == pytest.approx(2 / 3)
+
+
+class TestWilsonCI:
+    def test_n5_zero_success(self):
+        lo, hi = wilson_ci(0, 5)
+        assert lo == pytest.approx(0.0)
+        assert hi > 0.4  # 区间很宽但上界不坍缩
+        assert hi < 0.6
+
+    def test_n5_all_success(self):
+        lo, hi = wilson_ci(5, 5)
+        assert lo > 0.4
+        assert lo < 0.6
+        assert hi == pytest.approx(1.0)
+
+    def test_n100_mid(self):
+        lo, hi = wilson_ci(50, 100)
+        assert lo == pytest.approx(0.404, abs=0.01)
+        assert hi == pytest.approx(0.596, abs=0.01)
+
+    def test_n0(self):
+        lo, hi = wilson_ci(0, 0)
+        assert lo == 0.0
+        assert hi == 1.0
+
+    def test_n_large(self):
+        lo, hi = wilson_ci(950, 1000)
+        assert lo == pytest.approx(0.935, abs=0.01)
+        assert hi == pytest.approx(0.962, abs=0.01)
+        # 大样本应比小样本窄
+        lo2, hi2 = wilson_ci(10, 20)
+        assert (hi - lo) < (hi2 - lo2)
+
+    def test_compute_ab_has_wilson_fields(self):
+        traces = [
+            _make_trace([_make_event('a', 'early_hit')], pool_success={'a': True}, is_success=True),
+            _make_trace([_make_event('a', 'early_hit')], pool_success={'a': True}, is_success=True),
+            _make_trace([_make_event('a', 'early_hit')], pool_success={'a': False}, is_success=False),
+        ]
+        results = compute_ab(traces, 'sequence', 'count')
+        for r in results:
+            assert 'wilson_ci_lower' in r
+            assert 'wilson_ci_upper' in r
+            assert 'laplace_success_prob' not in r
+            assert 0.0 <= r['wilson_ci_lower'] <= r['wilson_ci_upper'] <= 1.0
+
+    def test_compute_ba_has_wilson_fields(self):
+        traces = [
+            _make_trace([_make_event('a', 'early_hit')], pool_success={'a': True}, is_success=True),
+            _make_trace([_make_event('a', 'early_hit')], pool_success={'a': True}, is_success=True),
+            _make_trace([_make_event('a', 'miss')], pool_success={'a': False}, is_success=False),
+        ]
+        results = compute_ba(traces, 'sequence')
+        for r in results:
+            assert 'p_given_success_wilson_lower' in r
+            assert 'p_given_success_wilson_upper' in r
+            assert 'p_given_failure_wilson_lower' in r
+            assert 'p_given_failure_wilson_upper' in r
+            assert 'p_given_success_laplace' not in r
+            assert 'p_given_failure_laplace' not in r
 
 
 class TestComputeBA:

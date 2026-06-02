@@ -19,17 +19,84 @@ from ..core.config_store import (
 )
 
 
-class _NoWheelSpinBox(QSpinBox):
-    def wheelEvent(self, event):
-        event.ignore()
+def _bonus_to_text(d):
+    """将额外资源字段序列化为紧凑文本格式"""
+    parts = []
+    ft = d.get('first_time_bonus', {})
+    if ft:
+        parts.append('ft:' + ','.join(f'{k}:{v}' for k, v in ft.items()))
+    nth = d.get('nth_time_bonus', {})
+    if nth:
+        nth_parts = []
+        for n, res in sorted(nth.items()):
+            nth_parts.append(f'{n}={",".join(f"{k}:{v}" for k, v in res.items())}')
+        parts.append('nth:' + ';'.join(nth_parts))
+    xs = d.get('excess_bonus', {})
+    if xs:
+        threshold = xs.get('threshold', 999999)
+        res = xs.get('resources', {})
+        xs_str = f'{threshold}>' + ','.join(f'{k}:{v}' for k, v in res.items())
+        parts.append('xs:' + xs_str)
+    return ' & '.join(parts)
 
-class _NoWheelDoubleSpinBox(QDoubleSpinBox):
-    def wheelEvent(self, event):
-        event.ignore()
 
-class _NoWheelComboBox(QComboBox):
-    def wheelEvent(self, event):
-        event.ignore()
+def _parse_bonus_text(text):
+    """解析紧凑格式的额外资源文本"""
+    result = {'first_time_bonus': {}, 'nth_time_bonus': {}, 'excess_bonus': {}}
+    if not text or not text.strip():
+        return result
+    for segment in text.split('&'):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if segment.startswith('ft:'):
+            for part in segment[3:].split(','):
+                part = part.strip()
+                if ':' in part:
+                    k, v = part.split(':', 1)
+                    try:
+                        result['first_time_bonus'][k.strip()] = float(v.strip())
+                    except ValueError:
+                        pass
+        elif segment.startswith('nth:'):
+            for entry in segment[4:].split(';'):
+                entry = entry.strip()
+                if '=' in entry:
+                    n_str, res_str = entry.split('=', 1)
+                    try:
+                        n = int(n_str.strip())
+                    except ValueError:
+                        continue
+                    resources = {}
+                    for part in res_str.split(','):
+                        part = part.strip()
+                        if ':' in part:
+                            k, v = part.split(':', 1)
+                            try:
+                                resources[k.strip()] = float(v.strip())
+                            except ValueError:
+                                pass
+                    if resources:
+                        result['nth_time_bonus'][n] = resources
+        elif segment.startswith('xs:'):
+            xs_content = segment[3:].strip()
+            if '>' in xs_content:
+                t_str, res_str = xs_content.split('>', 1)
+                try:
+                    threshold = int(t_str.strip())
+                except ValueError:
+                    threshold = 999999
+                resources = {}
+                for part in res_str.split(','):
+                    part = part.strip()
+                    if ':' in part:
+                        k, v = part.split(':', 1)
+                        try:
+                            resources[k.strip()] = float(v.strip())
+                        except ValueError:
+                            pass
+                result['excess_bonus'] = {'threshold': threshold, 'resources': resources}
+    return result
 
 
 class PoolDistributionDialog(QDialog):
@@ -37,16 +104,17 @@ class PoolDistributionDialog(QDialog):
         super().__init__(parent)
         self.pool_id = pool_id
         self.setWindowTitle(f"编辑池子分布 - {pool_id}")
-        self.setMinimumSize(700, 400)
+        self.setMinimumSize(900, 400)
 
         layout = QVBoxLayout(self)
 
         self.dist_table = QTableWidget()
-        self.dist_table.setColumnCount(5)
-        self.dist_table.setHorizontalHeaderLabels(["卡ID", "概率(%)", "稀有度", "Featured", "资源获取"])
+        self.dist_table.setColumnCount(6)
+        self.dist_table.setHorizontalHeaderLabels(["卡ID", "概率(%)", "稀有度", "Featured", "资源获取", "额外资源"])
         self.dist_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.dist_table.verticalHeader().setVisible(False)
         self.dist_table.setAlternatingRowColors(True)
+        self.dist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.dist_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         layout.addWidget(self.dist_table)
@@ -91,14 +159,14 @@ class PoolDistributionDialog(QDialog):
                 card_id_item.setBackground(QColor(220, 220, 220))
             self.dist_table.setItem(i, 0, card_id_item)
 
-            prob_spin = _NoWheelDoubleSpinBox()
+            prob_spin = QDoubleSpinBox()
             prob_spin.setRange(0.000, 100.000)
             prob_spin.setDecimals(3)
             prob_spin.setValue(d.get('probability', 0.0))
             prob_spin.valueChanged.connect(self._update_total)
             self.dist_table.setCellWidget(i, 1, prob_spin)
 
-            rarity_combo = _NoWheelComboBox()
+            rarity_combo = QComboBox()
             rarity_combo.addItems(["SSR", "SR", "R", "无"])
             rarity = d.get('rarity', 'R').lower()
             rarity_map = {o.lower(): i for i, o in enumerate(["SSR", "SR", "R", "无"])}
@@ -119,6 +187,11 @@ class PoolDistributionDialog(QDialog):
             res_edit.setPlaceholderText("resource_id:amount,...")
             self.dist_table.setCellWidget(i, 4, res_edit)
 
+            bonus_text = _bonus_to_text(d)
+            bonus_edit = QLineEdit(bonus_text)
+            bonus_edit.setPlaceholderText("ft:r:a & nth:n=r:a;n=r:a & xs:t>r:a")
+            self.dist_table.setCellWidget(i, 5, bonus_edit)
+
         self._update_total()
 
     def _add_row(self):
@@ -126,14 +199,14 @@ class PoolDistributionDialog(QDialog):
         self.dist_table.insertRow(row)
         self.dist_table.setItem(row, 0, QTableWidgetItem(f"{self.pool_id}_new"))
 
-        prob_spin = _NoWheelDoubleSpinBox()
+        prob_spin = QDoubleSpinBox()
         prob_spin.setRange(0.000, 100.000)
         prob_spin.setDecimals(3)
         prob_spin.setValue(0.0)
         prob_spin.valueChanged.connect(self._update_total)
         self.dist_table.setCellWidget(row, 1, prob_spin)
 
-        rarity_combo = _NoWheelComboBox()
+        rarity_combo = QComboBox()
         rarity_combo.addItems(["SSR", "SR", "R", "无"])
         self.dist_table.setCellWidget(row, 2, rarity_combo)
 
@@ -143,6 +216,10 @@ class PoolDistributionDialog(QDialog):
         res_edit = QLineEdit()
         res_edit.setPlaceholderText("resource_id:amount,...")
         self.dist_table.setCellWidget(row, 4, res_edit)
+
+        bonus_edit = QLineEdit()
+        bonus_edit.setPlaceholderText("ft:r:a & nth:n=r:a;n=r:a & xs:t>r:a")
+        self.dist_table.setCellWidget(row, 5, bonus_edit)
 
         self._update_total()
 
@@ -154,14 +231,14 @@ class PoolDistributionDialog(QDialog):
         card_id_item.setBackground(QColor(220, 220, 220))
         self.dist_table.setItem(row, 0, card_id_item)
 
-        prob_spin = _NoWheelDoubleSpinBox()
+        prob_spin = QDoubleSpinBox()
         prob_spin.setRange(0.000, 100.000)
         prob_spin.setDecimals(3)
         prob_spin.setValue(0.0)
         prob_spin.valueChanged.connect(self._update_total)
         self.dist_table.setCellWidget(row, 1, prob_spin)
 
-        rarity_combo = _NoWheelComboBox()
+        rarity_combo = QComboBox()
         rarity_combo.addItems(["SSR", "SR", "R", "无"])
         rarity_combo.setCurrentIndex(3)
         self.dist_table.setCellWidget(row, 2, rarity_combo)
@@ -174,6 +251,10 @@ class PoolDistributionDialog(QDialog):
         res_edit = QLineEdit()
         res_edit.setPlaceholderText("resource_id:amount,...")
         self.dist_table.setCellWidget(row, 4, res_edit)
+
+        bonus_edit = QLineEdit()
+        bonus_edit.setPlaceholderText("ft:r:a & nth:n=r:a;n=r:a & xs:t>r:a")
+        self.dist_table.setCellWidget(row, 5, bonus_edit)
 
         self._update_total()
 
@@ -226,6 +307,7 @@ class PoolDistributionDialog(QDialog):
             rarity_combo = self.dist_table.cellWidget(i, 2)
             featured_cb = self.dist_table.cellWidget(i, 3)
             res_edit = self.dist_table.cellWidget(i, 4)
+            bonus_edit = self.dist_table.cellWidget(i, 5)
 
             card_id = card_id_item.text().strip() if card_id_item else ''
 
@@ -242,6 +324,8 @@ class PoolDistributionDialog(QDialog):
                             except ValueError:
                                 pass
 
+            bonus = _parse_bonus_text(bonus_edit.text() if bonus_edit else '')
+
             rarity = rarity_combo.currentText() if rarity_combo else 'R'
             featured = featured_cb.isChecked() if featured_cb else False
             if card_id == '_no_card':
@@ -254,6 +338,9 @@ class PoolDistributionDialog(QDialog):
                 'rarity': rarity,
                 'featured': featured,
                 'resources_gained': resources_gained,
+                'first_time_bonus': bonus.get('first_time_bonus', {}),
+                'nth_time_bonus': bonus.get('nth_time_bonus', {}),
+                'excess_bonus': bonus.get('excess_bonus', {}),
             })
         return result
 
@@ -405,7 +492,7 @@ class ConfigPanel(QWidget):
 
         add_from_tmpl_layout = QHBoxLayout()
         add_from_tmpl_layout.addWidget(QLabel("从模板批量添加:"))
-        self.tmpl_count_spin = _NoWheelSpinBox()
+        self.tmpl_count_spin = QSpinBox()
         self.tmpl_count_spin.setRange(1, 50)
         self.tmpl_count_spin.setValue(8)
         add_from_tmpl_layout.addWidget(QLabel("数量:"))
@@ -416,12 +503,12 @@ class ConfigPanel(QWidget):
         self.tmpl_name_prefix = QLineEdit()
         self.tmpl_name_prefix.setPlaceholderText("名称前缀(如角色池)")
         add_from_tmpl_layout.addWidget(self.tmpl_name_prefix)
-        self.tmpl_start_day = _NoWheelSpinBox()
+        self.tmpl_start_day = QSpinBox()
         self.tmpl_start_day.setRange(0, 9999)
         self.tmpl_start_day.setValue(0)
         add_from_tmpl_layout.addWidget(QLabel("起始天:"))
         add_from_tmpl_layout.addWidget(self.tmpl_start_day)
-        self.tmpl_interval = _NoWheelSpinBox()
+        self.tmpl_interval = QSpinBox()
         self.tmpl_interval.setRange(0, 9999)
         self.tmpl_interval.setValue(21)
         add_from_tmpl_layout.addWidget(QLabel("间隔天:"))
@@ -440,7 +527,7 @@ class ConfigPanel(QWidget):
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel("筛选:"))
 
-        self.pool_filter = _NoWheelComboBox()
+        self.pool_filter = QComboBox()
         self.pool_filter.addItems(["全部", "角色池", "武器池", "兑换池", "复刻池", "普通池"])
         self.pool_filter.currentIndexChanged.connect(self._filter_pools)
         filter_layout.addWidget(self.pool_filter)
@@ -879,24 +966,24 @@ class ConfigPanel(QWidget):
         self.pity_name_edit = QLineEdit()
         detail_form.addRow("名称:", self.pity_name_edit)
 
-        self.pity_type_combo = _NoWheelComboBox()
+        self.pity_type_combo = QComboBox()
         self.pity_type_combo.addItems(["soft", "hard"])
         self.pity_type_combo.currentIndexChanged.connect(self._on_pity_type_changed)
         detail_form.addRow("类型:", self.pity_type_combo)
 
-        self.pity_start_spin = _NoWheelSpinBox()
+        self.pity_start_spin = QSpinBox()
         self.pity_start_spin.setRange(1, 999)
         self.pity_start_spin.setValue(74)
         self._pity_start_label = QLabel("起始抽数:")
         detail_form.addRow(self._pity_start_label, self.pity_start_spin)
 
-        self.pity_end_spin = _NoWheelSpinBox()
+        self.pity_end_spin = QSpinBox()
         self.pity_end_spin.setRange(1, 999)
         self.pity_end_spin.setValue(90)
         self._pity_end_label = QLabel("结束抽数:")
         detail_form.addRow(self._pity_end_label, self.pity_end_spin)
 
-        self.pity_func_combo = _NoWheelComboBox()
+        self.pity_func_combo = QComboBox()
         self.pity_func_combo.addItems(["linear", "exp", "step"])
         self._pity_func_label = QLabel("递增函数:")
         detail_form.addRow(self._pity_func_label, self.pity_func_combo)
@@ -924,14 +1011,14 @@ class ConfigPanel(QWidget):
         target_btn_layout.addStretch()
         detail_form.addRow(target_btn_layout)
 
-        self.pity_reset_combo = _NoWheelComboBox()
+        self.pity_reset_combo = QComboBox()
         self.pity_reset_combo.addItems(["any_ssr", "featured_ssr", "never"])
         detail_form.addRow("重置条件:", self.pity_reset_combo)
 
         self.pity_pools_edit = QLineEdit()
         detail_form.addRow("适用池子:", self.pity_pools_edit)
 
-        self.pity_init_spin = _NoWheelSpinBox()
+        self.pity_init_spin = QSpinBox()
         self.pity_init_spin.setRange(0, 200)
         self.pity_init_spin.setValue(0)
         detail_form.addRow("初始水位:", self.pity_init_spin)
@@ -1046,13 +1133,13 @@ class ConfigPanel(QWidget):
         self.pity_target_table.setRowCount(len(target_dist))
         keys = ["limited_ssr", "standard_ssr", "ssr", "sr", "r"]
         for i, (cid, weight) in enumerate(target_dist.items()):
-            combo = _NoWheelComboBox()
+            combo = QComboBox()
             combo.addItems(keys)
             cidx = combo.findText(cid)
             if cidx >= 0:
                 combo.setCurrentIndex(cidx)
             self.pity_target_table.setCellWidget(i, 0, combo)
-            spin = _NoWheelSpinBox()
+            spin = QSpinBox()
             spin.setRange(1, 100)
             spin.setValue(int(weight))
             self.pity_target_table.setCellWidget(i, 1, spin)
@@ -1073,10 +1160,10 @@ class ConfigPanel(QWidget):
         row = self.pity_target_table.rowCount()
         self.pity_target_table.insertRow(row)
         keys = ["limited_ssr", "standard_ssr", "ssr", "sr", "r"]
-        combo = _NoWheelComboBox()
+        combo = QComboBox()
         combo.addItems(keys)
         self.pity_target_table.setCellWidget(row, 0, combo)
-        spin = _NoWheelSpinBox()
+        spin = QSpinBox()
         spin.setRange(1, 100)
         spin.setValue(50)
         self.pity_target_table.setCellWidget(row, 1, spin)
@@ -1095,7 +1182,7 @@ class ConfigPanel(QWidget):
         layout = QVBoxLayout(group)
 
         strategy_layout = QFormLayout()
-        self.strategy_type = _NoWheelComboBox()
+        self.strategy_type = QComboBox()
         self._strategy_display_names = [
             entry['display_name'] for entry in STRATEGY_REGISTRY.values()
             if not entry.get('internal')
@@ -1103,7 +1190,7 @@ class ConfigPanel(QWidget):
         self.strategy_type.addItems(self._strategy_display_names)
         strategy_layout.addRow("策略类型:", self.strategy_type)
 
-        self.stop_condition_type = _NoWheelComboBox()
+        self.stop_condition_type = QComboBox()
         self._stop_condition_display_names = [
             entry['display_name'] for entry in STOP_CONDITION_REGISTRY.values()
         ]
@@ -1150,6 +1237,14 @@ class ConfigPanel(QWidget):
         target_btn_layout.addStretch()
         layout.addLayout(target_btn_layout)
 
+        hint_label = QLabel(
+            "提示：「需求数量」表示还需从抽卡中获得的额外数量。"
+            "例如：初始持有 1 张，想再抽 2 张，则需求数量应设为 2。"
+        )
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("color: #888; padding: 4px 0; font-size: 12px;")
+        layout.addWidget(hint_label)
+
         card_ref_label = QLabel("可用卡ID参考（双击可添加到目标卡）:")
         layout.addWidget(card_ref_label)
 
@@ -1186,12 +1281,12 @@ class ConfigPanel(QWidget):
             default = param_def.get('default')
 
             if ptype == 'int':
-                widget = _NoWheelSpinBox()
+                widget = QSpinBox()
                 widget.setRange(param_def.get('min', 0), param_def.get('max', 99999))
                 widget.setValue(int(default) if default is not None else 0)
                 self._strategy_params_layout.addRow(f"{display}:", widget)
             elif ptype == 'float':
-                widget = _NoWheelDoubleSpinBox()
+                widget = QDoubleSpinBox()
                 widget.setRange(param_def.get('min', 0.0), param_def.get('max', 99999.0))
                 widget.setDecimals(2)
                 widget.setSingleStep(0.1)
@@ -1372,19 +1467,19 @@ class ConfigPanel(QWidget):
         for i, (cid, w) in enumerate(data.items()):
             self.weight_table.setItem(i, 0, QTableWidgetItem(cid))
             self.weight_table.setItem(i, 1, QTableWidgetItem(w.get('name', cid)))
-            desire_spin = _NoWheelDoubleSpinBox()
+            desire_spin = QDoubleSpinBox()
             desire_spin.setRange(0.0, 100.0)
             desire_spin.setDecimals(2)
             desire_spin.setValue(w.get('desire_weight', 1.0))
             desire_spin.setSingleStep(0.1)
             self.weight_table.setCellWidget(i, 2, desire_spin)
-            miss_spin = _NoWheelDoubleSpinBox()
+            miss_spin = QDoubleSpinBox()
             miss_spin.setRange(0.0, 100.0)
             miss_spin.setDecimals(2)
             miss_spin.setValue(w.get('miss_cost_weight', 1.0))
             miss_spin.setSingleStep(0.1)
             self.weight_table.setCellWidget(i, 3, miss_spin)
-            value_spin = _NoWheelDoubleSpinBox()
+            value_spin = QDoubleSpinBox()
             value_spin.setRange(0.0, 100.0)
             value_spin.setDecimals(2)
             value_spin.setValue(w.get('card_value', 1.0))
@@ -1506,7 +1601,7 @@ class ConfigPanel(QWidget):
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel("筛选:"))
 
-        self.card_rarity_filter = _NoWheelComboBox()
+        self.card_rarity_filter = QComboBox()
         self.card_rarity_filter.addItems(["全部", "SSR", "SR", "R", "无"])
         self.card_rarity_filter.currentIndexChanged.connect(self._filter_card_defs)
         filter_layout.addWidget(self.card_rarity_filter)
@@ -1519,14 +1614,16 @@ class ConfigPanel(QWidget):
         layout.addLayout(filter_layout)
 
         self.card_def_table = QTableWidget()
-        self.card_def_table.setColumnCount(4)
-        self.card_def_table.setHorizontalHeaderLabels(["卡ID", "名称", "稀有度", "所属池子"])
+        self.card_def_table.setColumnCount(5)
+        self.card_def_table.setHorizontalHeaderLabels(["卡ID", "名称", "稀有度", "所属池子", "初始持有"])
         header = self.card_def_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.card_def_table.setColumnWidth(2, 80)
+        self.card_def_table.setColumnWidth(4, 80)
         self.card_def_table.verticalHeader().setVisible(False)
         self.card_def_table.setAlternatingRowColors(True)
         self.card_def_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1555,12 +1652,16 @@ class ConfigPanel(QWidget):
         self.card_def_table.insertRow(row)
         self.card_def_table.setItem(row, 0, QTableWidgetItem(""))
         self.card_def_table.setItem(row, 1, QTableWidgetItem(""))
-        rarity_combo = _NoWheelComboBox()
+        rarity_combo = QComboBox()
         rarity_combo.addItems(["SSR", "SR", "R", "无"])
         self.card_def_table.setCellWidget(row, 2, rarity_combo)
         pools_item = QTableWidgetItem("")
         pools_item.setFlags(pools_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.card_def_table.setItem(row, 3, pools_item)
+        init_spin = QSpinBox()
+        init_spin.setRange(0, 9999)
+        init_spin.setValue(0)
+        self.card_def_table.setCellWidget(row, 4, init_spin)
 
     def _remove_card_def(self):
         rows = sorted([r.row() for r in self.card_def_table.selectionModel().selectedRows()], reverse=True)
@@ -1625,16 +1726,19 @@ class ConfigPanel(QWidget):
             name_item = self.card_def_table.item(i, 1)
             rarity_widget = self.card_def_table.cellWidget(i, 2)
             pools_item = self.card_def_table.item(i, 3)
+            init_widget = self.card_def_table.cellWidget(i, 4)
             card_id = card_id_item.text().strip() if card_id_item else ''
             name = name_item.text().strip() if name_item else ''
             rarity = rarity_widget.currentText() if rarity_widget else 'R'
             pools_text = pools_item.text().strip() if pools_item else ''
             pools = [p.strip() for p in pools_text.split(',') if p.strip()] if pools_text else []
+            initial_count = init_widget.value() if init_widget else 0
             defs.append({
                 'card_id': card_id,
                 'name': name,
                 'rarity': rarity,
                 'pools': pools,
+                'initial_count': initial_count,
             })
         return defs
 
@@ -1647,7 +1751,7 @@ class ConfigPanel(QWidget):
         for i, d in enumerate(defs):
             self.card_def_table.setItem(i, 0, QTableWidgetItem(d.get('card_id', '')))
             self.card_def_table.setItem(i, 1, QTableWidgetItem(d.get('name', '')))
-            rarity_combo = _NoWheelComboBox()
+            rarity_combo = QComboBox()
             rarity_combo.addItems(rarity_options)
             rarity = d.get('rarity', 'R').lower()
             idx = rarity_map.get(rarity, 2)
@@ -1657,6 +1761,10 @@ class ConfigPanel(QWidget):
             pools_item = QTableWidgetItem(pools_text)
             pools_item.setFlags(pools_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.card_def_table.setItem(i, 3, pools_item)
+            init_spin = QSpinBox()
+            init_spin.setRange(0, 9999)
+            init_spin.setValue(d.get('initial_count', 0))
+            self.card_def_table.setCellWidget(i, 4, init_spin)
         self.card_def_table.blockSignals(False)
 
     def _setup_preview(self, parent):
@@ -1901,7 +2009,7 @@ class ConfigPanel(QWidget):
         self.resource_defs_table.insertRow(row)
         self.resource_defs_table.setItem(row, 0, QTableWidgetItem(resource_id))
         self.resource_defs_table.setItem(row, 1, QTableWidgetItem(display_name or resource_id))
-        spin = _NoWheelSpinBox()
+        spin = QSpinBox()
         spin.setRange(0, 9999999)
         spin.setValue(0)
         spin.setSingleStep(100)
@@ -1928,7 +2036,10 @@ class ConfigPanel(QWidget):
                 'note': '',
                 'distribution': [{'card_id': d.card_id, 'probability': d.probability,
                                   'rarity': d.rarity, 'featured': d.featured,
-                                  'resources_gained': d.resources_gained}
+                                  'resources_gained': d.resources_gained,
+                                  'first_time_bonus': getattr(d, 'first_time_bonus', {}),
+                                  'nth_time_bonus': getattr(d, 'nth_time_bonus', {}),
+                                  'excess_bonus': getattr(d, 'excess_bonus', {}),}
                                  for d in p.distribution] if p.distribution else None,
             })
 
@@ -1962,7 +2073,8 @@ class ConfigPanel(QWidget):
         target_cards = [{'card_id': tc.card_id, 'quantity': tc.quantity, 'pools': tc.pool_ids}
                         for tc in store.target_cards]
 
-        card_defs = [{'card_id': cd.card_id, 'name': cd.name, 'rarity': cd.rarity, 'pools': cd.pools}
+        card_defs = [{'card_id': cd.card_id, 'name': cd.name, 'rarity': cd.rarity, 'pools': cd.pools,
+                      'initial_count': getattr(cd, 'initial_count', 0)}
                      for cd in store.card_defs]
 
         resource_defs = [{'resource_id': rid, 'display_name': name,
@@ -2039,6 +2151,9 @@ class ConfigPanel(QWidget):
                         rarity=d.get('rarity', 'R'),
                         featured=d.get('featured', False),
                         resources_gained=d.get('resources_gained', {}),
+                        first_time_bonus=d.get('first_time_bonus', {}),
+                        nth_time_bonus=d.get('nth_time_bonus', {}),
+                        excess_bonus=d.get('excess_bonus', {}),
                     ))
             pool_type = p.get('type', '角色')
             bindings = {}
@@ -2277,7 +2392,7 @@ class ConfigPanel(QWidget):
             for i in range(table.rowCount()):
                 for col in range(table.columnCount()):
                     widget = table.cellWidget(i, col)
-                    if isinstance(widget, _NoWheelComboBox):
+                    if isinstance(widget, QComboBox):
                         current = widget.currentText()
                         widget.blockSignals(True)
                         widget.clear()
@@ -2307,7 +2422,7 @@ class ConfigPanel(QWidget):
         for i, d in enumerate(defs):
             self.resource_defs_table.setItem(i, 0, QTableWidgetItem(d.get('resource_id', '')))
             self.resource_defs_table.setItem(i, 1, QTableWidgetItem(d.get('display_name', '')))
-            spin = _NoWheelSpinBox()
+            spin = QSpinBox()
             spin.setRange(0, 9999999)
             spin.setValue(int(d.get('initial_amount', 0)))
             spin.setSingleStep(100)
@@ -2337,7 +2452,7 @@ class ConfigPanel(QWidget):
         self.gain_rules_table.blockSignals(True)
         self.gain_rules_table.setRowCount(len(rules))
         for i, r in enumerate(rules):
-            type_combo = _NoWheelComboBox()
+            type_combo = QComboBox()
             type_combo.addItems(rule_types)
             rtype = r.get('type', '每天')
             idx = type_combo.findText(rtype)
@@ -2347,7 +2462,7 @@ class ConfigPanel(QWidget):
 
             self.gain_rules_table.setItem(i, 1, QTableWidgetItem(str(r.get('param', ''))))
 
-            rid_combo = _NoWheelComboBox()
+            rid_combo = QComboBox()
             rid_combo.addItems(resource_ids)
             rid = r.get('resource_id', '')
             idx = rid_combo.findText(rid)
@@ -2355,7 +2470,7 @@ class ConfigPanel(QWidget):
                 rid_combo.setCurrentIndex(idx)
             self.gain_rules_table.setCellWidget(i, 2, rid_combo)
 
-            amt_spin = _NoWheelSpinBox()
+            amt_spin = QSpinBox()
             amt_spin.setRange(0, 99999)
             amt_spin.setValue(int(r.get('amount', 0)))
             self.gain_rules_table.setCellWidget(i, 3, amt_spin)
@@ -2385,7 +2500,7 @@ class ConfigPanel(QWidget):
         for i, o in enumerate(overrides):
             self.day_overrides_table.setItem(i, 0, QTableWidgetItem(str(o.get('day', 0))))
 
-            rid_combo = _NoWheelComboBox()
+            rid_combo = QComboBox()
             rid_combo.addItems(resource_ids)
             rid = o.get('resource_id', '')
             idx = rid_combo.findText(rid)
@@ -2393,7 +2508,7 @@ class ConfigPanel(QWidget):
                 rid_combo.setCurrentIndex(idx)
             self.day_overrides_table.setCellWidget(i, 1, rid_combo)
 
-            amt_spin = _NoWheelSpinBox()
+            amt_spin = QSpinBox()
             amt_spin.setRange(0, 99999)
             amt_spin.setValue(int(o.get('amount', 0)))
             self.day_overrides_table.setCellWidget(i, 2, amt_spin)
@@ -2412,7 +2527,7 @@ class ConfigPanel(QWidget):
         self.resource_defs_table.insertRow(row)
         self.resource_defs_table.setItem(row, 0, QTableWidgetItem(""))
         self.resource_defs_table.setItem(row, 1, QTableWidgetItem(""))
-        spin = _NoWheelSpinBox()
+        spin = QSpinBox()
         spin.setRange(0, 9999999)
         spin.setValue(0)
         spin.setSingleStep(100)
@@ -2434,14 +2549,14 @@ class ConfigPanel(QWidget):
         row = self.gain_rules_table.rowCount()
         self.gain_rules_table.insertRow(row)
         rule_types = ["每天", "每N天", "每周几", "每月第几天", "每月第几周几", "指定日期"]
-        type_combo = _NoWheelComboBox()
+        type_combo = QComboBox()
         type_combo.addItems(rule_types)
         self.gain_rules_table.setCellWidget(row, 0, type_combo)
         self.gain_rules_table.setItem(row, 1, QTableWidgetItem(""))
-        rid_combo = _NoWheelComboBox()
+        rid_combo = QComboBox()
         rid_combo.addItems(resource_ids)
         self.gain_rules_table.setCellWidget(row, 2, rid_combo)
-        amt_spin = _NoWheelSpinBox()
+        amt_spin = QSpinBox()
         amt_spin.setRange(0, 99999)
         amt_spin.setValue(0)
         self.gain_rules_table.setCellWidget(row, 3, amt_spin)
@@ -2460,10 +2575,10 @@ class ConfigPanel(QWidget):
         row = self.day_overrides_table.rowCount()
         self.day_overrides_table.insertRow(row)
         self.day_overrides_table.setItem(row, 0, QTableWidgetItem("0"))
-        rid_combo = _NoWheelComboBox()
+        rid_combo = QComboBox()
         rid_combo.addItems(resource_ids)
         self.day_overrides_table.setCellWidget(row, 1, rid_combo)
-        amt_spin = _NoWheelSpinBox()
+        amt_spin = QSpinBox()
         amt_spin.setRange(0, 99999)
         amt_spin.setValue(0)
         self.day_overrides_table.setCellWidget(row, 2, amt_spin)
@@ -2508,6 +2623,9 @@ class ConfigPanel(QWidget):
                         rarity=d.get('rarity', 'R'),
                         featured=d.get('featured', False),
                         resources_gained=d.get('resources_gained', {}),
+                        first_time_bonus=d.get('first_time_bonus', {}),
+                        nth_time_bonus=d.get('nth_time_bonus', {}),
+                        excess_bonus=d.get('excess_bonus', {}),
                     ))
 
             bindings = {}
@@ -2562,6 +2680,7 @@ class ConfigPanel(QWidget):
                 name=cd.get('name', ''),
                 rarity=cd.get('rarity', 'R'),
                 pools=cd.get('pools', []),
+                initial_count=cd.get('initial_count', 0),
             ))
 
         store.resource_defs = {}
@@ -2616,7 +2735,10 @@ class ConfigPanel(QWidget):
             if p.distribution:
                 dist_list = [{'card_id': d.card_id, 'probability': d.probability,
                               'rarity': d.rarity, 'featured': d.featured,
-                              'resources_gained': d.resources_gained}
+                              'resources_gained': d.resources_gained,
+                              'first_time_bonus': getattr(d, 'first_time_bonus', {}),
+                              'nth_time_bonus': getattr(d, 'nth_time_bonus', {}),
+                              'excess_bonus': getattr(d, 'excess_bonus', {}),}
                              for d in p.distribution]
                 self._pool_distributions[p.pool_id] = dist_list
 
@@ -2663,7 +2785,8 @@ class ConfigPanel(QWidget):
                        for tc in store.target_cards]
         self._set_target_cards(target_data)
 
-        card_data = [{'card_id': cd.card_id, 'name': cd.name, 'rarity': cd.rarity, 'pools': cd.pools}
+        card_data = [{'card_id': cd.card_id, 'name': cd.name, 'rarity': cd.rarity, 'pools': cd.pools,
+                      'initial_count': getattr(cd, 'initial_count', 0)}
                      for cd in store.card_defs]
         self.set_card_defs(card_data)
 

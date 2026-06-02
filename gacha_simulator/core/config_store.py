@@ -11,6 +11,9 @@ class PoolDistEntry:
     rarity: str = 'R'
     featured: bool = False
     resources_gained: Dict[str, float] = field(default_factory=dict)
+    first_time_bonus: Dict[str, float] = field(default_factory=dict)
+    nth_time_bonus: Dict[str, Any] = field(default_factory=dict)
+    excess_bonus: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -18,6 +21,7 @@ class PoolEntry:
     enabled: bool = True
     pool_id: str = ''
     name: str = ''
+    pool_type: str = ''
     start_day: int = 0
     end_day: int = 21
     cost: str = 'draw_resource:160'
@@ -72,6 +76,7 @@ class CardDefEntry:
     name: str = ''
     rarity: str = 'r'
     pools: List[str] = field(default_factory=list)
+    initial_count: int = 0
 
 
 @dataclass

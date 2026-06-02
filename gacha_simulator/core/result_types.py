@@ -34,6 +34,7 @@ class CompactResult:
     final_pity_state: Dict[str, Any] = field(default_factory=dict)
     pool_end_resources: Dict[str, Dict[str, float]] = field(default_factory=dict)
     pool_end_pity_states: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    pool_types: Dict[str, str] = field(default_factory=dict)
     strategy_name: str = ''
     result_version: int = _RESULT_VERSION
     generated_at: float = 0.0

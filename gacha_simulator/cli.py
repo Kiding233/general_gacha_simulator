@@ -128,32 +128,34 @@ def create_pity_engine_from_config(config, pools):
     return PityEngine(pool_specs, pity_defs, behaviors)
 
 
-class SmartStrategy:
+from gacha_simulator.core.strategy import Strategy, StrategyContext
+
+
+class SmartStrategy(Strategy):
     lookahead = None
 
     def __init__(self, target_cards):
         self.target_cards = target_cards
-        self.acquired = {}
         self._pool_to_targets = {}
         for t in target_cards.targets:
             for pid in t.pool_ids:
                 self._pool_to_targets.setdefault(pid, []).append(t)
 
-    def _pool_needs_target(self, pool_id):
+    def _pool_needs_target(self, pool_id, acquired):
         for t in self._pool_to_targets.get(pool_id, []):
-            if self.acquired.get(t.card_id, 0) < t.quantity_needed:
+            if acquired.get(t.card_id, 0) < t.quantity_needed:
                 return True
         return False
 
-    def select_action(self, state, history, current_pools, future_schedules, target_cards, stop_cond):
-        for pool in current_pools:
-            if self._pool_needs_target(pool.id) and state.can_afford(pool.cost):
+    def select_action(self, ctx: StrategyContext):
+        for pool in ctx.current_pools:
+            if self._pool_needs_target(pool.id, ctx.acquired) and ctx.state.can_afford(pool.cost):
                 return DrawAction(pool_id=pool.id)
 
         wait_time = DAY
-        for pool in current_pools:
-            if pool.available_until and pool.available_until > state.real_time:
-                wait_time = min(wait_time, pool.available_until - state.real_time)
+        for pool in ctx.current_pools:
+            if pool.available_until and pool.available_until > ctx.state.real_time:
+                wait_time = min(wait_time, pool.available_until - ctx.state.real_time)
 
         if wait_time <= 0:
             wait_time = 3600
@@ -215,6 +217,10 @@ def main():
             'resources': {'draw_resource': 50000}
         }
     
+    pools, target_set, schedule_mgr = create_pools_from_config(config)
+    end_time = max(s.available_until for s in schedule_mgr.schedules)
+    pity_engine = create_pity_engine_from_config(config, pools)
+
     print("=" * 50)
     print("GachaStat CLI")
     print("=" * 50)
@@ -227,10 +233,6 @@ def main():
         print(f"  Type: {pity_cfg.get('type', 'soft')}")
         print(f"  Range: {pity_cfg.get('start', 80)}-{pity_cfg.get('end', 90)}")
     print("=" * 50)
-    
-    pools, target_set, schedule_mgr = create_pools_from_config(config)
-    end_time = max(s.available_until for s in schedule_mgr.schedules)
-    pity_engine = create_pity_engine_from_config(config, pools)
     
     resources = config.get('resources', {'draw_resource': 50000})
     

@@ -78,7 +78,7 @@ class TestRidge:
         )
         fig = renderer.to_figure(spec)
         assert len(fig.data) == 2
-        assert all(isinstance(t, go.Violin) for t in fig.data)
+        assert all(isinstance(t, go.Histogram) for t in fig.data)
 
     def test_single_series(self, renderer):
         spec = ChartSpec("ridge", RidgeData({"X": np.array([1, 2, 3])}), "R")

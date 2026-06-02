@@ -49,18 +49,7 @@ class ComparisonWorker(QThread):
         try:
             from .batch_simulator import SimulationEnvBuilder, run_batch_parallel
 
-            env = SimulationEnvBuilder.from_config_store(self.config_store)
-            sim_env = {
-                'pools': env.pools,
-                'schedule_mgr': env.schedule_mgr,
-                'end_time': env.end_time,
-                'pity_engine': env.pity_engine,
-                'resource_gain': env.resource_gain,
-                'pity_state_init': env.pity_state_init,
-                'card_defs': env.card_defs,
-                'initial_resources': env.initial_resources,
-                'ssr_ids': env.ssr_ids,
-            }
+            sim_env = SimulationEnvBuilder.from_config_store(self.config_store)
 
             target_specs = {}
             for tc in self.config_store.target_cards:
@@ -84,21 +73,14 @@ class ComparisonWorker(QThread):
                     sparams = {}
 
                 histories = run_batch_parallel(
-                    pools=sim_env['pools'],
-                    schedule_mgr=sim_env['schedule_mgr'],
-                    end_time=sim_env['end_time'],
-                    pity_engine=sim_env['pity_engine'],
-                    resource_gain=sim_env['resource_gain'],
-                    pity_state_init=sim_env['pity_state_init'],
-                    card_defs=sim_env['card_defs'],
+                    env=sim_env,
                     target_specs=target_specs,
-                    initial_resources=sim_env['initial_resources'],
+                    initial_resources=sim_env.initial_resources,
                     num_simulations=self.num_simulations,
                     max_workers=self.max_workers,
                     seed=0,
                     strategy_name=skey,
                     strategy_params=sparams,
-                    ssr_ids=sim_env['ssr_ids'],
                 )
 
                 results[skey] = self._compute_summary(histories, display_name)

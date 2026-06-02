@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QComboBox, QTextEdit
+    QSplitter, QComboBox, QTextEdit, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
@@ -354,14 +354,14 @@ class ResourceSearchPanel(QWidget):
         self.resource_hint_spin.setSingleStep(5000)
         self.resource_hint_spin.setValue(55000)
         self.resource_hint_spin.setToolTip("二分搜索的起始资源值（上界），若该值已够则直接进入二分；0表示自动从100抽成本开始")
-        params_layout.addRow("搜索起始资源:", self.resource_hint_spin)
+        params_layout.addRow("起始上界:", self.resource_hint_spin)
 
         self.resource_lo_spin = QSpinBox()
         self.resource_lo_spin.setRange(0, 9999999)
         self.resource_lo_spin.setSingleStep(5000)
         self.resource_lo_spin.setValue(0)
         self.resource_lo_spin.setToolTip("二分搜索的下界，0表示从0开始搜索；设置更高可加速收敛")
-        params_layout.addRow("搜索下界:", self.resource_lo_spin)
+        params_layout.addRow("起始下界:", self.resource_lo_spin)
 
         self.max_iterations_spin = QSpinBox()
         self.max_iterations_spin.setRange(5, 100)
@@ -419,8 +419,8 @@ class ResourceSearchPanel(QWidget):
             "<b>资源搜索</b>：给定目标卡集合和成功率阈值，"
             "通过二分搜索找到使得成功率≥阈值所需的最少抽卡资源。<br><br>"
             "搜索分两阶段：<br>"
-            "1. <b>搜索上界</b>：从初始资源开始，若不够则翻倍，直到成功率≥阈值<br>"
-            "2. <b>二分搜索</b>：在 [0, 上界] 区间二分，逐步缩小到精度范围内"
+            "1. <b>搜索上界</b>：从起始上界开始，若不够则翻倍，直到成功率≥阈值<br>"
+            "2. <b>二分搜索</b>：在 [起始下界, 起始上界] 区间二分，逐步缩小到精度范围内"
         )
         desc_label.setWordWrap(True)
         result_layout.addWidget(desc_label)
@@ -462,7 +462,11 @@ class ResourceSearchPanel(QWidget):
         right_layout.addWidget(self.chart_group)
 
         splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right_panel)
+        splitter.addWidget(right_scroll)
         splitter.setSizes([350, 650])
 
     def _on_run_clicked(self):
@@ -536,13 +540,14 @@ class ResourceSearchPanel(QWidget):
 
         r = result.min_resource
         draws = r / result.cost_per_draw if result.cost_per_draw > 0 else 0
+        precision_val = result.cost_per_draw * self.precision_spin.value()
         self.result_label.setText(
-            f"<p><b>最少所需资源:</b> {r:.0f}</p>"
-            f"<p><b>约等于:</b> {draws:.1f} 抽</p>"
-            f"<p><b>对应成功率:</b> {result.final_success_probability:.2%}</p>"
-            f"<p><b>单抽成本:</b> {result.cost_per_draw:.0f}</p>"
-            f"<p><b>搜索精度:</b> ±{result.cost_per_draw * self.precision_spin.value():.0f} 资源</p>"
-            f"<p><b>总迭代次数:</b> {result.total_iterations}</p>"
+            f"<p><b>最少所需资源:</b> {r:.0f} &nbsp;|&nbsp; "
+            f"<b>约等于:</b> {draws:.1f} 抽 &nbsp;|&nbsp; "
+            f"<b>成功率:</b> {result.final_success_probability:.2%}</p>"
+            f"<p><b>单抽成本:</b> {result.cost_per_draw:.0f} &nbsp;|&nbsp; "
+            f"<b>精度:</b> ±{precision_val:.0f} &nbsp;|&nbsp; "
+            f"<b>迭代次数:</b> {result.total_iterations}</p>"
             f"<p><b>目标规格:</b> {result.target_specs}</p>"
         )
 
@@ -572,9 +577,7 @@ class ResourceSearchPanel(QWidget):
 
     def _draw_resource_chart(self, result):
         if not result or not result.steps:
-            self.chart_webview.setHtml(
-                "<p style='text-align:center;color:#888;padding:40px;'>无数据</p>"
-            )
+            self.chart_webview.show_message("无数据")
             return
 
         from ..visualization.chart_spec import scatter_multi, ScatterTrace, ChartAnnotation

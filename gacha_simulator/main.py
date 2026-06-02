@@ -6,16 +6,22 @@ parent_dir = os.path.dirname(this_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
-from gacha_simulator.gui import MainWindow
-from gacha_simulator._version import __version__
+# 关键修复：PyQt6 和 GUI 导入必须放在 __main__ 护卫内。
+# Windows 上 multiprocessing 使用 spawn 模式，每个 worker 子进程都会
+# 重新执行此模块的顶层代码。若 PyQt6 在顶层导入，18 个 worker 各自加载
+# 整个 GUI 栈（PyQt6 C 扩展 + 所有面板 + matplotlib），浪费 3-8 秒。
+# 移入 __main__ 护卫后，worker 进程 __name__ 为 'gacha_simulator.main'，
+# 不会触发这些导入，仅加载轻量的 sys/os 路径配置。
 
-_ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.png')
+if __name__ == '__main__':
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
+    from gacha_simulator.gui import MainWindow
+    from gacha_simulator._version import __version__
 
+    _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.png')
 
-def main():
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
     app.setApplicationName("GachaStat")
@@ -35,7 +41,3 @@ def main():
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-
-if __name__ == '__main__':
-    main()

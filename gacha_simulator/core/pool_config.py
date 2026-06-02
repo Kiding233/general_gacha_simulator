@@ -16,18 +16,20 @@ class CardDef:
     name: str
     pools: List[str] = field(default_factory=list)
     rerun_of: Optional[str] = None
+    initial_count: int = 0
 
 
 @dataclass
 class CardCatalog:
     cards: Dict[str, CardDef] = field(default_factory=dict)
 
-    def add_card(self, card_id: str, rarity: str, name: str = None, pools: List[str] = None):
+    def add_card(self, card_id: str, rarity: str, name: str = None, pools: List[str] = None, initial_count: int = 0):
         self.cards[card_id] = CardDef(
             card_id=card_id,
             rarity=rarity,
             name=name or card_id,
             pools=pools or [],
+            initial_count=initial_count,
         )
 
     def get_card(self, card_id: str) -> Optional[CardDef]:
@@ -47,6 +49,8 @@ class CardCatalog:
                     existing.name = card_def.name
                 if not existing.rarity or existing.rarity == existing.card_id:
                     existing.rarity = card_def.rarity
+                if card_def.initial_count > 0:
+                    existing.initial_count = max(existing.initial_count, card_def.initial_count)
                 for pid in card_def.pools:
                     if pid not in existing.pools:
                         existing.pools.append(pid)
@@ -57,6 +61,7 @@ class CardCatalog:
                     name=card_def.name,
                     pools=list(card_def.pools),
                     rerun_of=card_def.rerun_of,
+                    initial_count=card_def.initial_count,
                 )
 
 
@@ -74,7 +79,13 @@ def parse_cards_file(filepath: str) -> CardCatalog:
                 card_id = parts[0].strip()
                 name = parts[1].strip()
                 rarity = parts[2].strip()
-                catalog.add_card(card_id, rarity, name)
+                initial_count = 0
+                if len(parts) >= 4:
+                    try:
+                        initial_count = int(parts[3].strip())
+                    except ValueError:
+                        pass
+                catalog.add_card(card_id, rarity, name, initial_count=initial_count)
     except FileNotFoundError:
         pass
     return catalog

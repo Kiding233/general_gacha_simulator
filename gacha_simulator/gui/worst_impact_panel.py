@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QRadioButton, QButtonGroup, QComboBox, QSizePolicy,
-    QSplitter, QLineEdit,
+    QSplitter, QLineEdit, QScrollArea, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
@@ -112,12 +112,13 @@ class WorstImpactWorker(QThread):
     finished = pyqtSignal(object)
     error = pyqtSignal(object)
 
-    def __init__(self, analyzer, condition, alpha, num_simulations):
+    def __init__(self, analyzer, condition, alpha, num_simulations, custom_resource=None):
         super().__init__()
         self.analyzer = analyzer
         self.condition = condition
         self.alpha = alpha
         self.num_simulations = num_simulations
+        self.custom_resource = custom_resource
 
     def run(self):
         try:
@@ -126,6 +127,7 @@ class WorstImpactWorker(QThread):
                 alpha=self.alpha,
                 num_simulations=self.num_simulations,
                 progress_callback=self._progress,
+                custom_resource=self.custom_resource,
             )
             self.finished.emit(result)
         except Exception as e:
@@ -238,7 +240,20 @@ class WorstImpactPanel(QWidget):
         self.alpha_spin.setSingleStep(0.01)
         self.alpha_spin.setValue(0.05)
         self.alpha_spin.setDecimals(2)
-        config_form.addRow("保守分位数 α:", self.alpha_spin)
+        self.alpha_spin.setMaximumWidth(100)
+        config_form.addRow("初始资源条件分位数 α:", self.alpha_spin)
+
+        self.custom_resource_check = QCheckBox("使用自定义初始资源")
+        self.custom_resource_input = QLineEdit("0")
+        self.custom_resource_input.setEnabled(False)
+        self.custom_resource_input.setMaximumWidth(100)
+        self.custom_resource_check.toggled.connect(self.custom_resource_input.setEnabled)
+        custom_row = QHBoxLayout()
+        custom_row.setSpacing(6)
+        custom_row.addWidget(self.custom_resource_check)
+        custom_row.addWidget(self.custom_resource_input)
+        custom_row.addStretch()
+        config_form.addRow("自定义初始资源:", custom_row)
 
         self.sim_spin = QSpinBox()
         self.sim_spin.setRange(50, 100000)
@@ -329,7 +344,11 @@ class WorstImpactPanel(QWidget):
         right_layout.addWidget(table_group, 1)
 
         splitter.addWidget(left)
-        splitter.addWidget(right)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right)
+        splitter.addWidget(right_scroll)
         splitter.setSizes([300, 700])
 
     def _edit_distribution(self):
@@ -346,12 +365,27 @@ class WorstImpactPanel(QWidget):
         self.gdr_threshold_spin.setValue(default)
 
     def _on_run(self):
-        if not self._simulation_results:
+        gdr_key = self.gdr_combo.currentData() or 'all_targets'
+        gdr_threshold = self.gdr_threshold_spin.value()
+
+        custom_resource = None
+        if self.custom_resource_check.isChecked():
+            try:
+                custom_resource = float(self.custom_resource_input.text() or '0')
+            except ValueError:
+                self.status_label.setText("请输入有效的自定义资源数值")
+                return
+
+        if custom_resource is None and not self._simulation_results:
             self.status_label.setText("请先运行批量模拟")
             return
 
-        if not self._target_specs:
-            self.status_label.setText("缺少目标卡规格，请重新运行批量模拟")
+        target_specs = self._target_specs or {}
+        if not target_specs and self._store:
+            for tc in self._store.target_cards:
+                target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
+        if not target_specs:
+            self.status_label.setText("缺少目标卡规格，请先配置目标卡")
             return
 
         if self.cond_success.isChecked():
@@ -360,9 +394,6 @@ class WorstImpactPanel(QWidget):
             condition = 'failure'
         else:
             condition = 'all'
-
-        gdr_key = self.gdr_combo.currentData() or 'all_targets'
-        gdr_threshold = self.gdr_threshold_spin.value()
 
         custom_pool = {
             'duration_days': self.pool_duration_spin.value(),
@@ -382,7 +413,7 @@ class WorstImpactPanel(QWidget):
 
         analyzer = WorstImpactAnalyzer(
             simulation_results=self._simulation_results,
-            target_specs=self._target_specs,
+            target_specs=target_specs,
             store=self._store,
             gdr_key=gdr_key,
             gdr_threshold=gdr_threshold,
@@ -396,6 +427,7 @@ class WorstImpactPanel(QWidget):
             analyzer, condition,
             self.alpha_spin.value(),
             self.sim_spin.value(),
+            custom_resource=custom_resource,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
@@ -418,11 +450,10 @@ class WorstImpactPanel(QWidget):
         self.coverage_gauge.set_value(result.pity_coverage)
 
         lines = [
-            f"<b>保守资源:</b> {result.worst_resource:.0f}",
-            f"<b>大保底覆盖:</b> {result.pity_coverage:.2f} 倍",
+            f"<b>保守资源:</b> {result.worst_resource:.0f}"
+            f" &nbsp;|&nbsp; <b>大保底覆盖:</b> {result.pity_coverage:.2f} 倍"
+            f" &nbsp;|&nbsp; <b>期望新池子数:</b> {result.expected_pools:.2f}",
         ]
-        if result.pool_distribution:
-            lines.append(f"<b>期望新池子数:</b> {result.expected_pools:.2f}")
         self.summary_label.setText('<br>'.join(lines))
 
         if result.pool_distribution:

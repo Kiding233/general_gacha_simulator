@@ -23,6 +23,7 @@ class SimulationThread(QThread):
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
+    status_update = pyqtSignal(str)
 
     def __init__(self, config_store, simulation_count=1000, max_workers=4, seed=42, parent=None):
         super().__init__(parent)
@@ -36,6 +37,14 @@ class SimulationThread(QThread):
             from .batch_simulator import SimulationEnvBuilder, SimulationEnv
 
             config_store = self.config_store
+            N = self.simulation_count
+            max_workers = self.max_workers
+            seed = self.seed
+
+            # 1.5 进度条即时反馈：构建环境前发出状态信号
+            self.progress.emit(0, N)
+            self.status_update.emit("正在构建模拟环境…")
+
             env = SimulationEnvBuilder.from_config_store(config_store)
 
             target_ids = env.target_ids
@@ -45,70 +54,55 @@ class SimulationThread(QThread):
             self._pool_end_times = env.pool_end_times
             self._gdr_context = env.gdr_context
 
-            N = self.simulation_count
-            max_workers = self.max_workers
-            seed = self.seed
-
+            import numpy as np
             from .batch_simulator import run_batch_parallel
-            from ..core.streaming import SharedResultCollector, extract_aggregate, DrawSequenceExtractor
 
             target_specs = {tc.card_id: tc.quantity for tc in config_store.target_cards}
-            card_defs_list = env.card_defs
+            n_heatmap_bins = max(20, min(100, int(N ** 0.5)))
+            env.n_heatmap_bins = n_heatmap_bins  # 传递给 worker extractor
 
-            collector = SharedResultCollector()
-            collector.add_extractor('aggregate', extract_aggregate)
-
-            seq_extractor = DrawSequenceExtractor(
-                max_keep=200,
-                pool_end_times=env.pool_end_times,
-                target_ids=target_ids,
-                ssr_ids=ssr_ids,
-                target_specs=target_specs,
-                initial_resources=env.initial_resources,
-                n_heatmap_bins=max(20, min(100, int(N ** 0.5))),
-            )
-            collector.add_extractor('draw_sequence', seq_extractor)
+            # P0: 不再通过 collector 在主进程冗余累积——worker 内已并行提取
+            env.return_compact = False
 
             strategy_key = config_store.strategy_name
 
-            run_batch_parallel(
-                pools=env.pools,
-                schedule_mgr=env.schedule_mgr,
-                end_time=env.end_time,
-                pity_engine=env.pity_engine,
-                resource_gain=env.resource_gain,
-                pity_state_init=env.pity_state_init,
-                card_defs=card_defs_list,
+            self.status_update.emit(f"正在启动 {max_workers} 个工作进程…")
+
+            # P1: 进度信号批处理，每 ~N/50 次 emit 一次，减少 Qt 事件循环压力
+            _batch_counter = 0
+            _batch_interval = max(1, N // 50)
+
+            def _batched_progress(done, total):
+                nonlocal _batch_counter
+                _batch_counter += 1
+                if _batch_counter % _batch_interval == 0 or done >= total:
+                    self.progress.emit(done, total)
+
+            batch_result = run_batch_parallel(
+                env=env,
                 target_specs=target_specs,
                 initial_resources=env.initial_resources,
                 num_simulations=N,
                 max_workers=max_workers,
                 seed=seed,
-                progress_callback=lambda done, total: self.progress.emit(done, total),
+                progress_callback=_batched_progress,
                 strategy_name=strategy_key,
                 strategy_params=config_store.strategy_params,
-                on_result=collector.on_result,
-                ssr_ids=env.ssr_ids,
             )
+
+            self.status_update.emit("正在计算基线…")
 
             no_draw_resource = None
             no_draw_pool_resources = {}
             try:
                 no_draw_results = run_batch_parallel(
-                    pools=env.pools,
-                    schedule_mgr=env.schedule_mgr,
-                    end_time=env.end_time,
-                    pity_engine=env.pity_engine,
-                    resource_gain=env.resource_gain,
-                    pity_state_init=env.pity_state_init,
-                    card_defs=card_defs_list,
+                    env=env,
                     target_specs=target_specs,
                     initial_resources=env.initial_resources,
                     num_simulations=1,
                     max_workers=1,
                     seed=seed,
                     strategy_name='no_draw',
-                    ssr_ids=env.ssr_ids,
                 )
                 if no_draw_results and no_draw_results[0]:
                     no_draw_resource = no_draw_results[0].get('final_resources', {}).get('draw_resource', None)
@@ -116,22 +110,54 @@ class SimulationThread(QThread):
             except Exception:
                 pass
 
-            result_bundle = {
-                'aggregate_data': collector.get_extracted('aggregate'),
-                'draw_sequences': seq_extractor.get_kept_sequences(),
-                'heatmap_data': seq_extractor.get_heatmap_data(),
-                'cumulative_snapshots': seq_extractor.get_cumulative_snapshots(),
-                'transition_flags': seq_extractor.get_transition_flags(),
-                'target_ids': target_ids,
-                'ssr_ids': ssr_ids,
-                'gdr_context': env.gdr_context,
-                'pool_end_times': env.pool_end_times,
-                'target_specs': target_specs,
-                'n_results': collector.n_results,
-                'n_requested': N,
-                'no_draw_resource': no_draw_resource,
-                'no_draw_pool_resources': no_draw_pool_resources,
-            }
+            # 使用 worker 内提取结果（并行路径）
+            ext = getattr(batch_result, 'extraction', None)
+            if ext is not None:
+                heatmap_bins = {
+                    'achievement': np.linspace(0, 1.05, n_heatmap_bins + 1),
+                    'resource': np.linspace(0, max(env.initial_resources.get('draw_resource', 0), 1.0) * 2,
+                                             n_heatmap_bins + 1),
+                }
+                result_bundle = {
+                    'aggregate_data': ext.get('aggregates', []),
+                    'draw_sequences': ext.get('kept_sequences', []),
+                    'heatmap_data': {
+                        'data': {
+                            'achievement': ext.get('heatmap_ach', {}),
+                            'resource': ext.get('heatmap_res', {}),
+                        },
+                        'bins': heatmap_bins,
+                    },
+                    'cumulative_snapshots': ext.get('cumulative_snapshots', {}),
+                    'transition_flags': ext.get('transition_flags', []),
+                    'target_ids': target_ids,
+                    'ssr_ids': ssr_ids,
+                    'gdr_context': env.gdr_context,
+                    'pool_end_times': env.pool_end_times,
+                    'target_specs': target_specs,
+                    'n_results': ext.get('n_results', 0),
+                    'n_requested': N,
+                    'no_draw_resource': no_draw_resource,
+                    'no_draw_pool_resources': no_draw_pool_resources,
+                }
+            else:
+                # extraction 不可用（极少情况，例如单进程且无 extractor）
+                result_bundle = {
+                    'aggregate_data': [],
+                    'draw_sequences': [],
+                    'heatmap_data': {'data': {}, 'bins': {}},
+                    'cumulative_snapshots': {},
+                    'transition_flags': [],
+                    'target_ids': target_ids,
+                    'ssr_ids': ssr_ids,
+                    'gdr_context': env.gdr_context,
+                    'pool_end_times': env.pool_end_times,
+                    'target_specs': target_specs,
+                    'n_results': 0,
+                    'n_requested': N,
+                    'no_draw_resource': no_draw_resource,
+                    'no_draw_pool_resources': no_draw_pool_resources,
+                }
 
             self.finished.emit(result_bundle)
 
@@ -272,6 +298,7 @@ class GachaPanel(QWidget):
         self.simulation_thread.finished.connect(self.on_simulation_finished)
         self.simulation_thread.error.connect(self.on_simulation_error)
         self.simulation_thread.progress.connect(self.on_simulation_progress)
+        self.simulation_thread.status_update.connect(self.status_update)
         self.simulation_thread.start()
 
     def on_simulation_finished(self, result_bundle):

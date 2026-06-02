@@ -81,20 +81,22 @@ class RetreatWorker(QThread):
 
             self.progress.emit("正在生成图表...", 60)
             from gacha_simulator.core.vulnerability import plot_vulnerability, plot_vulnerability_ridge
+            import numpy as np
 
-            ridge_spec = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
+            ridge_fig = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
 
+            global_edges = np.array(analysis.global_bin_edges) if analysis.global_bin_edges else None
             pool_specs = {}
             for pr in analysis.pool_results:
                 pname = self.pool_names.get(pr.pool_id, pr.pool_id)
-                spec = plot_vulnerability(pr, self.alpha, pool_name=pname)
+                spec = plot_vulnerability(pr, self.alpha, pool_name=pname, global_bin_edges=global_edges)
                 pool_specs[pr.pool_id] = spec
 
             self.progress.emit("分析完成", 100)
             self.finished.emit({
                 'analysis': analysis,
                 'pool_specs': pool_specs,
-                'ridge_spec': ridge_spec,
+                'ridge_fig': ridge_fig,
                 'pool_names': self.pool_names,
             })
         except Exception as e:
@@ -284,7 +286,7 @@ class RetreatPanel(QWidget):
         self._results = result
         analysis = result["analysis"]
         pool_specs = result["pool_specs"]
-        ridge_spec = result.get("ridge_spec")
+        ridge_fig = result.get("ridge_fig")
         pool_names = result["pool_names"]
 
         summary = (
@@ -295,46 +297,21 @@ class RetreatPanel(QWidget):
         self.status_label.setText(summary)
 
         charts: dict[str, object] = {}
-        if ridge_spec is not None:
-            charts["总览"] = ridge_spec
+        if ridge_fig is not None:
+            charts["总览"] = ridge_fig
 
         for pr in analysis.pool_results:
             pname = pool_names.get(pr.pool_id, pr.pool_id)
             spec_data = pool_specs.get(pr.pool_id, {})
 
-            info_text = (
-                f"<p style='margin:4px 0;'>"
-                f"到达此池的模拟数: {pr.n_total} | 失败数: {pr.n_failed} | 失败率: {pr.failure_rate:.1%}<br>"
-                f"总体资源剩余均值: {pr.resource_mean_all:.0f} | 失败资源剩余均值: {pr.resource_mean_failed:.0f}"
-            )
-            if pr.vulnerability_intervals:
-                vi_texts = []
-                for vi in pr.vulnerability_intervals:
-                    vi_texts.append(
-                        f"区间 [{vi.lower:.0f}, {vi.upper:.0f}]: "
-                        f"均值={vi.mean:.0f}, 最高比例={vi.max_ratio:.1%}"
-                    )
-                info_text += "<br>脆弱区间:<br>" + "<br>".join(vi_texts)
-            else:
-                info_text += "<br>无脆弱区间（条件失败概率均 ≤ α）"
-            info_text += "</p>"
-
-            from ..visualization.chart_spec import histogram, scatter, ChartAnnotation
-
-            hist_spec = spec_data.get("histogram") if isinstance(spec_data, dict) else None
-            curve_spec = spec_data.get("curve") if isinstance(spec_data, dict) else None
-
-            if hist_spec is not None:
-                charts[pname] = hist_spec
-            if curve_spec is not None:
-                charts[f"{pname} 条件概率"] = curve_spec
+            combined_fig = spec_data.get("combined_figure") if isinstance(spec_data, dict) else None
+            if combined_fig is not None:
+                charts[pname] = combined_fig
 
         if charts:
             self.chart_webview.set_charts(charts)
         else:
-            self.chart_webview.setHtml(
-                "<p style='text-align:center;color:#888;padding:40px;'>无数据可绘制</p>"
-            )
+            self.chart_webview.show_message("无数据可绘制")
 
         self.vulnerability_finished.emit(analysis)
 

@@ -85,13 +85,7 @@ class RetreatSearchEngine:
         ir = dict(env.initial_resources)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
-            pools=env.pools,
-            schedule_mgr=env.schedule_mgr,
-            end_time=env.end_time,
-            pity_engine=env.pity_engine,
-            resource_gain=env.resource_gain,
-            pity_state_init=env.pity_state_init,
-            card_defs=env.card_defs,
+            env=env,
             target_specs=target_specs,
             initial_resources=ir,
             num_simulations=self.num_simulations,
@@ -99,7 +93,6 @@ class RetreatSearchEngine:
             seed=0,
             strategy_name=self.strategy_name,
             strategy_params=self.strategy_params,
-            ssr_ids=env.ssr_ids,
         )
         return compute_success_probability(histories, target_specs, self.gdr_key, self.gdr_threshold,
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)

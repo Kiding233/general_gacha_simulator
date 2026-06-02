@@ -2,17 +2,16 @@
 
 import os
 from pathlib import Path
-from collections import defaultdict
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QScrollArea, QCheckBox, QSplitter, QComboBox,
-    QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFileDialog, QGridLayout, QSizePolicy, QProgressBar,
+    QSpinBox, QDoubleSpinBox,
+    QGridLayout, QProgressBar, QSizePolicy,
     QFrame,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QFont
+
 
 
 class _NoWheelSpinBox(QSpinBox):
@@ -59,16 +58,13 @@ ANALYSIS_CATEGORIES = {
 
 _EXPANDABLE_KEYS = {'gdr_dist', 'risk_worst_case', 'risk_best_case', 'conditional_dist', 'transition_analysis', 'cumulative_by_pool'}
 
-_KEY_TITLE_MAP = {}
+# 渲染顺序：按 ANALYSIS_CATEGORIES 中定义的出现顺序排列图表
+_CHART_DISPLAY_ORDER: dict[str, int] = {}
+_order_idx = 0
 for _cat, _items in ANALYSIS_CATEGORIES.items():
     for _key, _label in _items:
-        _KEY_TITLE_MAP[_key] = _label
-_KEY_TITLE_MAP.update({
-    'risk_worst_case_chart': '最差情形分布图',
-    'risk_best_case_chart': '最好情形分布图',
-    'conditional_dist_chart': '条件分布图',
-    'draws_vs_gdr': '抽卡数-目标达成率散点图',
-})
+        _CHART_DISPLAY_ORDER[_key] = _order_idx
+        _order_idx += 1
 
 
 class AnalysisItemWidget(QFrame):
@@ -155,165 +151,15 @@ class AnalysisItemWidget(QFrame):
         return widget
 
 
-class ResultUnit(QFrame):
-    def __init__(self, key, title, parent=None):
-        super().__init__(parent)
-        self.key = key
-        self._image_path = None
-        self._setup_ui(title)
-
-    def _setup_ui(self, title):
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("""
-            ResultUnit {
-                border: 1px solid #d0d0d0;
-                border-radius: 6px;
-                background: #ffffff;
-            }
-        """)
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        title_bar = QWidget()
-        title_bar.setObjectName("ruTitleBar")
-        title_bar.setStyleSheet("""
-            QWidget#ruTitleBar {
-                background: #f0f0f0;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                border-bottom: 1px solid #e0e0e0;
-            }
-        """)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(10, 6, 10, 6)
-
-        title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold; font-size: 13px; background: transparent; border: none;")
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-
-        self.export_btn = QPushButton("导出")
-        self.export_btn.setFixedSize(56, 24)
-        self.export_btn.setStyleSheet("""
-            QPushButton {
-                background: #e0e0e0;
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background: #d0d0d0;
-            }
-        """)
-        title_layout.addWidget(self.export_btn)
-
-        main_layout.addWidget(title_bar)
-
-        self.content_widget = QWidget()
-        self.content_widget.setStyleSheet("background: #ffffff; border: none;")
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.addWidget(self.content_widget)
-
-    def set_chart(self, image_path):
-        self._clear_content()
-        self._image_path = image_path
-        label = QLabel()
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            scaled = pixmap.scaledToWidth(900, Qt.TransformationMode.SmoothTransformation)
-            label.setPixmap(scaled)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.content_layout.addWidget(label)
-
-    def set_table(self, headers, rows):
-        self._clear_content()
-        self._image_path = None
-        table = QTableWidget()
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.setRowCount(len(rows))
-        for i, row in enumerate(rows):
-            for j, val in enumerate(row):
-                item = QTableWidgetItem(str(val))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                table.setItem(i, j, item)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.verticalHeader().setDefaultSectionSize(26)
-        h = table.horizontalHeader().height() + len(rows) * 26 + 4
-        table.setMinimumHeight(h)
-        self.content_layout.addWidget(table)
-
-    def set_text(self, text):
-        self._clear_content()
-        self._image_path = None
-        label = QLabel(text)
-        label.setWordWrap(True)
-        label.setStyleSheet("font-size: 12px; line-height: 1.5;")
-        self.content_layout.addWidget(label)
-
-    def _clear_content(self):
-        while self.content_layout.count():
-            item = self.content_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        self._image_path = None
-
-    def get_image_path(self):
-        return self._image_path
-
-
-def _compute_transition_flags(draw_sequences, sorted_pools, criteria, ctx, ssr_ids, target_specs):
-    target_ids_trans = set(ctx.target_specs.keys())
-    total_needed = sum(target_specs.values()) or 1
-    success_flags_per_sim = []
-
-    for seq in draw_sequences:
-        card_ids = seq.get('draw_card_ids', [])
-        pool_ids_seq = seq.get('draw_pool_ids', [])
-        times = seq.get('draw_times', [])
-        flags = []
-        for pool_id, end_time in sorted_pools:
-            if criteria == 'any_ssr':
-                success = False
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if cid in ssr_ids:
-                        success = True
-                        break
-                flags.append(success)
-            elif criteria == 'per_pool_target':
-                success = False
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if i < len(pool_ids_seq) and pool_ids_seq[i] == pool_id and cid in target_ids_trans:
-                        success = True
-                        break
-                flags.append(success)
-            else:
-                obtained = 0
-                for i, cid in enumerate(card_ids):
-                    if i < len(times) and times[i] > end_time:
-                        break
-                    if cid in target_ids_trans:
-                        obtained += 1
-                flags.append(obtained >= total_needed)
-        success_flags_per_sim.append(flags)
-
-    return success_flags_per_sim
-
+# 支持「以抽数为单位」换算的资源类 GDR（除以 cost_per_draw 转为抽数等价量）
+_DRAW_UNIT_GDR_KEYS = {'resource_remaining', 'resource_consumed', 'resource_per_card'}
 
 class AnalysisWorker(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(str, int)
+    error = pyqtSignal(str)
 
-    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_cond_selections=None, best_case_cond_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None, use_draw_units=False, cost_per_draw=160, no_draw_resource=None, no_draw_pool_resources=None):
+    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_cond_selections=None, best_case_cond_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None, use_draw_units=False, cost_per_draw=160, no_draw_resource=None, no_draw_pool_resources=None, pool_names=None):
         super().__init__()
         self.results = results
         self.ctx = ctx
@@ -339,27 +185,31 @@ class AnalysisWorker(QThread):
         self.cost_per_draw = cost_per_draw
         self.no_draw_resource = no_draw_resource
         self.no_draw_pool_resources = no_draw_pool_resources or {}
+        self.pool_names = pool_names or {}
 
     def _emit(self, msg, pct):
         self.progress.emit(msg, pct)
 
     def run(self):
+        try:
+            self._run_impl()
+        except Exception as e:
+            import traceback
+            self.error.emit(f"分析过程发生异常：{e}\n{traceback.format_exc()}")
+
+    def _run_impl(self):
         import numpy as np
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
+        from gacha_simulator.visualization.chart_spec import (
+            ChartSpec, ChartAnnotation,
+            HistogramData, HistogramOverlay, CDFData, RidgeData,
+            ScatterData, ScatterTrace, BarData, HeatmapData, Waterfall3DData,
+            histogram, cdf, ridge, scatter, scatter_multi, scatter_colored,
+            bar, heatmap,
+        )
 
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
-
-        plt.rcParams.update({
-            'font.size': 14,
-            'axes.titlesize': 16,
-            'axes.labelsize': 14,
-            'xtick.labelsize': 12,
-            'ytick.labelsize': 12,
-            'legend.fontsize': 12,
-        })
+        def _strip_pid(pid: str) -> str:
+            """返回池子显示名：优先配置中文名，fallback 为原始 ID。"""
+            return self.pool_names.get(pid, pid)
 
         charts = {}
         ctx = self.ctx
@@ -413,8 +263,14 @@ class AnalysisWorker(QThread):
 
         target_specs = ctx.target_specs if ctx else {}
         ssr_ids = ctx.ssr_ids if ctx else set()
-        _display_to_key = {defn.display_name: key for key, defn in UNIFIED_GDR_REGISTRY.items()}
-        _key_to_display = {key: defn.display_name for key, defn in UNIFIED_GDR_REGISTRY.items()}
+        _display_to_key = {
+            (('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name): key
+            for key, defn in UNIFIED_GDR_REGISTRY.items()
+        }
+        _key_to_display = {
+            key: (('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name)
+            for key, defn in UNIFIED_GDR_REGISTRY.items()
+        }
 
         gdr_dists = {}
         if any(s[0] == '_prepare_gdr_dists' for s in active_steps):
@@ -432,7 +288,7 @@ class AnalysisWorker(QThread):
             step_done('GDR分布计算完成')
 
         if self.use_draw_units and self.cost_per_draw > 0:
-            _resource_gdr_keys = {'resource_remaining'}
+            _resource_gdr_keys = _DRAW_UNIT_GDR_KEYS
             for _key in _resource_gdr_keys:
                 if _key in gdr_dists:
                     _orig = gdr_dists[_key]
@@ -448,58 +304,54 @@ class AnalysisWorker(QThread):
                 dist = gdr_dists.get(metric_key)
                 if not dist or dist.n == 0:
                     continue
-                n_subplots = len(chart_types)
-                if n_subplots == 1:
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    axes = [ax]
-                else:
-                    fig, axes = plt.subplots(1, n_subplots, figsize=(7 * n_subplots, 6))
-                ax_idx = 0
+
                 no_draw_ref = None
                 if metric_key == 'resource_remaining' and self.no_draw_resource is not None:
                     no_draw_ref = self.no_draw_resource
                     if self.use_draw_units and self.cost_per_draw > 0:
                         no_draw_ref = no_draw_ref / self.cost_per_draw
 
-                _unit_suffix = ''
-                if metric_key == 'resource_remaining' and self.use_draw_units:
-                    _unit_suffix = ' (抽)'
+                _unit_suffix = ' (抽)' if (metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else ''
+                annotations = []
+                if no_draw_ref is not None:
+                    annotations.append(ChartAnnotation(
+                        type="vline", value=no_draw_ref, color="green",
+                        dash="dash", text=f'不抽卡基线: {no_draw_ref:.1f}',
+                    ))
 
                 if 'hist' in chart_types:
-                    ax = axes[ax_idx]
-                    from gacha_simulator.core.distribution import freedman_diaconis_bins
-                    ax.hist(dist.samples, bins=freedman_diaconis_bins(dist.samples), density=True, edgecolor='black', alpha=0.7)
-                    ax.axvline(dist.mean(), color='red', linestyle='--', label=f'均值: {dist.mean():.3f}')
-                    ax.axvline(dist.var(alpha), color='orange', linestyle=':', label=f'VaR({alpha}): {dist.var(alpha):.3f}')
-                    if no_draw_ref is not None:
-                        ax.axvline(no_draw_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {no_draw_ref:.1f}')
-                    ax.set_xlabel(f'{metric_name}{_unit_suffix}')
-                    ax.set_ylabel('概率密度')
-                    ax.set_title(f'{metric_name}{_unit_suffix} 分布')
-                    ax.legend(fontsize=10)
-                    ax.grid(alpha=0.3)
-                    ax_idx += 1
+                    var_val = dist.var(alpha)
+                    spec = ChartSpec(
+                        chart_type="histogram",
+                        data=HistogramData(
+                            samples=np.array(dist.samples),
+                            mean_line=True,
+                            quantile_lines=[alpha],
+                        ),
+                        title=f'{metric_name}{_unit_suffix} 分布',
+                        xlabel=f'{metric_name}{_unit_suffix}',
+                        ylabel='概率密度',
+                        annotations=list(annotations),
+                    )
+                    # 替换默认分位数线标签为 VaR 格式
+                    if spec.annotations:
+                        for a in spec.annotations:
+                            if a.type == "vline" and a.color == "green":
+                                a.text = f'不抽卡基线: {no_draw_ref:.1f}'
+                    charts[f'gdr_dist_{metric_name}_hist'] = spec
+
                 if 'cdf' in chart_types:
-                    ax = axes[ax_idx]
-                    sorted_v = sorted(dist.samples)
-                    cdf_y = [(i + 1) / len(sorted_v) for i in range(len(sorted_v))]
-                    ax.plot(sorted_v, cdf_y, linewidth=2)
-                    ax.axhline(alpha, color='orange', linestyle=':', alpha=0.5)
-                    if no_draw_ref is not None:
-                        ax.axvline(no_draw_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {no_draw_ref:.1f}')
-                        ax.legend(fontsize=10)
-                    ax.set_xlabel(f'{metric_name}{_unit_suffix}')
-                    ax.set_ylabel('累积概率')
-                    ax.set_title(f'{metric_name}{_unit_suffix} 累积分布')
-                    ax.grid(alpha=0.3)
-                    ax.set_ylim(0, 1.05)
-                    ax_idx += 1
-                plt.tight_layout()
-                safe_name = metric_name.replace('/', '_').replace(' ', '_')
-                p = str(self.output_dir / f'gdr_dist_{safe_name}.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts[f'gdr_dist_{metric_name}'] = p
+                    spec = ChartSpec(
+                        chart_type="cdf",
+                        data=CDFData(samples=np.array(dist.samples)),
+                        title=f'{metric_name}{_unit_suffix} 累积分布',
+                        xlabel=f'{metric_name}{_unit_suffix}',
+                        ylabel='累积概率',
+                        annotations=[
+                            ChartAnnotation(type="hline", value=alpha, color="orange", dash="dot", text=f'α={alpha:.2f}'),
+                        ] + list(annotations),
+                    )
+                    charts[f'gdr_dist_{metric_name}_cdf'] = spec
             step_done('GDR分布')
 
         if 'risk_var_cvar' in self.selected:
@@ -509,7 +361,7 @@ class AnalysisWorker(QThread):
                 if dist.n < 2:
                     continue
                 _display_name = _key_to_display.get(name, name)
-                if name == 'resource_remaining' and self.use_draw_units:
+                if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                     _display_name = f'{_display_name} (抽)'
                 rows.append({
                     'name': _display_name,
@@ -530,7 +382,12 @@ class AnalysisWorker(QThread):
                         f"{r['std']:.4f}", f"{r['VaR']:.4f}", f"{r['CVaR']:.4f}",
                         f"{r['VaR-均值差']:.4f}", f"{r['VaR-中位数差']:.4f}",
                     ])
-                charts['risk_var_cvar'] = ('table', headers, table_rows)
+                from gacha_simulator.visualization.chart_spec import TableData
+                charts['risk_var_cvar'] = ChartSpec(
+                    chart_type="table",
+                    data=TableData(headers=headers, rows=table_rows),
+                    title='GDR 风险指标 (VaR/CVaR)',
+                )
             step_done('VaR/CVaR分析')
 
         if 'risk_worst_case' in self.selected:
@@ -538,10 +395,20 @@ class AnalysisWorker(QThread):
             primary_name = self.primary_gdr
             primary_key = _display_to_key.get(primary_name, primary_name)
             primary_dist = gdr_dists.get(primary_key)
+            primary_defn = UNIFIED_GDR_REGISTRY.get(primary_key)
+            primary_lib = primary_defn.lower_is_better if primary_defn else False
             if primary_dist and primary_dist.n > 0:
                 from gacha_simulator.core.distribution import JointSamples
-                var_val = primary_dist.quantile(alpha)
-                is_in_tail = [v <= var_val for v in primary_dist.samples]
+                if primary_lib:
+                    var_val = primary_dist.quantile(1 - alpha)
+                    is_in_tail = [v >= var_val for v in primary_dist.samples]
+                    tail_label = f'≥上{1-alpha}分位数'
+                    tail_label_short = f'上{1-alpha}分位数'
+                else:
+                    var_val = primary_dist.quantile(alpha)
+                    is_in_tail = [v <= var_val for v in primary_dist.samples]
+                    tail_label = f'≤VaR({alpha})'
+                    tail_label_short = f'VaR({alpha})'
                 tail_samples = [primary_dist.samples[i] for i in range(primary_dist.n) if is_in_tail[i]]
                 tail_dist = EmpiricalDistribution(tail_samples) if tail_samples else EmpiricalDistribution([])
 
@@ -550,12 +417,13 @@ class AnalysisWorker(QThread):
                     if dist.n < 2:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
-                    cond_dist = joint.conditional_second(lambda f: f <= var_val)
+                    cond_filter = (lambda f: f >= var_val) if primary_lib else (lambda f: f <= var_val)
+                    cond_dist = joint.conditional_second(cond_filter)
                     if cond_dist.n > 0:
                         g_mean = dist.mean()
                         g_var = dist.var(alpha)
                         _wc_display = _key_to_display.get(name, name)
-                        if name == 'resource_remaining' and self.use_draw_units:
+                        if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                             _wc_display = f'{_wc_display} (抽)'
                         table_rows.append([
                             _wc_display,
@@ -572,34 +440,50 @@ class AnalysisWorker(QThread):
                             f"{cond_dist.max_val():.4f}",
                         ])
                 if table_rows:
-                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
-                    charts['risk_worst_case'] = ('table', headers, table_rows)
+                    var_label = f'上{1-alpha}分位数' if primary_lib else f'VaR({alpha})'
+                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', var_label, 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
+                    from gacha_simulator.visualization.chart_spec import TableData
+                    charts['risk_worst_case'] = ChartSpec(
+                        chart_type="table",
+                        data=TableData(headers=headers, rows=table_rows),
+                        title=f'各GDR在 {primary_name} 条件分布下的统计量',
+                    )
 
-                fig, ax = plt.subplots(figsize=(12, 7))
-                hp1 = AnalysisPanel._hist_params(primary_dist.samples, 'black', 0.4, f'{primary_name}(全部)')
-                ax.hist(primary_dist.samples, **hp1)
+                # 主概览图: 直方图 + 尾部叠加
+                is_disc = AnalysisPanel._is_discrete(primary_dist.samples)
+                main_color = 'black'
+                wc_overlays = []
+                wc_anns = [
+                    ChartAnnotation(type="vline", value=var_val, color="orange", dash="dash",
+                                    text=f'{tail_label_short}={var_val:.4f}'),
+                ]
                 if tail_dist.n > 0:
                     uc_tail = AnalysisPanel._unique_count(tail_dist.samples)
                     if uc_tail <= 1 and AnalysisPanel._unique_count(primary_dist.samples) > 1:
-                        import numpy as np
-                        tail_val = float(tail_dist.samples[0])
-                        ax.axvline(tail_val, color='red', linewidth=3,
-                                   label=f'≤VaR({alpha}), n={tail_dist.n} (值={tail_val:.2f})')
+                        wc_anns.append(ChartAnnotation(
+                            type="vline", value=float(tail_dist.samples[0]), color="red", dash="solid",
+                            text=f'{tail_label}, n={tail_dist.n} (值={float(tail_dist.samples[0]):.2f})',
+                        ))
                     else:
-                        hp2 = AnalysisPanel._hist_params(tail_dist.samples, 'red', 0.6, f'≤VaR({alpha}), n={tail_dist.n}')
-                        ax.hist(tail_dist.samples, **hp2)
-                ax.axvline(var_val, color='orange', linestyle='--', label=f'VaR({alpha})={var_val:.4f}')
-                ax.set_xlabel(primary_name)
-                ax.set_ylabel('频次' if AnalysisPanel._is_discrete(primary_dist.samples) else '密度')
-                ax.set_title(f'最差情形分析: {primary_name} (α={alpha})')
-                ax.legend(fontsize=11)
-                ax.grid(alpha=0.3)
-                plt.tight_layout()
-                p = str(self.output_dir / 'risk_worst_case.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['risk_worst_case_chart'] = p
+                        wc_overlays.append(HistogramOverlay(
+                            samples=np.array(tail_dist.samples),
+                            color='red', opacity=0.6, label=f'{tail_label}, n={tail_dist.n}',
+                        ))
+                charts['risk_worst_case_chart'] = ChartSpec(
+                    chart_type="histogram",
+                    data=HistogramData(
+                        samples=np.array(primary_dist.samples),
+                        mean_line=False,
+                        overlays=wc_overlays,
+                        density=not is_disc,
+                    ),
+                    title=f'最差情形分析: {primary_name} (α={alpha})',
+                    xlabel=primary_name,
+                    ylabel='频次' if is_disc else '密度',
+                    annotations=wc_anns,
+                )
 
+                # 各指标条件分布图
                 for name, dist in gdr_dists.items():
                     if name == primary_key or dist.n < 2:
                         continue
@@ -607,36 +491,29 @@ class AnalysisWorker(QThread):
                     if display not in self.worst_case_cond_selections:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
-                    cond = joint.conditional_second(lambda f: f <= var_val)
+                    cond = joint.conditional_second(lambda f: f >= var_val) if primary_lib else joint.conditional_second(lambda f: f <= var_val)
                     if cond.n < 2:
                         continue
-                    uc_all = AnalysisPanel._unique_count(dist.samples)
-                    uc_cond = AnalysisPanel._unique_count(cond.samples)
-                    fig2, ax2 = plt.subplots(figsize=(10, 6))
-                    hpa = AnalysisPanel._hist_params(dist.samples, 'black', 0.3, f'{display}(全部)')
-                    ax2.hist(dist.samples, **hpa)
-                    if uc_cond <= 1 and uc_all > 1:
-                        import numpy as np
-                        cval = float(cond.samples[0])
-                        ax2.axvline(cval, color='red', linewidth=3,
-                                    label=f'{display}(最差条件, n={cond.n}, 值={cval:.2f})')
-                    else:
-                        hpb = AnalysisPanel._hist_params(cond.samples, 'red', 0.6, f'{display}(最差条件, n={cond.n})')
-                        ax2.hist(cond.samples, **hpb)
-                    _wc_xlabel = display
-                    if name == 'resource_remaining' and self.use_draw_units:
-                        _wc_xlabel = f'{display} (抽)'
-                    ax2.set_xlabel(_wc_xlabel)
-                    ax2.set_ylabel('频次' if AnalysisPanel._is_discrete(dist.samples) else '密度')
-                    ax2.set_title(f'最差情形: {display} | {primary_name}≤VaR({alpha})')
-                    ax2.legend(fontsize=11)
-                    ax2.grid(alpha=0.3)
-                    plt.tight_layout()
-                    safe_name = name.replace('/', '_').replace(' ', '_')
-                    p2 = str(self.output_dir / f'risk_worst_case_{safe_name}.png')
-                    plt.savefig(p2, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts[f'risk_worst_case_{name}'] = p2
+                    is_disc2 = AnalysisPanel._is_discrete(dist.samples)
+                    _wc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
+                    wc_cond_op = '≥' if primary_lib else '≤'
+                    wc_cond_label = tail_label_short if primary_lib else f'VaR({alpha})'
+                    ovs2 = [HistogramOverlay(
+                        samples=np.array(cond.samples), color='red', opacity=0.6,
+                        label=f'{display}(最差条件, n={cond.n})',
+                    )]
+                    charts[f'risk_worst_case_{name}'] = ChartSpec(
+                        chart_type="histogram",
+                        data=HistogramData(
+                            samples=np.array(dist.samples),
+                            mean_line=False,
+                            overlays=ovs2,
+                            density=not is_disc2,
+                        ),
+                        title=f'最差情形: {display} | {primary_name}{wc_cond_op}{wc_cond_label}',
+                        xlabel=_wc_xlabel,
+                        ylabel='频次' if is_disc2 else '密度',
+                    )
             step_done('最差情形分析')
 
         if 'risk_best_case' in self.selected:
@@ -644,10 +521,20 @@ class AnalysisWorker(QThread):
             primary_name = self.best_primary_gdr
             primary_key = _display_to_key.get(primary_name, primary_name)
             primary_dist = gdr_dists.get(primary_key)
+            primary_defn_best = UNIFIED_GDR_REGISTRY.get(primary_key)
+            primary_lib_best = primary_defn_best.lower_is_better if primary_defn_best else False
             if primary_dist and primary_dist.n > 0:
                 from gacha_simulator.core.distribution import JointSamples
-                upper_val = primary_dist.quantile(1 - alpha)
-                is_in_top = [v >= upper_val for v in primary_dist.samples]
+                if primary_lib_best:
+                    upper_val = primary_dist.quantile(alpha)
+                    is_in_top = [v <= upper_val for v in primary_dist.samples]
+                    best_tail_label = f'≤VaR({alpha})'
+                    best_tail_label_short = f'VaR({alpha})'
+                else:
+                    upper_val = primary_dist.quantile(1 - alpha)
+                    is_in_top = [v >= upper_val for v in primary_dist.samples]
+                    best_tail_label = f'≥上{1-alpha}分位数'
+                    best_tail_label_short = f'上{1-alpha}分位数'
                 top_samples = [primary_dist.samples[i] for i in range(primary_dist.n) if is_in_top[i]]
                 top_dist = EmpiricalDistribution(top_samples) if top_samples else EmpiricalDistribution([])
 
@@ -656,11 +543,12 @@ class AnalysisWorker(QThread):
                     if dist.n < 2:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
-                    cond_dist = joint.conditional_second(lambda f: f >= upper_val)
+                    bc_cond_filter = (lambda f: f <= upper_val) if primary_lib_best else (lambda f: f >= upper_val)
+                    cond_dist = joint.conditional_second(bc_cond_filter)
                     if cond_dist.n > 0:
                         g_mean = dist.mean()
                         display = _key_to_display.get(name, name)
-                        if name == 'resource_remaining' and self.use_draw_units:
+                        if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                             display = f'{display} (抽)'
                         g_var = dist.var(alpha)
                         table_rows.append([
@@ -678,34 +566,50 @@ class AnalysisWorker(QThread):
                             f"{cond_dist.max_val():.4f}",
                         ])
                 if table_rows:
-                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', f'VaR({alpha})', 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
-                    charts['risk_best_case'] = ('table', headers, table_rows)
+                    bc_var_label = f'VaR({alpha})' if primary_lib_best else f'上{1-alpha}分位数'
+                    headers = ['GDR指标', '样本数', '全局均值', '条件均值', '均值差', '中位数', '标准差', bc_var_label, 'VaR-均值差', 'VaR-中位数差', '最小值', '最大值']
+                    from gacha_simulator.visualization.chart_spec import TableData
+                    best_primary_name = self.best_primary_gdr
+                    charts['risk_best_case'] = ChartSpec(
+                        chart_type="table",
+                        data=TableData(headers=headers, rows=table_rows),
+                        title=f'各GDR在 {best_primary_name} 条件分布下的统计量',
+                    )
 
-                fig, ax = plt.subplots(figsize=(12, 7))
-                hp1 = AnalysisPanel._hist_params(primary_dist.samples, 'black', 0.4, f'{primary_name}(全部)')
-                ax.hist(primary_dist.samples, **hp1)
+                # 主概览图: 直方图 + 顶部叠加
+                is_disc = AnalysisPanel._is_discrete(primary_dist.samples)
+                bc_overlays = []
+                bc_anns = [
+                    ChartAnnotation(type="vline", value=upper_val, color="green", dash="dash",
+                                    text=f'{best_tail_label_short}={upper_val:.4f}'),
+                ]
                 if top_dist.n > 0:
                     uc_top = AnalysisPanel._unique_count(top_dist.samples)
                     if uc_top <= 1 and AnalysisPanel._unique_count(primary_dist.samples) > 1:
-                        import numpy as np
-                        top_val = float(top_dist.samples[0])
-                        ax.axvline(top_val, color='green', linewidth=3,
-                                   label=f'≥上{1-alpha:.2f}分位, n={top_dist.n} (值={top_val:.2f})')
+                        bc_anns.append(ChartAnnotation(
+                            type="vline", value=float(top_dist.samples[0]), color="green", dash="solid",
+                            text=f'{best_tail_label}, n={top_dist.n} (值={float(top_dist.samples[0]):.2f})',
+                        ))
                     else:
-                        hp2 = AnalysisPanel._hist_params(top_dist.samples, 'green', 0.6, f'≥上{1-alpha:.2f}分位, n={top_dist.n}')
-                        ax.hist(top_dist.samples, **hp2)
-                ax.axvline(upper_val, color='green', linestyle='--', label=f'上{1-alpha:.2f}分位={upper_val:.4f}')
-                ax.set_xlabel(primary_name)
-                ax.set_ylabel('频次' if AnalysisPanel._is_discrete(primary_dist.samples) else '密度')
-                ax.set_title(f'最好情形分析: {primary_name} (α={alpha})')
-                ax.legend(fontsize=11)
-                ax.grid(alpha=0.3)
-                plt.tight_layout()
-                p = str(self.output_dir / 'risk_best_case.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['risk_best_case_chart'] = p
+                        bc_overlays.append(HistogramOverlay(
+                            samples=np.array(top_dist.samples),
+                            color='green', opacity=0.6, label=f'{best_tail_label}, n={top_dist.n}',
+                        ))
+                charts['risk_best_case_chart'] = ChartSpec(
+                    chart_type="histogram",
+                    data=HistogramData(
+                        samples=np.array(primary_dist.samples),
+                        mean_line=False,
+                        overlays=bc_overlays,
+                        density=not is_disc,
+                    ),
+                    title=f'最好情形分析: {primary_name} (α={alpha})',
+                    xlabel=primary_name,
+                    ylabel='频次' if is_disc else '密度',
+                    annotations=bc_anns,
+                )
 
+                # 各指标条件分布图
                 for name, dist in gdr_dists.items():
                     if name == primary_key or dist.n < 2:
                         continue
@@ -713,36 +617,30 @@ class AnalysisWorker(QThread):
                     if display not in self.best_case_cond_selections:
                         continue
                     joint = JointSamples([(primary_dist.samples[i], dist.samples[i]) for i in range(primary_dist.n) if i < dist.n])
-                    cond = joint.conditional_second(lambda f: f >= upper_val)
+                    bc_cond_filter2 = (lambda f: f <= upper_val) if primary_lib_best else (lambda f: f >= upper_val)
+                    cond = joint.conditional_second(bc_cond_filter2)
                     if cond.n < 2:
                         continue
-                    uc_all = AnalysisPanel._unique_count(dist.samples)
-                    uc_cond = AnalysisPanel._unique_count(cond.samples)
-                    fig2, ax2 = plt.subplots(figsize=(10, 6))
-                    hpa = AnalysisPanel._hist_params(dist.samples, 'black', 0.3, f'{display}(全部)')
-                    ax2.hist(dist.samples, **hpa)
-                    if uc_cond <= 1 and uc_all > 1:
-                        import numpy as np
-                        cval = float(cond.samples[0])
-                        ax2.axvline(cval, color='green', linewidth=3,
-                                    label=f'{display}(最好条件, n={cond.n}, 值={cval:.2f})')
-                    else:
-                        hpb = AnalysisPanel._hist_params(cond.samples, 'green', 0.6, f'{display}(最好条件, n={cond.n})')
-                        ax2.hist(cond.samples, **hpb)
-                    _bc_xlabel = display
-                    if name == 'resource_remaining' and self.use_draw_units:
-                        _bc_xlabel = f'{display} (抽)'
-                    ax2.set_xlabel(_bc_xlabel)
-                    ax2.set_ylabel('频次' if AnalysisPanel._is_discrete(dist.samples) else '密度')
-                    ax2.set_title(f'最好情形: {display} | {primary_name}≥上{1-alpha:.2f}分位')
-                    ax2.legend(fontsize=11)
-                    ax2.grid(alpha=0.3)
-                    plt.tight_layout()
-                    safe_name = name.replace('/', '_').replace(' ', '_')
-                    p2 = str(self.output_dir / f'risk_best_case_{safe_name}.png')
-                    plt.savefig(p2, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts[f'risk_best_case_{name}'] = p2
+                    is_disc2 = AnalysisPanel._is_discrete(dist.samples)
+                    _bc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
+                    bc_cond_op = '≤' if primary_lib_best else '≥'
+                    bc_cond_label2 = best_tail_label_short if primary_lib_best else f'上{1-alpha}分位数'
+                    ovs2 = [HistogramOverlay(
+                        samples=np.array(cond.samples), color='green', opacity=0.6,
+                        label=f'{display}(最好条件, n={cond.n})',
+                    )]
+                    charts[f'risk_best_case_{name}'] = ChartSpec(
+                        chart_type="histogram",
+                        data=HistogramData(
+                            samples=np.array(dist.samples),
+                            mean_line=False,
+                            overlays=ovs2,
+                            density=not is_disc2,
+                        ),
+                        title=f'最好情形: {display} | {primary_name}{bc_cond_op}{bc_cond_label2}',
+                        xlabel=_bc_xlabel,
+                        ylabel='频次' if is_disc2 else '密度',
+                    )
             step_done('最好情形分析')
 
         if 'conditional_dist' in self.selected:
@@ -756,7 +654,7 @@ class AnalysisWorker(QThread):
                 cond_values = [compute_gdr_from_compact(agg, target_specs, cond_key, ssr_ids=ssr_ids) for agg in aggregate_data]
                 target_values = [compute_gdr_from_compact(agg, target_specs, target_key, ssr_ids=ssr_ids) for agg in aggregate_data]
                 _target_unit_suffix = ''
-                if target_key == 'resource_remaining' and self.use_draw_units and self.cost_per_draw > 0:
+                if target_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units and self.cost_per_draw > 0:
                     target_values = [v / self.cost_per_draw for v in target_values]
                     _target_unit_suffix = ' (抽)'
                 joint = JointSamples(list(zip(cond_values, target_values)))
@@ -782,34 +680,50 @@ class AnalysisWorker(QThread):
                             ])
                     if table_rows:
                         headers = ['条件', '样本数', '均值', '中位数', '标准差', f'VaR({alpha})', 'Q25', 'Q75']
-                        charts['conditional_dist'] = ('table', headers, table_rows)
+                        from gacha_simulator.visualization.chart_spec import TableData
+                        cond_gdr_name = self.cond_gdr
+                        target_gdr_name = self.target_gdr
+                        charts['conditional_dist'] = ChartSpec(
+                            chart_type="table",
+                            data=TableData(headers=headers, rows=table_rows),
+                            title=f'{cond_gdr_name} 条件下 {target_gdr_name} 的分布统计量',
+                        )
 
-                    fig, ax = plt.subplots(figsize=(12, 7))
-                    from gacha_simulator.core.distribution import freedman_diaconis_bins
-                    if all_target.n > 0:
-                        ax.hist(all_target.samples, bins=freedman_diaconis_bins(all_target.samples), density=True, edgecolor='black', alpha=0.3, label='全部')
+                    is_disc = AnalysisPanel._is_discrete(all_target.samples)
+                    _cond_unit_suffix = ' (抽)' if (target_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else ''
+                    overlays_cond = []
+                    cond_anns = []
                     if success_target.n > 0:
-                        ax.hist(success_target.samples, bins=freedman_diaconis_bins(success_target.samples), density=True, edgecolor='green', alpha=0.5, label=f'条件≥{success_threshold:.4f}(n={success_target.n})')
+                        overlays_cond.append(HistogramOverlay(
+                            samples=np.array(success_target.samples), color='green', opacity=0.5,
+                            label=f'条件≥{success_threshold:.4f}(n={success_target.n})',
+                        ))
                     if fail_target.n > 0:
-                        ax.hist(fail_target.samples, bins=freedman_diaconis_bins(fail_target.samples), density=True, edgecolor='red', alpha=0.5, label=f'条件<{success_threshold:.4f}(n={fail_target.n})')
+                        overlays_cond.append(HistogramOverlay(
+                            samples=np.array(fail_target.samples), color='red', opacity=0.5,
+                            label=f'条件<{success_threshold:.4f}(n={fail_target.n})',
+                        ))
                     if target_key == 'resource_remaining' and self.no_draw_resource is not None:
                         _ref = self.no_draw_resource
                         if self.use_draw_units and self.cost_per_draw > 0:
                             _ref = _ref / self.cost_per_draw
-                        ax.axvline(_ref, color='green', linestyle='--', linewidth=1.5, label=f'不抽卡基线: {_ref:.1f}')
-                    _cond_unit_suffix = ''
-                    if target_key == 'resource_remaining' and self.use_draw_units:
-                        _cond_unit_suffix = ' (抽)'
-                    ax.set_xlabel(f'{target_name}{_cond_unit_suffix}')
-                    ax.set_ylabel('密度')
-                    ax.set_title(f'条件分布: {target_name}{_target_unit_suffix} | {cond_name} (阈值={success_threshold:.4f})')
-                    ax.legend(fontsize=11)
-                    ax.grid(alpha=0.3)
-                    plt.tight_layout()
-                    p = str(self.output_dir / 'conditional_dist.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts['conditional_dist_chart'] = p
+                        cond_anns.append(ChartAnnotation(
+                            type="vline", value=_ref, color="green", dash="dash",
+                            text=f'不抽卡基线: {_ref:.1f}',
+                        ))
+                    charts['conditional_dist_chart'] = ChartSpec(
+                        chart_type="histogram",
+                        data=HistogramData(
+                            samples=np.array(all_target.samples),
+                            mean_line=False,
+                            overlays=overlays_cond,
+                            density=not is_disc,
+                        ),
+                        title=f'条件分布: {target_name}{_target_unit_suffix} | {cond_name} (阈值={success_threshold:.4f})',
+                        xlabel=f'{target_name}{_cond_unit_suffix}',
+                        ylabel='密度',
+                        annotations=cond_anns,
+                    )
             step_done('条件分布')
 
         if 'time_series' in self.selected:
@@ -817,9 +731,9 @@ class AnalysisWorker(QThread):
             if self.draw_sequences:
                 target_ids = set(ctx.target_specs.keys())
                 target_count = sum(ctx.target_specs.values())
-                fig, ax = plt.subplots(figsize=(12, 7))
                 n_sample = min(20, len(self.draw_sequences))
                 indices = np.random.choice(len(self.draw_sequences), n_sample, replace=False) if len(self.draw_sequences) > n_sample else range(len(self.draw_sequences))
+                ts_traces = []
                 for idx in indices:
                     seq = self.draw_sequences[idx]
                     card_ids = seq.get('draw_card_ids', [])
@@ -829,16 +743,18 @@ class AnalysisWorker(QThread):
                         if cid in target_ids:
                             obtained += 1
                         gdr_series.append(obtained / target_count if target_count > 0 else 0)
-                    ax.plot(range(len(gdr_series)), gdr_series, alpha=0.4, linewidth=0.8)
-                ax.set_xlabel('抽卡序号')
-                ax.set_ylabel('目标达成率')
-                ax.set_title('GDR演化（样本路径）')
-                ax.grid(alpha=0.3)
-                plt.tight_layout()
-                p = str(self.output_dir / 'time_series.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['time_series'] = p
+                    ts_traces.append(ScatterTrace(
+                        x=np.arange(len(gdr_series)), y=np.array(gdr_series),
+                        mode="lines", name=f"样本{idx}",
+                        marker_size=1, line_color=None,
+                    ))
+                charts['time_series'] = ChartSpec(
+                    chart_type="scatter",
+                    data=ScatterData(traces=ts_traces),
+                    title='GDR演化（样本路径）',
+                    xlabel='抽卡序号',
+                    ylabel='目标达成率',
+                )
             step_done('时间序列')
 
         if 'time_heatmap' in self.selected:
@@ -863,12 +779,9 @@ class AnalysisWorker(QThread):
                     ('SSR出数', 'ssr_count', None, None, 25),
                 ]
 
-                fig, axes = plt.subplots(len(gdr_configs), 1, figsize=(12, 4 * len(gdr_configs)),
-                                         squeeze=False)
                 has_content = False
 
                 for row_idx, (gdr_name, gdr_key, vmin_default, vmax_default, n_gdr_bins) in enumerate(gdr_configs):
-                    ax = axes[row_idx, 0]
                     time_gdr_data = {}
                     is_prebinned = gdr_key in heatmap_bins
 
@@ -889,6 +802,10 @@ class AnalysisWorker(QThread):
 
                     if not time_gdr_data:
                         continue
+
+                    if gdr_key == 'resource' and self.use_draw_units and self.cost_per_draw > 0:
+                        time_gdr_data = {k: [v / self.cost_per_draw for v in vals] for k, vals in time_gdr_data.items()}
+                        gdr_name = '资源剩余 (抽)'
 
                     has_content = True
                     sorted_draws = sorted(time_gdr_data.keys())
@@ -934,7 +851,6 @@ class AnalysisWorker(QThread):
                             density_matrix[:, ci] = counts / max(len(col_valid), 1)
 
                     n_yticks = min(7, len(gdr_bin_edges) - 1)
-                    y_tick_pos = np.linspace(0, len(gdr_bin_edges) - 2, n_yticks).astype(int)
                     y_tick_vals = np.linspace(y_lo, y_hi, n_yticks)
                     if gdr_key == 'achievement':
                         y_tick_labels = [f'{v:.0%}' for v in y_tick_vals]
@@ -945,30 +861,22 @@ class AnalysisWorker(QThread):
                     else:
                         y_tick_labels = [f'{v:.2f}' for v in y_tick_vals]
 
-                    im = ax.imshow(density_matrix, aspect='auto', origin='lower',
-                                   cmap='YlOrRd', interpolation='nearest',
-                                   vmin=0, vmax=np.max(density_matrix) if np.max(density_matrix) > 0 else 1)
-                    x_tick_step = max(1, len(sampled_draws) // 10)
-                    ax.set_xticks(range(0, len(sampled_draws), x_tick_step))
-                    ax.set_xticklabels([f'{sampled_draws[i]}' for i in range(0, len(sampled_draws), x_tick_step)],
-                                       rotation=45, ha='right', fontsize=8)
-                    ax.set_yticks(y_tick_pos)
-                    ax.set_yticklabels(y_tick_labels, fontsize=8)
-                    ax.set_xlabel('抽卡次数')
-                    ax.set_ylabel(gdr_name)
-                    ax.set_title(f'{gdr_name} 分布随抽卡次数演化')
-                    cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
-                    cbar.set_label('概率密度', fontsize=8)
+                    col_labels = [f'{sampled_draws[i]}' for i in range(0, len(sampled_draws))]
+                    charts[f'time_heatmap_{gdr_key}'] = ChartSpec(
+                        chart_type="heatmap",
+                        data=HeatmapData(
+                            matrix=density_matrix,
+                            row_labels=y_tick_labels,
+                            col_labels=col_labels,
+                            colorscale="YlOrRd",
+                        ),
+                        title=f'{gdr_name} 分布随抽卡次数演化 ({n_sims} 次模拟)',
+                        xlabel='抽卡次数',
+                        ylabel=gdr_name,
+                    )
 
                 if has_content:
-                    plt.suptitle(f'GDR 时间演化热力图 ({n_sims} 次模拟)', fontsize=14, y=1.01)
-                    plt.tight_layout()
-                    p = str(self.output_dir / 'time_heatmap.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts['time_heatmap'] = p
-                else:
-                    plt.close()
+                    pass  # 各 heatmap 已添加到 charts
             step_done('时间热力图')
 
         if 'waterfall_3d' in self.selected and self.draw_sequences:
@@ -988,16 +896,14 @@ class AnalysisWorker(QThread):
                     time_gdr_data[draw_idx].append(obtained)
                     draw_idx += 1
             if time_gdr_data:
-                from mpl_toolkits.mplot3d import Axes3D
                 sorted_times = sorted(time_gdr_data.keys())
                 t_sample = min(40, len(sorted_times))
                 t_indices = np.linspace(0, len(sorted_times) - 1, t_sample, dtype=int)
                 t_indices = sorted(set(t_indices))
-                cmap = plt.cm.viridis
-                norm_t = plt.Normalize(sorted_times[t_indices[0]], sorted_times[t_indices[-1]])
-                fig = plt.figure(figsize=(16, 11))
-                ax3d = fig.add_subplot(111, projection='3d')
                 gdr_range = range(0, target_count + 1)
+                wf_x = []
+                wf_y = []
+                wf_z = []
                 for idx in t_indices:
                     t_val = sorted_times[idx]
                     data = time_gdr_data[t_val]
@@ -1006,20 +912,22 @@ class AnalysisWorker(QThread):
                         if v in counts_per:
                             counts_per[v] += 1
                     total = len(data)
-                    probs = [counts_per[g] / total for g in gdr_range]
-                    ax3d.plot([t_val] * len(list(gdr_range)), list(gdr_range), probs, color=cmap(norm_t(t_val)), linewidth=1.2, alpha=0.8)
-                sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_t)
-                sm.set_array([])
-                fig.colorbar(sm, ax=ax3d, shrink=0.5, pad=0.1, label='时间步')
-                ax3d.set_xlabel('时间步')
-                ax3d.set_ylabel('目标卡数')
-                ax3d.set_zlabel('概率')
-                ax3d.set_title('3D瀑布图')
-                ax3d.view_init(elev=25, azim=-60)
-                p = str(self.output_dir / 'waterfall_3d.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['waterfall_3d'] = p
+                    for g in gdr_range:
+                        wf_x.append(float(t_val))
+                        wf_y.append(float(g))
+                        wf_z.append(counts_per[g] / total)
+                charts['waterfall_3d'] = ChartSpec(
+                    chart_type="waterfall_3d",
+                    data=Waterfall3DData(
+                        x=np.array(wf_x),
+                        y=np.array(wf_y),
+                        z=np.array(wf_z),
+                    ),
+                    title='3D瀑布图',
+                    xlabel='时间步',
+                    ylabel='目标卡数',
+                    layout_hints={'zlabel': '概率'},
+                )
             step_done('3D瀑布图')
 
         if 'waterfall_2d' in self.selected and self.draw_sequences:
@@ -1043,10 +951,10 @@ class AnalysisWorker(QThread):
                 t_sample = min(25, len(sorted_times))
                 t_indices = np.linspace(0, len(sorted_times) - 1, t_sample, dtype=int)
                 t_indices = sorted(set(t_indices))
-                cmap = plt.cm.viridis
-                norm_t = plt.Normalize(sorted_times[t_indices[0]], sorted_times[t_indices[-1]])
-                fig, ax = plt.subplots(figsize=(12, 8))
+                t_min = sorted_times[t_indices[0]]
+                t_max = sorted_times[t_indices[-1]]
                 gdr_range = range(0, target_count + 1)
+                wf2d_traces = []
                 for idx in t_indices:
                     t_val = sorted_times[idx]
                     data = time_gdr_data[t_val]
@@ -1056,18 +964,24 @@ class AnalysisWorker(QThread):
                             counts_per[v] += 1
                     total = len(data)
                     probs = [counts_per[g] / total for g in gdr_range]
-                    ax.plot(list(gdr_range), probs, color=cmap(norm_t(t_val)), linewidth=1.2, alpha=0.7)
-                sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm_t)
-                sm.set_array([])
-                plt.colorbar(sm, ax=ax, label='时间步')
-                ax.set_xlabel('目标卡数量')
-                ax.set_ylabel('概率')
-                ax.set_title('2D瀑布图')
-                ax.grid(alpha=0.3)
-                p = str(self.output_dir / 'waterfall_2d.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['waterfall_2d'] = p
+                    # 使用 viridis 色阶计算颜色
+                    frac = (t_val - t_min) / max(t_max - t_min, 1)
+                    r = int((0.267 + frac * (0.993 - 0.267)) * 255)
+                    g2 = int((0.004 + frac * (0.906 - 0.004)) * 255)
+                    b = int((0.329 + frac * (0.144 - 0.329)) * 255)
+                    color_hex = f'#{r:02x}{g2:02x}{b:02x}'
+                    wf2d_traces.append(ScatterTrace(
+                        x=np.array(list(gdr_range)), y=np.array(probs),
+                        mode="lines", name=f't={int(t_val)}',
+                        marker_size=1, line_color=color_hex,
+                    ))
+                charts['waterfall_2d'] = ChartSpec(
+                    chart_type="scatter",
+                    data=ScatterData(traces=wf2d_traces),
+                    title='2D瀑布图',
+                    xlabel='目标卡数量',
+                    ylabel='概率',
+                )
             step_done('2D瀑布图')
 
         if any(k in self.selected for k in ('per_pool_draws', 'per_pool_target_rate', 'per_pool_pity_rate')):
@@ -1095,43 +1009,40 @@ class AnalysisWorker(QThread):
             stats = per_pool_summary_stats(batch_snaps)
             if stats:
                 pool_ids = sorted(stats.keys())
-                short_ids = [pid.replace('pool_', 'p').replace('exchange_', 'e')[:12] for pid in pool_ids]
+                short_ids = [_strip_pid(pid) for pid in pool_ids]
 
                 if 'per_pool_draws' in self.selected:
-                    fig, ax = plt.subplots(figsize=(10, max(5, len(pool_ids) * 0.6 + 1)))
                     vals = [stats[pid].get('mean_draws', 0) for pid in pool_ids]
-                    ax.barh(short_ids, vals, color='#2196F3', alpha=0.7)
-                    ax.set_title('每池平均抽卡数', fontsize=14)
-                    ax.grid(alpha=0.3, axis='x')
-                    plt.tight_layout()
-                    p = str(self.output_dir / 'per_pool_draws.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts['per_pool_draws'] = p
+                    charts['per_pool_draws'] = ChartSpec(
+                        chart_type="bar",
+                        data=BarData(labels=short_ids, values=np.array(vals), orientation="h"),
+                        title='每池平均抽卡数',
+                        xlabel='抽卡数',
+                        ylabel='池子',
+                        layout_hints={'color': '#2196F3'},
+                    )
 
                 if 'per_pool_target_rate' in self.selected:
-                    fig, ax = plt.subplots(figsize=(10, max(5, len(pool_ids) * 0.6 + 1)))
                     vals = [stats[pid].get('target_count', 0) for pid in pool_ids]
-                    ax.barh(short_ids, vals, color='#4CAF50', alpha=0.7)
-                    ax.set_title('每池目标卡数', fontsize=14)
-                    ax.grid(alpha=0.3, axis='x')
-                    plt.tight_layout()
-                    p = str(self.output_dir / 'per_pool_target_rate.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts['per_pool_target_rate'] = p
+                    charts['per_pool_target_rate'] = ChartSpec(
+                        chart_type="bar",
+                        data=BarData(labels=short_ids, values=np.array(vals), orientation="h"),
+                        title='每池目标卡数',
+                        xlabel='目标卡数',
+                        ylabel='池子',
+                        layout_hints={'color': '#4CAF50'},
+                    )
 
                 if 'per_pool_pity_rate' in self.selected:
-                    fig, ax = plt.subplots(figsize=(10, max(5, len(pool_ids) * 0.6 + 1)))
                     vals = [stats[pid].get('pity_count', 0) for pid in pool_ids]
-                    ax.barh(short_ids, vals, color='#FF9800', alpha=0.7)
-                    ax.set_title('每池保底数', fontsize=14)
-                    ax.grid(alpha=0.3, axis='x')
-                    plt.tight_layout()
-                    p = str(self.output_dir / 'per_pool_pity_rate.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts['per_pool_pity_rate'] = p
+                    charts['per_pool_pity_rate'] = ChartSpec(
+                        chart_type="bar",
+                        data=BarData(labels=short_ids, values=np.array(vals), orientation="h"),
+                        title='每池保底数',
+                        xlabel='保底数',
+                        ylabel='池子',
+                        layout_hints={'color': '#FF9800'},
+                    )
 
             step_done('每池分析')
 
@@ -1168,7 +1079,7 @@ class AnalysisWorker(QThread):
                 step_done('截止每池的GDR分布')
             else:
                 pool_ids = sorted(cum_data.keys())
-                short_ids = [pid.replace('pool_', 'p').replace('exchange_', 'e')[:12] for pid in pool_ids]
+                short_ids = [_strip_pid(pid) for pid in pool_ids]
                 _gdr_key_by_name = _display_to_key
                 _cum_data_keys = {
                     '简单目标达成率': 'target_achievement_rate',
@@ -1198,7 +1109,7 @@ class AnalysisWorker(QThread):
                                     pass
                         pool_dists.append(raw)
 
-                    if metric_key == 'resource_remaining' and self.use_draw_units and self.cost_per_draw > 0:
+                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units and self.cost_per_draw > 0:
                         pool_dists = [[v / self.cost_per_draw for v in d] for d in pool_dists]
 
                     per_pool_baselines = {}
@@ -1212,90 +1123,30 @@ class AnalysisWorker(QThread):
                                 per_pool_baselines[pid] = baseline
 
                     n_pools = len(pool_ids)
-                    fig, axes = plt.subplots(n_pools, 1, figsize=(10, 1.8 * n_pools), sharex=True)
-                    if n_pools == 1:
-                        axes = [axes]
-
-                    all_vals = [v for d in pool_dists for v in d]
-                    if all_vals:
-                        x_min, x_max = min(all_vals), max(all_vals)
-                        margin = (x_max - x_min) * 0.02 if x_max > x_min else 0.5
-                        x_min -= margin
-                        x_max += margin
-                    else:
-                        x_min, x_max = 0, 1
-
-                    from gacha_simulator.core.distribution import freedman_diaconis_bins
-                    num_bins = freedman_diaconis_bins(all_vals)
-                    bin_edges = np.linspace(x_min, x_max, num_bins + 1)
-                    colors = plt.cm.viridis(np.linspace(0.2, 0.9, n_pools))
-
-                    # 计算全局最大频次，避免每池独立归一化导致分布形状不可比
-                    global_max_count = 0
-                    for dist in pool_dists:
+                    ridge_series = {}
+                    for sid, dist in zip(short_ids, pool_dists):
                         if dist:
-                            counts, _ = np.histogram(dist, bins=bin_edges)
-                            global_max_count = max(global_max_count, max(counts))
-                    if global_max_count == 0:
-                        global_max_count = 1
-
-                    for idx, (ax, dist, sid) in enumerate(zip(axes, pool_dists, short_ids)):
-                        if not dist:
-                            ax.text(0.5, 0.5, '无数据', ha='center', va='center',
-                                    transform=ax.transAxes, fontsize=9)
-                            ax.set_yticks([])
-                            ax.spines['top'].set_visible(False)
-                            ax.spines['right'].set_visible(False)
-                            ax.spines['left'].set_visible(False)
-                            ax.set_ylabel(sid, rotation=0, ha='right', va='center',
-                                          fontsize=10, fontweight='bold')
-                            continue
-
-                        counts, _ = np.histogram(dist, bins=bin_edges)
-                        density = counts / global_max_count
-                        y_pad = np.append(density, density[-1])
-
-                        ax.step(bin_edges, y_pad, where='post',
-                                color=colors[idx], linewidth=1.2)
-                        ax.fill_between(bin_edges, y_pad, step='post',
-                                        alpha=0.45, color=colors[idx])
-
-                        mean_val = np.mean(dist)
-                        ax.axvline(x=mean_val, color='red', linestyle='--',
-                                   linewidth=1, alpha=0.7)
-
-                        _pid = pool_ids[idx]
-                        _pool_baseline = per_pool_baselines.get(_pid)
-                        if _pool_baseline is not None:
-                            ax.axvline(x=_pool_baseline, color='green', linestyle='--',
-                                       linewidth=1.5, alpha=0.7)
-
-                        ax.set_ylim(0, 1.25)
-                        ax.set_yticks([])
-                        ax.spines['top'].set_visible(False)
-                        ax.spines['right'].set_visible(False)
-                        ax.spines['left'].set_visible(False)
-                        ax.set_ylabel(sid, rotation=0, ha='right', va='center',
-                                      fontsize=10, fontweight='bold')
-
-                        if idx < n_pools - 1:
-                            ax.spines['bottom'].set_visible(False)
-                            ax.tick_params(labelbottom=False)
-
+                            ridge_series[sid] = np.array(dist)
+                    # 将基线 key 从完整 pool_id 映射为 short_id
+                    ridge_baselines = {}
+                    for pid, baseline in per_pool_baselines.items():
+                        short_pid = _strip_pid(pid)
+                        if short_pid in ridge_series:
+                            ridge_baselines[short_pid] = baseline
                     _xlabel = metric_name
-                    if metric_key == 'resource_remaining' and self.use_draw_units:
+                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                         _xlabel = f'{metric_name} (抽)'
-                    axes[-1].set_xlabel(_xlabel, fontsize=11)
                     _cum_title = f'{metric_name} (截止每池)'
-                    if metric_key == 'resource_remaining' and self.use_draw_units:
+                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                         _cum_title = f'{metric_name} (抽, 截止每池)'
-                    fig.suptitle(_cum_title, fontsize=13, fontweight='bold', y=0.995)
-                    plt.tight_layout()
-                    safe_name = metric_name.replace('/', '_').replace(' ', '_')
-                    p = str(self.output_dir / f'cumulative_by_pool_{safe_name}.png')
-                    plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                    plt.close()
-                    charts[f'cumulative_by_pool_{metric_name}'] = p
+                    if ridge_series:
+                        charts[f'cumulative_by_pool_{metric_name}'] = ChartSpec(
+                            chart_type="ridge",
+                            data=RidgeData(series=ridge_series, baselines=ridge_baselines),
+                            title=_cum_title,
+                            xlabel=_xlabel,
+                            ylabel='池子',
+                        )
                 step_done('截止每池的GDR分布')
 
         if 'draws_vs_gdr' in self.selected:
@@ -1303,17 +1154,14 @@ class AnalysisWorker(QThread):
             dist = gdr_dists.get('target_achievement')
             if dist and dist.n > 0:
                 draws_per = [agg.get('total_draws', 0) for agg in aggregate_data]
-                fig, ax = plt.subplots(figsize=(10, 7))
-                ax.scatter(draws_per, dist.samples, alpha=0.3, s=10)
-                ax.set_xlabel('总抽卡数')
-                ax.set_ylabel('简单目标达成率')
-                ax.set_title('抽卡数 vs 简单目标达成率')
-                ax.grid(alpha=0.3)
-                plt.tight_layout()
-                p = str(self.output_dir / 'draws_vs_gdr.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['draws_vs_gdr'] = p
+                draws_per = [agg.get('total_draws', 0) for agg in aggregate_data]
+                charts['draws_vs_gdr'] = ChartSpec(
+                    chart_type="scatter",
+                    data=ScatterData(x=np.array(draws_per), y=np.array(dist.samples), mode="markers"),
+                    title='抽卡数 vs 简单目标达成率',
+                    xlabel='总抽卡数',
+                    ylabel='简单目标达成率',
+                )
             step_done('抽卡数-目标达成率散点图')
 
         if 'correlation' in self.selected:
@@ -1321,117 +1169,127 @@ class AnalysisWorker(QThread):
             names = [n for n in gdr_dists if gdr_dists[n].n > 1]
             if len(names) >= 2:
                 data_matrix = np.array([gdr_dists[n].samples for n in names])
-                corr = np.corrcoef(data_matrix)
-                fig, ax = plt.subplots(figsize=(max(10, len(names)), max(8, len(names))))
-                im = ax.imshow(corr, cmap='RdBu_r', vmin=-1, vmax=1)
-                ax.set_xticks(range(len(names)))
-                ax.set_yticks(range(len(names)))
+                # 过滤零方差 GDR（如二元指标全部为 0 或全部为 1，导致 corrcoef 除零）
+                stds = np.std(data_matrix, axis=1)
+                valid_mask = stds > 1e-12
+                if valid_mask.sum() >= 2:
+                    data_matrix = data_matrix[valid_mask]
+                    names = [n for n, v in zip(names, valid_mask) if v]
+                    corr = np.corrcoef(data_matrix)
+                else:
+                    corr = np.zeros((len(names), len(names)))
                 short = [_key_to_display.get(n, n)[:8] for n in names]
-                ax.set_xticklabels(short, rotation=45, ha='right', fontsize=11)
-                ax.set_yticklabels(short, fontsize=11)
-                for i in range(len(names)):
-                    for j in range(len(names)):
-                        ax.text(j, i, f'{corr[i, j]:.2f}', ha='center', va='center', fontsize=10, color='white' if abs(corr[i, j]) > 0.5 else 'black')
-                plt.colorbar(im, ax=ax, label='相关系数')
-                ax.set_title('GDR指标相关性')
-                plt.tight_layout()
-                p = str(self.output_dir / 'correlation.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['correlation'] = p
+                charts['correlation'] = ChartSpec(
+                    chart_type="heatmap",
+                    data=HeatmapData(
+                        matrix=corr,
+                        row_labels=short,
+                        col_labels=short,
+                        colorscale="RdBu_r",
+                    ),
+                    title='GDR指标相关性',
+                )
             step_done('相关性分析')
 
-        if 'transition_analysis' in self.selected and self.pool_end_times:
-            self._emit('生成转变分析...', int(completed / total_steps * 100))
-            from gacha_simulator.core.per_pool_analysis import TransitionMatrix
-
-            sorted_pools = sorted(self.pool_end_times.items(), key=lambda x: x[1])
-            pool_ids_ordered = [pid for pid, _ in sorted_pools]
-            n_pools = len(pool_ids_ordered)
-            criteria = self.success_criteria
-
-            if criteria == 'all_targets' and self.transition_flags:
-                success_flags_per_sim = self.transition_flags
-                n_sims = len(success_flags_per_sim)
-            else:
-                success_flags_per_sim = _compute_transition_flags(
-                    self.draw_sequences, sorted_pools, criteria,
-                    ctx, ssr_ids, target_specs,
-                )
-                n_sims = len(success_flags_per_sim)
-
+        if 'transition_analysis' in self.selected:
             trans = []
-            if n_sims > 0 and n_pools > 0:
-                for i in range(n_pools):
-                    to_pid = pool_ids_ordered[i]
-                    from_pid = pool_ids_ordered[i - 1] if i > 0 else '(初始)'
+            if not self.pool_end_times:
+                self._emit('警告: 转变分析需要池结束时间数据，但当前为空，已跳过',
+                           int(completed / total_steps * 100))
+            else:
+                self._emit('生成转变分析...', int(completed / total_steps * 100))
+                from gacha_simulator.core.per_pool_analysis import (
+                    compute_transition_matrices_from_flags,
+                    compute_transition_flags_from_gdr,
+                )
 
-                    if i == 0:
-                        before = [False] * n_sims
-                    else:
-                        before = [success_flags_per_sim[s][i - 1] for s in range(n_sims) if i - 1 < len(success_flags_per_sim[s])]
-                    after = [success_flags_per_sim[s][i] for s in range(n_sims) if i < len(success_flags_per_sim[s])]
+                sorted_pools = sorted(self.pool_end_times.items(), key=lambda x: x[1])
+                pool_ids_ordered = [pid for pid, _ in sorted_pools]
 
-                    n_eff = min(len(before), len(after))
-                    before = before[:n_eff]
-                    after = after[:n_eff]
+                # 优先使用 streaming 提取器预计算的 transition_flags（已修正计数逻辑）
+                if self.transition_flags:
+                    success_flags_per_sim = self.transition_flags
+                elif self.cumulative_snapshots or self.draw_sequences:
+                    criteria_map = {
+                        'all_targets':      ('all_targets',       'cumulative',  1.0),
+                        'any_ssr':          ('ssr_collection',    'cumulative',  0.01),
+                        'per_pool_target':  ('target_card_draws', 'single_pool', 1.0),
+                    }
+                    gdr_key, scope, threshold = criteria_map.get(
+                        self.success_criteria, ('all_targets', 'cumulative', 1.0)
+                    )
+                    success_flags_per_sim = compute_transition_flags_from_gdr(
+                        self.cumulative_snapshots, pool_ids_ordered,
+                        target_specs, gdr_key=gdr_key, threshold=threshold,
+                        scope=scope, aggregates=self.results,
+                        ssr_ids=ssr_ids,
+                    )
+                else:
+                    self._emit('警告: 转变分析缺少数据——transition_flags 和 cumulative_snapshots 均为空',
+                               int(completed / total_steps * 100))
+                    success_flags_per_sim = []
 
-                    ss = sum(1 for b, a in zip(before, after) if b and a)
-                    sf = sum(1 for b, a in zip(before, after) if b and not a)
-                    fs = sum(1 for b, a in zip(before, after) if not b and a)
-                    ff = sum(1 for b, a in zip(before, after) if not b and not a)
-
-                    s_before = sum(1 for b in before if b)
-                    s_after = sum(1 for a in after if a)
-
-                    trans.append(TransitionMatrix(
-                        from_pool_id=from_pid,
-                        to_pool_id=to_pid,
-                        success_to_success=ss / s_before if s_before > 0 else 0,
-                        success_to_fail=sf / s_before if s_before > 0 else 0,
-                        fail_to_success=fs / (n_eff - s_before) if (n_eff - s_before) > 0 else 0,
-                        fail_to_fail=ff / (n_eff - s_before) if (n_eff - s_before) > 0 else 0,
-                        success_rate_before=s_before / n_eff if n_eff > 0 else 0,
-                        success_rate_after=s_after / n_eff if n_eff > 0 else 0,
-                    ))
+                trans = compute_transition_matrices_from_flags(
+                    success_flags_per_sim, pool_ids_ordered,
+                )
+                if not trans:
+                    self._emit('警告: 转变分析无足够数据生成转移矩阵（池数={}，模拟数={}）'.format(
+                        len(pool_ids_ordered), len(success_flags_per_sim)),
+                        int(completed / total_steps * 100))
             if trans:
                 n_trans = len(trans)
-                fig = plt.figure(figsize=(20, 6 + 3 * n_trans))
+                # 使用池名替代池 ID
+                def _pool_label(pid):
+                    return self.pool_names.get(pid, pid)
+                transition_labels = [f'{_pool_label(t.from_pool_id)}→{_pool_label(t.to_pool_id)}' for t in trans]
 
-                ax_rates = fig.add_subplot(2, 1, 1)
-                transition_labels = [f'{t.from_pool_id[:8]}→{t.to_pool_id[:8]}' for t in trans]
-                x = range(n_trans)
-                ax_rates.plot(x, [t.success_rate_before for t in trans], 'o-', label='转移前成功率', color='#2196F3')
-                ax_rates.plot(x, [t.success_rate_after for t in trans], 's-', label='转移后成功率', color='#4CAF50')
-                ax_rates.set_xticks(x)
-                ax_rates.set_xticklabels(transition_labels, rotation=45, ha='right', fontsize=11)
-                ax_rates.set_ylabel('成功率')
-                ax_rates.set_title('相邻池子间成功率变化')
-                ax_rates.legend()
-                ax_rates.grid(alpha=0.3)
+                # 成功率变化折线图
+                ts_rates_traces = [
+                    ScatterTrace(
+                        x=np.arange(n_trans),
+                        y=np.array([t.success_rate_before for t in trans]),
+                        mode="lines+markers", name='转移前成功率',
+                        marker_size=8, line_color='#2196F3',
+                    ),
+                    ScatterTrace(
+                        x=np.arange(n_trans),
+                        y=np.array([t.success_rate_after for t in trans]),
+                        mode="lines+markers", name='转移后成功率',
+                        marker_size=8, line_color='#4CAF50',
+                        marker_symbol="square",
+                    ),
+                ]
+                charts['transition_analysis_rates'] = ChartSpec(
+                    chart_type="scatter",
+                    data=ScatterData(traces=ts_rates_traces),
+                    title='相邻池子间成功率变化',
+                    xlabel='转移',
+                    ylabel='成功率',
+                )
 
-                for i, t in enumerate(trans):
-                    ax_mat = fig.add_subplot(2, n_trans, n_trans + i + 1)
-                    mat = [[t.success_to_success, t.success_to_fail],
-                           [t.fail_to_success, t.fail_to_fail]]
-                    im = ax_mat.imshow(mat, cmap='Blues', vmin=0, vmax=1)
-                    ax_mat.set_xticks([0, 1])
-                    ax_mat.set_yticks([0, 1])
-                    ax_mat.set_xticklabels(['成功', '失败'], fontsize=11)
-                    ax_mat.set_yticklabels(['成功', '失败'], fontsize=11)
-                    ax_mat.set_xlabel('转移后', fontsize=11)
-                    ax_mat.set_ylabel('转移前', fontsize=11)
-                    ax_mat.set_title(f'{t.from_pool_id[:6]}→{t.to_pool_id[:6]}', fontsize=11)
-                    for r in range(2):
-                        for c in range(2):
-                            ax_mat.text(c, r, f'{mat[r][c]:.3f}', ha='center', va='center',
-                                        fontsize=10, color='white' if mat[r][c] > 0.5 else 'black')
-
-                plt.tight_layout()
-                p = str(self.output_dir / 'transition_analysis.png')
-                plt.savefig(p, dpi=400, bbox_inches='tight', pad_inches=0.15)
-                plt.close()
-                charts['transition_analysis'] = p
+                # 所有转移矩阵合并为一张子图网格
+                matrices = []
+                grid_titles = []
+                for t in trans:
+                    mat = np.array([
+                        [t.success_to_success, t.success_to_fail],
+                        [t.fail_to_success, t.fail_to_fail],
+                    ])
+                    matrices.append(mat)
+                    grid_titles.append(f'{_pool_label(t.from_pool_id)}→{_pool_label(t.to_pool_id)}')
+                from gacha_simulator.visualization.chart_spec import SubplotGridData
+                charts['transition_analysis_matrices'] = ChartSpec(
+                    chart_type="subplot_grid",
+                    data=SubplotGridData(
+                        matrices=matrices,
+                        titles=grid_titles,
+                        row_labels=['成功', '失败'],
+                        col_labels=['成功', '失败'],
+                        colorscale="Blues",
+                        cols=4,
+                    ),
+                    title='转移概率矩阵',
+                )
             step_done('转变分析')
 
         self._emit('完成', 100)
@@ -1448,8 +1306,9 @@ class AnalysisPanel(QWidget):
         self._heatmap_data = {}
         self._cumulative_snapshots = {}
         self._transition_flags = []
-        self._result_units = {}
         self._computed_conditions = {}
+        self._chart_specs_cache: dict[str, object] = {}
+        self._chart_webview_initialized = False
         self._summary_data = {}
         self._store = None
         self.output_dir = Path(os.getcwd()) / 'output' / 'analysis'
@@ -1459,6 +1318,14 @@ class AnalysisPanel(QWidget):
     def set_store(self, store):
         self._store = store
         self._update_cost_per_draw_default()
+
+    def _get_pool_names(self):
+        """构建 {pool_id: pool_name} 映射。"""
+        names = {}
+        if self._store and hasattr(self._store, 'pools'):
+            for pe in self._store.pools:
+                names[pe.pool_id] = getattr(pe, 'name', pe.pool_id)
+        return names
 
     def _extract_cost_per_draw(self):
         if self._store is None or not self._store.pools:
@@ -1527,6 +1394,14 @@ class AnalysisPanel(QWidget):
         self.alpha_spin.setSingleStep(0.01)
         self.alpha_spin.setDecimals(2)
         param_layout.addWidget(self.alpha_spin, 0, 1)
+        param_layout.addWidget(QLabel("Bootstrap 置信水平:"), 1, 0)
+        self.ci_level_spin = _NoWheelDoubleSpinBox()
+        self.ci_level_spin.setRange(0.80, 0.99)
+        self.ci_level_spin.setValue(0.95)
+        self.ci_level_spin.setSingleStep(0.01)
+        self.ci_level_spin.setDecimals(2)
+        self.ci_level_spin.setToolTip("Bootstrap 置信区间的置信水平（80%~99%），影响均值/中位数/VaR 列的 CI 宽度")
+        param_layout.addWidget(self.ci_level_spin, 1, 1)
         layout.addWidget(param_group)
 
         unit_group = QGroupBox("图表单位")
@@ -1543,7 +1418,10 @@ class AnalysisPanel(QWidget):
         layout.addWidget(unit_group)
 
         from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY as _UNIFIED_GDR_REGISTRY
-        _gdr_names = [defn.display_name for defn in _UNIFIED_GDR_REGISTRY.values()]
+        _gdr_names = [
+            ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+            for defn in _UNIFIED_GDR_REGISTRY.values()
+        ]
 
         self._items = {}
         self._gdr_dist_checks = {}
@@ -1772,6 +1650,13 @@ class AnalysisPanel(QWidget):
         self._placeholder_label.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
         self._results_layout.addWidget(self._placeholder_label)
 
+        from gacha_simulator.gui.chart_webview import ChartWebView
+        self.chart_webview = ChartWebView()
+        self.chart_webview.setVisible(False)
+        self.chart_webview.setMinimumHeight(800)
+        self.chart_webview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._results_layout.addWidget(self.chart_webview)
+
         self._results_scroll.setWidget(self._results_container)
         return self._results_scroll
 
@@ -1889,6 +1774,8 @@ class AnalysisPanel(QWidget):
 
     def _get_conditions_for_key(self, key):
         cond = {'alpha': self.alpha_spin.value()}
+        if key == 'gdr_statistics':
+            cond['ci_level'] = self.ci_level_spin.value()
         if key == 'transition_analysis':
             cond['success_criteria'] = self.success_criteria_combo.currentData()
         if key in ('conditional_dist', 'conditional_dist_chart'):
@@ -1939,6 +1826,7 @@ class AnalysisPanel(QWidget):
 
             self._pending_statistics = need_statistics
 
+            pool_names = self._get_pool_names()
             self._worker = AnalysisWorker(
                 self.results, self._gdr_context, self._pool_end_times,
                 chart_keys, self.alpha_spin.value(), self.output_dir,
@@ -1960,9 +1848,11 @@ class AnalysisPanel(QWidget):
                 cost_per_draw=self.cost_per_draw_spin.value(),
                 no_draw_resource=self._no_draw_resource,
                 no_draw_pool_resources=self._no_draw_pool_resources,
+                pool_names=pool_names,
             )
             self._worker.progress.connect(self._on_progress)
             self._worker.finished.connect(self._on_analysis_done)
+            self._worker.error.connect(self._on_analysis_error)
             self._worker.start()
         else:
             if need_statistics:
@@ -1975,40 +1865,44 @@ class AnalysisPanel(QWidget):
         self.status_label.setText(msg)
         self.progress_bar.setValue(pct)
 
+    def _on_analysis_error(self, err_msg):
+        self.run_btn.setEnabled(True)
+        self.progress_bar.setValue(0)
+        self.status_label.setText(f"分析失败：{err_msg[:100]}...")
+        if self._placeholder_label:
+            self._placeholder_label.setVisible(False)
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "分析异常", err_msg)
+
     def _on_analysis_done(self, charts):
         from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY
+        from gacha_simulator.visualization.chart_spec import ChartSpec
         key_to_display = {k: d.display_name for k, d in UNIFIED_GDR_REGISTRY.items()}
+
+        # 收集所有 ChartSpec（表格已统一为 chart_type="table"）
+        chart_specs = {}
         for key, data in charts.items():
-            title = _KEY_TITLE_MAP.get(key)
-            if title is None and key.startswith('gdr_dist_'):
-                metric_name = key[len('gdr_dist_'):]
-                title = f'{metric_name} 分布'
-            if title is None and key.startswith('cumulative_by_pool_'):
-                metric_name = key[len('cumulative_by_pool_'):]
-                title = f'{metric_name} (截止每池)'
-            if title is None and key.startswith('risk_worst_case_') and not key.endswith('_chart'):
-                metric_name = key[len('risk_worst_case_'):]
-                metric_display = key_to_display.get(metric_name, metric_name)
-                title = f'最差情形: {metric_display}'
-            if title is None and key.startswith('risk_best_case_') and not key.endswith('_chart'):
-                metric_name = key[len('risk_best_case_'):]
-                metric_display = key_to_display.get(metric_name, metric_name)
-                title = f'最好情形: {metric_display}'
-            if title is None:
-                title = key
-            if key in self._result_units:
-                unit = self._result_units[key]
+            if isinstance(data, ChartSpec):
+                chart_specs[key] = data
+
+        # 图表型结果：使用 ChartWebView
+        if chart_specs:
+            self.chart_webview.setVisible(True)
+            # 判断哪些 chart key 是全新的（HTML 中尚无对应 div）
+            new_keys = {k for k in chart_specs if not self.chart_webview.has_chart(k)}
+            if self._chart_webview_initialized and not new_keys:
+                # 纯增量更新：所有 key 均已存在于 HTML 中，只更新数据
+                for key, spec in chart_specs.items():
+                    self.chart_webview.update_chart(key, spec)
+                    self._computed_conditions[key] = self._get_conditions_for_key(key)
+                self._chart_specs_cache.update(chart_specs)  # 同步缓存，避免后续全量重建时混入过期数据
             else:
-                unit = ResultUnit(key, title)
-                unit.export_btn.clicked.connect(lambda checked, k=key: self._export_unit(k))
-                self._results_layout.addWidget(unit)
-                self._result_units[key] = unit
-            if isinstance(data, tuple) and len(data) == 3 and data[0] == 'table':
-                _, headers, rows = data
-                unit.set_table(headers, rows)
-            else:
-                unit.set_chart(data)
-            self._computed_conditions[key] = self._get_conditions_for_key(key)
+                # 有新增图表或首次加载：合并到缓存后全量重建 HTML
+                self._chart_specs_cache.update(chart_specs)
+                self.chart_webview.set_charts(self._get_ordered_charts(), use_tabs=False)
+                self._chart_webview_initialized = True
+                for key in chart_specs:
+                    self._computed_conditions[key] = self._get_conditions_for_key(key)
 
         if any(k.startswith('gdr_dist_') for k in charts):
             self._computed_conditions['gdr_dist'] = self._get_conditions_for_key('gdr_dist')
@@ -2018,6 +1912,10 @@ class AnalysisPanel(QWidget):
             self._computed_conditions['risk_worst_case'] = self._get_conditions_for_key('risk_worst_case')
         if any(k.startswith('risk_best_case_') for k in charts):
             self._computed_conditions['risk_best_case'] = self._get_conditions_for_key('risk_best_case')
+        if any(k.startswith('time_heatmap_') for k in charts):
+            self._computed_conditions['time_heatmap'] = self._get_conditions_for_key('time_heatmap')
+        if any(k.startswith('transition_analysis_') for k in charts):
+            self._computed_conditions['transition_analysis'] = self._get_conditions_for_key('transition_analysis')
 
         if getattr(self, '_pending_statistics', False):
             self._compute_statistics_unit()
@@ -2032,28 +1930,36 @@ class AnalysisPanel(QWidget):
 
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
-        self.status_label.setText(f"完成，共 {len(self._result_units)} 个结果单元")
-
-        last_key = list(charts.keys())[-1] if charts else None
-        if last_key and last_key in self._result_units:
-            self._results_scroll.ensureWidgetVisible(self._result_units[last_key])
+        chart_count = len(chart_specs)
+        self.status_label.setText(f"完成，共 {chart_count} 个图表")
 
     def _compute_statistics_unit(self):
         if not self.results or not self._gdr_context:
             return
 
         from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact
+        from gacha_simulator.core.bootstrap import BootstrapEngine
         import numpy as np
 
         target_specs = self._gdr_context.target_specs if self._gdr_context else {}
         ssr_ids = self._gdr_context.ssr_ids if self._gdr_context else set()
 
-        headers = ["指标", "均值", "中位数", "标准差", f"VaR({self.alpha_spin.value():.0%})"]
+        alpha = self.alpha_spin.value()
+        ci_level = self.ci_level_spin.value()
+        ci_pct = f"{ci_level:.0%}"
+        headers = [
+            "指标",
+            "均值", f"均值 {ci_pct} CI",
+            "中位数", f"中位数 {ci_pct} CI",
+            "标准差",
+            f"VaR({alpha:.0%})", f"VaR {ci_pct} CI",
+        ]
         rows = []
         self._summary_data = {}
 
         use_draw_units = self.draw_unit_cb.isChecked()
         cost_per_draw = self.cost_per_draw_spin.value()
+        engine = BootstrapEngine(B=1000, ci_level=ci_level, random_seed=42)
 
         from gacha_simulator.core.distribution import EmpiricalDistribution
         for key, defn in UNIFIED_GDR_REGISTRY.items():
@@ -2062,71 +1968,113 @@ class AnalysisPanel(QWidget):
                 for r in self.results:
                     v = compute_gdr_from_compact(r, target_specs, key, ssr_ids=ssr_ids)
                     vals.append(v)
-                if key == 'resource_remaining' and use_draw_units and cost_per_draw > 0:
+                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units and cost_per_draw > 0:
                     vals = [v / cost_per_draw for v in vals]
+                n = len(vals)
                 mean_val = np.mean(vals)
                 median_val = np.median(vals)
                 std_val = np.std(vals)
-                var_val = EmpiricalDistribution(vals).var(self.alpha_spin.value())
-                _display_name = defn.display_name
-                if key == 'resource_remaining' and use_draw_units:
+                var_val = EmpiricalDistribution(vals).var(alpha)
+                _display_name = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units:
                     _display_name = f'{_display_name} (抽)'
-                rows.append([_display_name, f"{mean_val:.4f}", f"{median_val:.4f}", f"{std_val:.4f}", f"{var_val:.4f}"])
+
+                if n >= 100:
+                    try:
+                        mean_res = engine.bootstrap_mean(vals, use_bca=True)
+                        mean_ci = f"[{mean_res.ci_lower:.4f}, {mean_res.ci_upper:.4f}]"
+                    except Exception:
+                        mean_ci = "—"
+
+                    try:
+                        median_res = engine.bootstrap_quantile(vals, q=0.5)
+                        median_ci = f"[{median_res.ci_lower:.4f}, {median_res.ci_upper:.4f}]"
+                    except Exception:
+                        median_ci = "—"
+
+                    try:
+                        if alpha <= 0.1:
+                            var_ci = "待实现"
+                        else:
+                            var_res = engine.bootstrap_quantile(vals, q=alpha, use_gpd=False)
+                            var_ci = f"[{var_res.ci_lower:.4f}, {var_res.ci_upper:.4f}]"
+                    except Exception:
+                        var_ci = "—"
+                else:
+                    mean_ci = "样本不足"
+                    median_ci = "样本不足"
+                    var_ci = "样本不足"
+
+                rows.append([
+                    _display_name,
+                    f"{mean_val:.4f}", mean_ci,
+                    f"{median_val:.4f}", median_ci,
+                    f"{std_val:.4f}",
+                    f"{var_val:.4f}", var_ci,
+                ])
                 self._summary_data[_display_name] = {'mean': f"{mean_val:.4f}"}
             except Exception:
-                _display_name = defn.display_name
-                if key == 'resource_remaining' and use_draw_units:
+                _display_name = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units:
                     _display_name = f'{_display_name} (抽)'
-                rows.append([_display_name, "-", "-", "-"])
+                rows.append([_display_name, "-", "-", "-", "-", "-", "-", "-"])
                 self._summary_data[_display_name] = {'mean': "-"}
 
         key = 'gdr_statistics'
-        title = _KEY_TITLE_MAP.get(key, 'GDR指标统计')
-
-        if key in self._result_units:
-            self._result_units[key].set_table(headers, rows)
-        else:
-            unit = ResultUnit(key, title)
-            unit.set_table(headers, rows)
-            unit.export_btn.clicked.connect(lambda checked, k=key: self._export_unit(k))
-            self._results_layout.addWidget(unit)
-            self._result_units[key] = unit
-
+        from gacha_simulator.visualization.chart_spec import TableData, ChartSpec
+        spec = ChartSpec(
+            chart_type="table",
+            data=TableData(headers=headers, rows=rows),
+            title='GDR 指标统计',
+        )
+        self._chart_specs_cache[key] = spec
+        self.chart_webview.setVisible(True)
+        if self._placeholder_label:
+            self._placeholder_label.setVisible(False)
+        self.chart_webview.set_charts(self._get_ordered_charts(), use_tabs=False)
+        self._chart_webview_initialized = True
         self._computed_conditions[key] = self._get_conditions_for_key(key)
 
-    def _export_unit(self, key):
-        unit = self._result_units.get(key)
-        if not unit:
-            return
-        image_path = unit.get_image_path()
-        if image_path and os.path.exists(image_path):
-            save_path, _ = QFileDialog.getSaveFileName(self, "导出图表", f"{key}.png", "PNG Files (*.png)")
-            if save_path:
-                from shutil import copy2
-                copy2(image_path, save_path)
-        else:
-            table = unit.findChild(QTableWidget)
-            if table:
-                save_path, _ = QFileDialog.getSaveFileName(self, "导出数据", f"{key}.csv", "CSV Files (*.csv)")
-                if save_path:
-                    with open(save_path, 'w', encoding='utf-8-sig') as f:
-                        headers = []
-                        for c in range(table.columnCount()):
-                            hi = table.horizontalHeaderItem(c)
-                            headers.append(hi.text() if hi else '')
-                        f.write(','.join(headers) + '\n')
-                        for r in range(table.rowCount()):
-                            row_data = []
-                            for c in range(table.columnCount()):
-                                item = table.item(r, c)
-                                row_data.append(item.text() if item else '')
-                            f.write(','.join(row_data) + '\n')
+    def _get_ordered_charts(self) -> dict:
+        """按 ANALYSIS_CATEGORIES 中定义的顺序排列图表缓存。
+
+        扩展键（如 gdr_dist_xxx）排在父键（如 gdr_dist）附近。
+        未在 CATEGORIES 中出现的键排在末尾。
+        """
+        cache = self._chart_specs_cache
+        if not cache:
+            return {}
+        ordered: dict[str, object] = {}
+        seen: set[str] = set()
+        for base_key in _CHART_DISPLAY_ORDER:
+            if base_key in cache:
+                ordered[base_key] = cache[base_key]
+                seen.add(base_key)
+            prefix = base_key + '_'
+            for k in sorted(cache):
+                if k not in seen and k.startswith(prefix):
+                    ordered[k] = cache[k]
+                    seen.add(k)
+        for k in cache:
+            if k not in seen:
+                ordered[k] = cache[k]
+        return ordered
 
     def _clear_results(self):
-        for key in list(self._result_units.keys()):
-            unit = self._result_units.pop(key)
-            self._results_layout.removeWidget(unit)
-            unit.deleteLater()
+        # 清除表格型结果帧（即除 placeholder_label 和 chart_webview 外的所有 widget）
+        i = 0
+        while i < self._results_layout.count():
+            w = self._results_layout.itemAt(i).widget()
+            if w is self._placeholder_label or w is self.chart_webview:
+                i += 1
+                continue
+            self._results_layout.removeWidget(w)
+            w.deleteLater()
+            # 不递增 i，因为移除后下一个元素索引仍为 i
+        # 隐藏并清理 chart_webview
+        self.chart_webview.setVisible(False)
+        self._chart_webview_initialized = False
+        self._chart_specs_cache.clear()
         self._computed_conditions.clear()
         self._summary_data.clear()
         if self._placeholder_label:

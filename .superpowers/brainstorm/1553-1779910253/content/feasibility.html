@@ -1,0 +1,208 @@
+<h2>方案A — PyQt6 可实现性分析</h2>
+<p class="subtitle">基于现有代码库的 widget 模式、QSS 能力和架构约束</p>
+
+<div class="mockup" style="max-width: 600px; margin: 0 auto;">
+  <div class="mockup-header">方案A 调整后 — PyQt6 可实现版本</div>
+  <div class="mockup-body" style="padding: 0; background: #1a1a2e; color: #e0e0e0;">
+
+    <!-- 整体：QScrollArea > QWidget > QVBoxLayout -->
+    <div style="padding: 8px; background: #0a0a14;">
+      <div style="font-size: 10px; color: #666; margin-bottom: 6px;">QScrollArea > QWidget > QVBoxLayout</div>
+
+      <!-- ========== 上半区：QSplitter (水平) ========== -->
+      <div style="display: flex; gap: 0; background: #0d1117; border-radius: 6px; overflow: hidden;">
+
+        <!-- 左侧卡池列：QWidget > QVBoxLayout (QPushButton × N) -->
+        <div style="width: 90px; background: rgba(0,0,0,0.6); padding: 6px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-size: 8px; color: #666; text-align: center; margin-bottom: 2px;">QPushButton ×N</div>
+          <div style="background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4a3728,stop:1 #3a2718); border: 2px solid #c9a96e; border-radius: 6px; padding: 8px 4px; text-align: center; font-size: 9px;">
+            <div style="color: #ffd700; font-weight: bold;">耀光之翼</div>
+            <div style="color: #999;">UP · 12天</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 4px; text-align: center; font-size: 9px;">
+            <div style="color: #ccc;">暗影之刃</div><div style="color: #666;">武器UP</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 4px; text-align: center; font-size: 9px;">
+            <div style="color: #ccc;">常驻池</div><div style="color: #666;">标准</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 8px 4px; text-align: center; font-size: 9px;">
+            <div style="color: #ccc;">兑换</div><div style="color: #666;">商店</div>
+          </div>
+        </div>
+
+        <!-- 右侧主区：QWidget > QVBoxLayout -->
+        <div style="flex: 1; display: flex; flex-direction: column;">
+
+          <!-- 资源条：QHBoxLayout (右对齐) QLabel -->
+          <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 6px 10px; background: rgba(0,0,0,0.3);">
+            <div style="font-size: 9px; color: #888;">QLabel</div>
+            <span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 3px; font-size: 11px;">💎 <b>28,800</b></span>
+            <span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 3px; font-size: 11px;">🎫 <b>12</b></span>
+          </div>
+
+          <!-- 池名 + 保底：QVBoxLayout QLabel -->
+          <div style="text-align: center; padding: 12px 8px 6px;">
+            <div style="font-size: 9px; color: #888;">QLabel</div>
+            <div style="font-size: 16px; font-weight: bold; color: #ffd700;">耀光之翼 · 限定角色</div>
+            <div style="margin-top: 4px; font-size: 11px; color: #aaa;">
+              软保底 <b style="color:#4fc3f7;">73/90</b> &nbsp; 大保底 <b style="color:#ff8a65;">0/1</b> &nbsp; SSR <b style="color:#81c784;">33.2%</b>
+            </div>
+          </div>
+
+          <!-- 展示区：QWidget (paintEvent 渐变) 或 QStackedWidget -->
+          <div style="flex: 1; margin: 6px 10px; background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #111133,stop:1 #0a0a1a); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 180px; position: relative;">
+            <div style="position: absolute; top: 4px; left: 8px; font-size: 8px; color: #666;">QWidget · 可切换为抽卡结果网格</div>
+            <div style="font-size: 40px; opacity: 0.3;">✦</div>
+            <div style="font-size: 11px; color: #666; margin-top: 4px;">中央展示区</div>
+            <div style="font-size: 9px; color: #555;">(抽卡结果以 2×5 网格覆盖显示)</div>
+          </div>
+
+          <!-- 底部按钮行：QHBoxLayout -->
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(0,0,0,0.5);">
+
+            <!-- 历史：QPushButton -->
+            <div>
+              <div style="font-size: 8px; color: #666; margin-bottom: 2px;">QPushButton → QDialog</div>
+              <button style="background: rgba(255,255,255,0.08); color: #bbb; border: 1px solid rgba(255,255,255,0.12); padding: 7px 14px; border-radius: 5px; font-size: 12px;">📋 历史记录</button>
+            </div>
+
+            <!-- 抽卡按钮：QPushButton ×2 -->
+            <div style="text-align: right;">
+              <div style="font-size: 8px; color: #666; margin-bottom: 2px;">QPushButton · QSS渐变</div>
+              <div style="display: flex; gap: 8px;">
+                <button style="background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #4a6a9a,stop:1 #3a5a8a); color: #fff; border: 1px solid #5a8ac0; padding: 8px 18px; border-radius: 5px; font-size: 13px; font-weight: bold;">抽 1 次</button>
+                <button style="background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #9a4a3a,stop:1 #7a2a1a); color: #fff; border: 2px solid #ff8a65; padding: 8px 18px; border-radius: 5px; font-size: 13px; font-weight: bold;">抽 10 次</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 分隔 ====== -->
+      <div style="padding: 10px 0 6px; text-align: center; font-size: 10px; color: #555;">▼ 下半区：QScrollArea 内继续 ▼</div>
+
+      <!-- ====== 下半区：调试面板 ====== -->
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+
+        <!-- 等待 + 状态 -->
+        <div style="display: flex; gap: 8px;">
+          <div style="flex: 1; background: #111; border-radius: 6px; padding: 8px;">
+            <div style="font-size: 9px; color: #888; margin-bottom: 2px;">QGroupBox · QHBoxLayout · QPushButton</div>
+            <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">⏳ 等待操作</div>
+            <div style="display: flex; gap: 4px;">
+              <button class="mock-button" style="font-size: 10px; padding: 3px 8px;">+1h</button>
+              <button class="mock-button" style="font-size: 10px; padding: 3px 8px;">+1d</button>
+              <button class="mock-button" style="font-size: 10px; padding: 3px 8px;">自定义…</button>
+              <button class="mock-button" style="font-size: 10px; padding: 3px 8px; background: #2a4a3a;">跳到下池</button>
+              <button class="mock-button" style="font-size: 10px; padding: 3px 8px; background: #4a3a2a;">跳到关闭</button>
+            </div>
+          </div>
+          <div style="background: #111; border-radius: 6px; padding: 8px; min-width: 120px;">
+            <div style="font-size: 9px; color: #888; margin-bottom: 2px;">QLabel</div>
+            <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 4px;">📡 状态</div>
+            <div style="font-size: 10px; color: #aaa;">时间: Day 3 · 抽数: 47</div>
+          </div>
+        </div>
+
+        <!-- GDR 表 -->
+        <div style="background: #111; border-radius: 6px; padding: 8px;">
+          <div style="font-size: 9px; color: #888; margin-bottom: 2px;">QTableWidget (17行 × 4列) · setItem / setBackground</div>
+          <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">📊 广义出率 (GDR) — 全部 17 项</div>
+          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 0.8fr; gap: 1px; font-size: 10px;">
+            <div style="color: #888; padding: 2px 4px;">指标</div><div style="color: #888; padding: 2px 4px;">值</div><div style="color: #888; padding: 2px 4px;">阈值</div><div style="color: #888; padding: 2px 4px; text-align: center;">成败</div>
+            <div style="padding: 2px 4px;">目标达成率</div><div>0.750</div><div>1.00</div><div style="color: #ff8a65; text-align: center;">✗</div>
+            <div style="padding: 2px 4px; background: rgba(255,255,255,0.02);">收集率</div><div style="background: rgba(255,255,255,0.02);">0.600</div><div style="background: rgba(255,255,255,0.02);">1.00</div><div style="background: rgba(255,255,255,0.02); color: #ff8a65; text-align: center;">✗</div>
+            <div style="padding: 2px 4px;">全部目标</div><div>0.000</div><div>1.00</div><div style="color: #ff8a65; text-align: center;">✗</div>
+            <div style="padding: 2px 4px; background: rgba(255,255,255,0.02);">SSR收集率</div><div style="background: rgba(255,255,255,0.02);">0.200</div><div style="background: rgba(255,255,255,0.02);">0.05</div><div style="background: rgba(255,255,255,0.02); color: #81c784; text-align: center;">✓</div>
+            <div style="padding: 2px 4px; color: #555;">… +13 项</div><div></div><div></div><div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<hr style="margin: 28px 0; border-color: var(--border-color);">
+
+<h3>关键可实现性对照</h3>
+
+<div style="max-width: 640px; margin: 0 auto;">
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; margin-bottom: 20px;">
+  <div style="background: rgba(129,199,132,0.12); padding: 8px; border-radius: 6px; border-left: 3px solid #81c784;">
+    <b style="color:#81c784;">✓ 直接可实现</b>
+    <div style="color: #aaa; margin-top: 4px; line-height: 1.6;">
+      QScrollArea 单页滚动<br>
+      QSS 渐变按钮 (qlineargradient)<br>
+      QTableWidget GDR 表(17行)<br>
+      QDialog 历史弹窗<br>
+      QHBoxLayout 资源条(右对齐)<br>
+      QLabel 保底信息<br>
+      QPushButton 卡池选择卡片
+    </div>
+  </div>
+  <div style="background: rgba(255,138,101,0.12); padding: 8px; border-radius: 6px; border-left: 3px solid #ff8a65;">
+    <b style="color:#ff8a65;">△ 需适配</b>
+    <div style="color: #aaa; margin-top: 4px; line-height: 1.6;">
+      UI 不模拟真实动画效果<br>
+      中央展示区——无角色立绘图片，改为信息面板 + 抽卡结果网格<br>
+      border-radius 跨平台一致性问题——Fusion 风格下基本可用
+    </div>
+  </div>
+</div>
+
+<div style="background: rgba(255,138,101,0.08); padding: 10px; border-radius: 6px; margin-bottom: 16px;">
+  <b style="color:#ff8a65;">✗ 不可行</b>
+  <div style="color: #aaa; margin-top: 4px; font-size: 12px; line-height: 1.6;">
+    CSS box-shadow / blur / 动画 —— QSS 不支持<br>
+    像素级完美复刻游戏内动画效果 —— 需要大量 QPropertyAnimation + 自绘
+  </div>
+</div>
+
+</div>
+
+<hr style="margin: 28px 0; border-color: var(--border-color);">
+
+<h3>需要额外明确的几个设计点</h3>
+
+<div style="max-width: 640px; margin: 0 auto;">
+
+<div class="section" style="background: #1a1a2e; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">1. 中央展示区的内容</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0;">
+    真实游戏展示角色立绘，但我们没有图片素材。<b>建议方案</b>：
+    默认显示当前池子的关键信息（UP卡名称、稀有度、概率），抽卡后变为 2×5 抽卡结果网格。
+    每个结果格显示卡名+稀有度色标（金/紫/蓝）。
+  </p>
+</div>
+
+<div class="section" style="background: #1a1a2e; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">2. 「十连」的引擎层实现</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0;">
+    当前引擎只有 <code>DrawAction</code>（单抽），没有十连 Action。<b>两种路径</b>：
+    <br>(a) 在 UI 层循环调用 10 次单抽——简单，但不保证原子性
+    <br>(b) 新增 <code>MultiDrawAction(count=10)</code>——需改核心引擎，但语义正确
+    <br><b>建议 (a)</b>，因为调试模式下不需要考虑并行模拟的竞态问题。
+  </p>
+</div>
+
+<div class="section" style="background: #1a1a2e; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">3. 「等待」的引擎层实现</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0;">
+    引擎已支持 <code>WaitAction(duration)</code>。<b>三种等待模式映射</b>：
+    <br>· 自定义时长 → WaitAction(duration=用户输入秒数)
+    <br>· 跳到下池开放 → 计算当前时间到 next_pool.available_from 的差值
+    <br>· 跳到池关闭前 → 计算到 current_pool.available_until 前一瞬间的差值
+  </p>
+</div>
+
+<div class="section" style="background: #1a1a2e; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">4. 历史弹窗的内容</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0;">
+    QDialog + QTableWidget，每行一条抽卡记录：<b>时间 → 池子 → 卡牌 → 稀有度 → 保底触发</b>。
+    支持按页浏览（类似原神每页6条）。数据来源：<code>CompactResult</code> 的逐抽序列。
+  </p>
+</div>
+
+</div>

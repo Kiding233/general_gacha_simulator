@@ -16,6 +16,7 @@ from .strategy import Strategy, StrategyContext, STRATEGY_REGISTRY
 from .schedule import PoolSchedule, PoolScheduleManager
 
 import fnmatch
+import os
 
 
 DAY = 86400
@@ -38,7 +39,7 @@ class ConditionalResourceDistribution:
             else:
                 self.failure_resources.append(res_val)
 
-    def get_conditional_distribution(self, condition='all'):
+    def get_conditional_distribution(self, condition='all', use_evt=True):
         if condition == 'success':
             samples = self.success_resources
         elif condition == 'failure':
@@ -47,9 +48,9 @@ class ConditionalResourceDistribution:
             samples = self.success_resources + self.failure_resources
         return EmpiricalDistribution(samples)
 
-    def get_worst_case_resource(self, condition='all', alpha=0.05):
-        dist = self.get_conditional_distribution(condition)
-        return dist.quantile(alpha)
+    def get_worst_case_resource(self, condition='all', alpha=0.05, use_evt=True):
+        dist = self.get_conditional_distribution(condition, use_evt=use_evt)
+        return dist.quantile(alpha, use_evt=use_evt)
 
 
 @dataclass
@@ -82,7 +83,7 @@ class DrawTargetStrategy(Strategy):
 
     def select_action(self, ctx: StrategyContext):
         for pool in ctx.current_pools:
-            if pool.id == self.pool_id and ctx.state.can_afford(pool.cost):
+            if (not self.pool_id or pool.id == self.pool_id) and ctx.state.can_afford(pool.cost):
                 return DrawAction(pool_id=pool.id)
 
         wait_time = 86400
@@ -122,6 +123,7 @@ class WorstImpactAnalyzer:
         self._featured_prob: float = 0.0
         self._pool_duration = 21 * DAY
         self._parsed_cost = [{'draw_resource': 160}]
+        self._resource_name = 'draw_resource'
         self._rewards = []
         self._main_ssr_ids: Set[str] = set()
         for cd in store.card_defs:
@@ -134,19 +136,30 @@ class WorstImpactAnalyzer:
                         self._main_ssr_ids.add(de.card_id)
 
     def analyze(self, condition='failure', alpha=0.05,
-                num_simulations=500, progress_callback=None):
+                num_simulations=500, progress_callback=None,
+                custom_resource=None):
         self._prepare_pool_info()
 
-        main_checker = self._build_success_checker(
-            target_specs=self.target_specs,
-            ssr_ids=self._main_ssr_ids,
-        )
+        if custom_resource is not None:
+            worst_resource = float(custom_resource)
+        else:
+            main_checker = self._build_success_checker(
+                target_specs=self.target_specs,
+                ssr_ids=self._main_ssr_ids,
+            )
+            self.cond_dist = ConditionalResourceDistribution(
+                self.simulation_results, main_checker.is_success,
+                resource=self._resource_name,
+            )
+            # 资源类 GDR + success 条件时，成功组资源被下界截断，EVT 外推可能越界
+            _skip_evt = (
+                self.gdr_key in ('resource_remaining', 'resource_efficiency', 'resource_consumed')
+                and condition == 'success'
+            )
+            worst_resource = self.cond_dist.get_worst_case_resource(
+                condition, alpha, use_evt=not _skip_evt,
+            )
 
-        self.cond_dist = ConditionalResourceDistribution(
-            self.simulation_results, main_checker.is_success
-        )
-
-        worst_resource = self.cond_dist.get_worst_case_resource(condition, alpha)
         pity_coverage = self._compute_pity_coverage(worst_resource)
 
         sim_config = self.prepare_simulation_config(worst_resource)
@@ -155,29 +168,23 @@ class WorstImpactAnalyzer:
         collector = SharedResultCollector()
         collector.add_extractor('aggregate', extract_aggregate)
 
-        from gacha_simulator.service.batch_simulator import run_batch_parallel
+        from gacha_simulator.service.batch_simulator import SimulationEnvBuilder, run_batch_parallel
+
+        sim_env = SimulationEnvBuilder.from_dict(sim_config)
 
         run_batch_parallel(
-            pools=sim_config['pools'],
-            schedule_mgr=sim_config['schedule_mgr'],
-            end_time=sim_config['end_time'],
-            pity_engine=sim_config['pity_engine'],
-            resource_gain=sim_config.get('resource_gain'),
-            pity_state_init=sim_config.get('pity_state_init'),
-            card_defs=sim_config['card_defs'],
+            env=sim_env,
             target_specs=sim_config['target_specs'],
             initial_resources=sim_config['initial_resources'],
             num_simulations=num_simulations,
-            max_workers=1,
+            max_workers=os.cpu_count() or 4,
             seed=42,
             progress_callback=lambda done, total: progress_callback(
                 f"模拟中: {done}/{total}", int(done / total * 100)
             ) if progress_callback else None,
-            strategy_name='smart',
-            strategy_params={},
+            strategy_name='draw_target',
+            strategy_params={'pool_id': ''},
             on_result=collector.on_result,
-            ssr_ids=sim_config['ssr_ids'],
-            stop_condition=sim_config['stop_condition'],
         )
 
         aggregate_data = collector.get_extracted('aggregate')
@@ -266,7 +273,7 @@ class WorstImpactAnalyzer:
         stop_condition = ConsecutivePoolTargetCondition(
             pool_schedules=pool_schedules_list,
             pool_targets=pool_targets,
-            resource_name='draw_resource',
+            resource_name=self._resource_name,
             end_time=total_end_time,
         )
 
@@ -286,7 +293,7 @@ class WorstImpactAnalyzer:
             'pity_state_init': pity_state_init,
             'card_defs': card_defs,
             'target_specs': target_specs,
-            'initial_resources': {'draw_resource': worst_resource},
+            'initial_resources': {self._resource_name: worst_resource},
             'ssr_ids': all_ssr_ids,
             'stop_condition': stop_condition,
             'pool_targets': pool_targets,
@@ -363,6 +370,7 @@ class WorstImpactAnalyzer:
 
         cost_str = getattr(pe, 'cost', 'draw_resource:160')
         self._parsed_cost = parse_cost_string(cost_str)
+        self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
 
         rewards = []
         if pe.distribution:
@@ -411,6 +419,7 @@ class WorstImpactAnalyzer:
 
         cost_str = cfg.get('cost', 'draw_resource:160')
         self._parsed_cost = parse_cost_string(cost_str)
+        self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
 
         rewards = []
         for d in cfg.get('distribution', []):
@@ -482,12 +491,15 @@ class WorstImpactAnalyzer:
                 )
 
         pool_specs = {}
+        ref_pool_id = self._ref_pool_entry.id if self._ref_pool_entry else None
         for pool_idx in range(MAX_POOLS):
             pid = f'_worst_impact_pool_{pool_idx}'
             matching = []
             resolved_per_pity = {}
             for pdef in pity_defs.values():
                 if fnmatch.fnmatch(pid, pdef.pools):
+                    matching.append(pdef.name)
+                elif ref_pool_id and fnmatch.fnmatch(ref_pool_id, pdef.pools):
                     matching.append(pdef.name)
                     if pdef.target_distribution:
                         resolved_per_pity[pdef.name] = self._resolve_targets_for_pool(
