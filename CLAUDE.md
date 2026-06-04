@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-GachaStat — 一个灵活的抽卡（gacha）概率模拟与统计分析系统，支持多池子、保底机制、资源管理、多种抽卡策略，以及丰富的后验分析（GDR/脆弱性/最差影响/过程分析/策略比较）。当前版本 v1.9.0。
+GachaStat — 一个灵活的抽卡（gacha）概率模拟与统计分析系统，支持多池子、保底机制、资源管理、多种抽卡策略，以及丰富的后验分析（GDR/脆弱性/最差影响/过程分析/策略比较）。当前版本 v1.10.0。
 
 ## 技术栈
 
