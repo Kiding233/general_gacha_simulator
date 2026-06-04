@@ -68,7 +68,6 @@ a = Analysis(
         'unittest',
         'pytest',
         'pdb',
-        'distutils',
         'PyQt6.QtBluetooth',
         'PyQt6.QtDBus',
         'PyQt6.QtNfc',
