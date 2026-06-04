@@ -14,6 +14,31 @@ class GDRContext:
     collection_sets: Dict[str, Set[str]] = field(default_factory=dict)
     weapon_character_map: Dict[str, str] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为 JSON 兼容的 dict。Set 类型字段转为 list。"""
+        return {
+            'target_specs': dict(self.target_specs),
+            'ssr_ids': list(self.ssr_ids),
+            'all_drawable_ids': list(self.all_drawable_ids),
+            'initial_resources': dict(self.initial_resources),
+            'resource_gain_per_day': dict(self.resource_gain_per_day),
+            'collection_sets': {k: list(v) for k, v in self.collection_sets.items()},
+            'weapon_character_map': dict(self.weapon_character_map),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'GDRContext':
+        """从 dict 反序列化。list 字段转回 set。"""
+        return cls(
+            target_specs={str(k): int(v) for k, v in d.get('target_specs', {}).items()},
+            ssr_ids=set(d.get('ssr_ids', [])),
+            all_drawable_ids=[str(x) for x in d.get('all_drawable_ids', [])],
+            initial_resources={str(k): float(v) for k, v in d.get('initial_resources', {}).items()},
+            resource_gain_per_day={str(k): float(v) for k, v in d.get('resource_gain_per_day', {}).items()},
+            collection_sets={str(k): set(v) for k, v in d.get('collection_sets', {}).items()},
+            weapon_character_map={str(k): str(v) for k, v in d.get('weapon_character_map', {}).items()},
+        )
+
 
 class WeightedGDRConfig:
     def __init__(self, weight_config, scheme_map: Dict[str, str] = None):
