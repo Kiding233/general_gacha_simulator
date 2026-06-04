@@ -64,10 +64,6 @@ a = Analysis(
     excludes=[
         'tkinter',
         'sqlite3',
-        'test',
-        'unittest',
-        'pytest',
-        'pdb',
         'PyQt6.QtBluetooth',
         'PyQt6.QtDBus',
         'PyQt6.QtNfc',
