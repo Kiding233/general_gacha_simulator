@@ -277,6 +277,7 @@ class GachaPanel(QWidget):
         sim_count = self.sim_count.value()
         max_workers = self.max_workers.value()
         seed = self.seed.value()
+        self._last_seed = seed
 
         config_store.simulation_count = sim_count
         config_store.max_workers = max_workers
