@@ -4,6 +4,7 @@
 import sys
 import os
 import traceback
+from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
@@ -28,10 +29,11 @@ from ..core.result_store import (
 from .data_manager_panel import DataManagerPanel
 from ..core.config_store import ConfigStore
 from ..core.config_io import load_store_from_directory, save_store_to_directory
+from ..paths import get_config_dir, get_resource
 
 
-_DEFAULT_CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config')
-_ICON_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'resources', 'app_icon.png')
+_DEFAULT_CONFIG_DIR = get_config_dir()
+_ICON_PATH = get_resource('app_icon.png')
 
 
 class MainWindow(QMainWindow):
@@ -112,6 +114,7 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(self.config_panel, "配置")
         self.tabs.addTab(self.gacha_panel, "批量模拟")
+        self.tabs.addTab(self.data_manager_panel, "数据管理")
         self.tabs.addTab(self.analysis_panel, "统计分析")
         self.tabs.addTab(self.process_analysis_panel, "过程分析")
         self.tabs.addTab(self.strategy_panel, "最多目标卡")
@@ -119,12 +122,14 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.retreat_tab, "退路分析")
         self.tabs.addTab(self.worst_impact_panel, "最差影响")
         self.tabs.addTab(self.comparison_analysis_panel, "比较分析")
-        self.tabs.addTab(self.data_manager_panel, "数据管理")
         self.tabs.addTab(self.sensitivity_panel, "敏感度分析")
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("就绪")
+
+        self._current_dataset_label = QLabel("当前数据集: —")
+        self.status_bar.addPermanentWidget(self._current_dataset_label)
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -178,6 +183,7 @@ class MainWindow(QMainWindow):
         self.data_manager_panel.load_requested.connect(self._load_dataset_for_analysis)
         self.data_manager_panel.compare_requested.connect(self._on_compare_datasets)
         self.data_manager_panel.status_update.connect(self.status_bar.showMessage)
+        self.result_store.current_changed.connect(self._on_current_dataset_changed)
         self.config_panel.config_changed.connect(self._on_config_changed)
         self.retreat_panel.vulnerability_finished.connect(self.retreat_search_panel.set_vulnerability_result)
 
@@ -356,9 +362,13 @@ class MainWindow(QMainWindow):
         strategy_name = getattr(self._store, 'strategy_name', '') or 'unknown'
         seed_start = getattr(self.gacha_panel, '_last_seed', 0)
 
-        from datetime import datetime
-        now = datetime.now().strftime('%m%d_%H%M')
-        auto_name = f"{strategy_name}_{now}"
+        # 自动命名：策略名 + 两位递增编号，如 smart_01, target_hunting_03
+        existing = self.result_store.list_datasets()
+        base = strategy_name
+        counter = 1
+        while any(d['name'] == f"{base}_{counter:02d}" for d in existing):
+            counter += 1
+        auto_name = f"{base}_{counter:02d}"
 
         # 构建指纹
         target_specs_for_fp = {}
@@ -426,6 +436,9 @@ class MainWindow(QMainWindow):
         actual_name = self.result_store.add(auto_name, dataset)
         self.result_store.set_current(actual_name)
 
+        # 自动加载到分析面板，确保状态栏与面板数据一致
+        self._load_dataset_for_analysis(actual_name)
+
         self.tabs.setCurrentIndex(2)
         self.status_bar.showMessage(f"模拟完成，共 {len(aggregate_data)} 次模拟，已存入: {actual_name}")
 
@@ -486,6 +499,19 @@ class MainWindow(QMainWindow):
         )
 
         self.status_bar.showMessage(f"已加载数据集: {name} ({ds.num_simulations} 次模拟)")
+
+    def _on_current_dataset_changed(self, name: str):
+        """ResultStore.current_changed → 更新状态栏永久标签"""
+        if name:
+            ds = self.result_store.get(name)
+            if ds:
+                self._current_dataset_label.setText(
+                    f"当前数据集: {name} ({ds.num_simulations}次)"
+                )
+            else:
+                self._current_dataset_label.setText(f"当前数据集: {name}")
+        else:
+            self._current_dataset_label.setText("当前数据集: —")
 
     def _on_compare_datasets(self, names: list):
         """从数据管理面板跳转到比较分析面板"""
