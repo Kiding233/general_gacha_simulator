@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
+from ..paths import get_user_data_dir
+
 
 
 class _NoWheelSpinBox(QSpinBox):
@@ -217,6 +219,7 @@ class AnalysisWorker(QThread):
         alpha = self.alpha
 
         from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact, compute_gdr_from_cumulative
+        from gacha_simulator.core.gdr_binning import compute_bins
         from gacha_simulator.core.distribution import EmpiricalDistribution, JointSamples
         from gacha_simulator.core.per_pool_analysis import (
             per_pool_summary_stats,
@@ -320,18 +323,28 @@ class AnalysisWorker(QThread):
                     ))
 
                 if 'hist' in chart_types:
-                    var_val = dist.var(alpha)
+                    samples_arr = np.array(dist.samples)
+                    bin_result = compute_bins(
+                        metric_key, samples_arr,
+                        target_specs=target_specs,
+                        cost_per_draw=self.cost_per_draw,
+                        use_draw_units=self.use_draw_units and metric_key in _DRAW_UNIT_GDR_KEYS,
+                    )
+                    _title = f'{metric_name}{_unit_suffix} 分布'
+                    if bin_result.inf_label:
+                        _title += f' ({bin_result.inf_label})'
                     spec = ChartSpec(
                         chart_type="histogram",
                         data=HistogramData(
-                            samples=np.array(dist.samples),
+                            samples=samples_arr,
                             mean_line=True,
                             quantile_lines=[alpha],
                         ),
-                        title=f'{metric_name}{_unit_suffix} 分布',
+                        title=_title,
                         xlabel=f'{metric_name}{_unit_suffix}',
-                        ylabel='概率密度',
+                        ylabel='频数' if not bin_result.density else '概率密度',
                         annotations=list(annotations),
+                        layout_hints=bin_result.to_layout_hints(),
                     )
                     # 替换默认分位数线标签为 VaR 格式
                     if spec.annotations:
@@ -450,8 +463,11 @@ class AnalysisWorker(QThread):
                     )
 
                 # 主概览图: 直方图 + 尾部叠加
-                is_disc = AnalysisPanel._is_discrete(primary_dist.samples)
-                main_color = 'black'
+                _wc_use_du = self.use_draw_units and primary_key in _DRAW_UNIT_GDR_KEYS
+                _wc_bins = compute_bins(primary_key, np.array(primary_dist.samples),
+                                        target_specs=target_specs,
+                                        cost_per_draw=self.cost_per_draw,
+                                        use_draw_units=_wc_use_du)
                 wc_overlays = []
                 wc_anns = [
                     ChartAnnotation(type="vline", value=var_val, color="orange", dash="dash",
@@ -475,12 +491,13 @@ class AnalysisWorker(QThread):
                         samples=np.array(primary_dist.samples),
                         mean_line=False,
                         overlays=wc_overlays,
-                        density=not is_disc,
+                        density=_wc_bins.density,
                     ),
                     title=f'最差情形分析: {primary_name} (α={alpha})',
                     xlabel=primary_name,
-                    ylabel='频次' if is_disc else '密度',
+                    ylabel='频次' if not _wc_bins.density else '密度',
                     annotations=wc_anns,
+                    layout_hints=_wc_bins.to_layout_hints(),
                 )
 
                 # 各指标条件分布图
@@ -494,7 +511,11 @@ class AnalysisWorker(QThread):
                     cond = joint.conditional_second(lambda f: f >= var_val) if primary_lib else joint.conditional_second(lambda f: f <= var_val)
                     if cond.n < 2:
                         continue
-                    is_disc2 = AnalysisPanel._is_discrete(dist.samples)
+                    _wc2_use_du = self.use_draw_units and name in _DRAW_UNIT_GDR_KEYS
+                    _wc_bins2 = compute_bins(name, np.array(dist.samples),
+                                             target_specs=target_specs,
+                                             cost_per_draw=self.cost_per_draw,
+                                             use_draw_units=_wc2_use_du)
                     _wc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
                     wc_cond_op = '≥' if primary_lib else '≤'
                     wc_cond_label = tail_label_short if primary_lib else f'VaR({alpha})'
@@ -508,11 +529,12 @@ class AnalysisWorker(QThread):
                             samples=np.array(dist.samples),
                             mean_line=False,
                             overlays=ovs2,
-                            density=not is_disc2,
+                            density=_wc_bins2.density,
                         ),
                         title=f'最差情形: {display} | {primary_name}{wc_cond_op}{wc_cond_label}',
                         xlabel=_wc_xlabel,
-                        ylabel='频次' if is_disc2 else '密度',
+                        ylabel='频次' if not _wc_bins2.density else '密度',
+                        layout_hints=_wc_bins2.to_layout_hints(),
                     )
             step_done('最差情形分析')
 
@@ -577,7 +599,11 @@ class AnalysisWorker(QThread):
                     )
 
                 # 主概览图: 直方图 + 顶部叠加
-                is_disc = AnalysisPanel._is_discrete(primary_dist.samples)
+                _bc_use_du = self.use_draw_units and primary_key in _DRAW_UNIT_GDR_KEYS
+                _bc_bins = compute_bins(primary_key, np.array(primary_dist.samples),
+                                        target_specs=target_specs,
+                                        cost_per_draw=self.cost_per_draw,
+                                        use_draw_units=_bc_use_du)
                 bc_overlays = []
                 bc_anns = [
                     ChartAnnotation(type="vline", value=upper_val, color="green", dash="dash",
@@ -601,12 +627,13 @@ class AnalysisWorker(QThread):
                         samples=np.array(primary_dist.samples),
                         mean_line=False,
                         overlays=bc_overlays,
-                        density=not is_disc,
+                        density=_bc_bins.density,
                     ),
                     title=f'最好情形分析: {primary_name} (α={alpha})',
                     xlabel=primary_name,
-                    ylabel='频次' if is_disc else '密度',
+                    ylabel='频次' if not _bc_bins.density else '密度',
                     annotations=bc_anns,
+                    layout_hints=_bc_bins.to_layout_hints(),
                 )
 
                 # 各指标条件分布图
@@ -621,7 +648,11 @@ class AnalysisWorker(QThread):
                     cond = joint.conditional_second(bc_cond_filter2)
                     if cond.n < 2:
                         continue
-                    is_disc2 = AnalysisPanel._is_discrete(dist.samples)
+                    _bc2_use_du = self.use_draw_units and name in _DRAW_UNIT_GDR_KEYS
+                    _bc_bins2 = compute_bins(name, np.array(dist.samples),
+                                             target_specs=target_specs,
+                                             cost_per_draw=self.cost_per_draw,
+                                             use_draw_units=_bc2_use_du)
                     _bc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
                     bc_cond_op = '≤' if primary_lib_best else '≥'
                     bc_cond_label2 = best_tail_label_short if primary_lib_best else f'上{1-alpha}分位数'
@@ -635,11 +666,12 @@ class AnalysisWorker(QThread):
                             samples=np.array(dist.samples),
                             mean_line=False,
                             overlays=ovs2,
-                            density=not is_disc2,
+                            density=_bc_bins2.density,
                         ),
                         title=f'最好情形: {display} | {primary_name}{bc_cond_op}{bc_cond_label2}',
                         xlabel=_bc_xlabel,
-                        ylabel='频次' if is_disc2 else '密度',
+                        ylabel='频次' if not _bc_bins2.density else '密度',
+                        layout_hints=_bc_bins2.to_layout_hints(),
                     )
             step_done('最好情形分析')
 
@@ -689,7 +721,11 @@ class AnalysisWorker(QThread):
                             title=f'{cond_gdr_name} 条件下 {target_gdr_name} 的分布统计量',
                         )
 
-                    is_disc = AnalysisPanel._is_discrete(all_target.samples)
+                    _cond_use_du = self.use_draw_units and target_key in _DRAW_UNIT_GDR_KEYS
+                    _cond_bins = compute_bins(target_key, np.array(all_target.samples),
+                                              target_specs=target_specs,
+                                              cost_per_draw=self.cost_per_draw,
+                                              use_draw_units=_cond_use_du)
                     _cond_unit_suffix = ' (抽)' if (target_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else ''
                     overlays_cond = []
                     cond_anns = []
@@ -717,12 +753,13 @@ class AnalysisWorker(QThread):
                             samples=np.array(all_target.samples),
                             mean_line=False,
                             overlays=overlays_cond,
-                            density=not is_disc,
+                            density=_cond_bins.density,
                         ),
                         title=f'条件分布: {target_name}{_target_unit_suffix} | {cond_name} (阈值={success_threshold:.4f})',
                         xlabel=f'{target_name}{_cond_unit_suffix}',
-                        ylabel='密度',
+                        ylabel='频数' if not _cond_bins.density else '密度',
                         annotations=cond_anns,
+                        layout_hints=_cond_bins.to_layout_hints(),
                     )
             step_done('条件分布')
 
@@ -1133,6 +1170,17 @@ class AnalysisWorker(QThread):
                         short_pid = _strip_pid(pid)
                         if short_pid in ridge_series:
                             ridge_baselines[short_pid] = baseline
+
+                    # 合并全部池子样本后统一判定分箱——山脊线图各组共享 bin_edges
+                    _all_ridge_vals = np.concatenate(list(ridge_series.values()))
+                    _use_du = self.use_draw_units and metric_key in _DRAW_UNIT_GDR_KEYS
+                    _ridge_bins = compute_bins(
+                        metric_key, _all_ridge_vals,
+                        target_specs=target_specs,
+                        cost_per_draw=self.cost_per_draw,
+                        use_draw_units=_use_du,
+                    )
+
                     _xlabel = metric_name
                     if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                         _xlabel = f'{metric_name} (抽)'
@@ -1140,12 +1188,18 @@ class AnalysisWorker(QThread):
                     if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
                         _cum_title = f'{metric_name} (抽, 截止每池)'
                     if ridge_series:
+                        _ridge_hints = {}
+                        if _ridge_bins.bin_edges is not None:
+                            _ridge_hints["bin_edges"] = _ridge_bins.bin_edges
+                        elif _ridge_bins._extra.get("nbins"):
+                            _ridge_hints["nbins"] = _ridge_bins._extra["nbins"]
                         charts[f'cumulative_by_pool_{metric_name}'] = ChartSpec(
                             chart_type="ridge",
                             data=RidgeData(series=ridge_series, baselines=ridge_baselines),
                             title=_cum_title,
                             xlabel=_xlabel,
                             ylabel='池子',
+                            layout_hints=_ridge_hints,
                         )
                 step_done('截止每池的GDR分布')
 
@@ -1311,7 +1365,7 @@ class AnalysisPanel(QWidget):
         self._chart_webview_initialized = False
         self._summary_data = {}
         self._store = None
-        self.output_dir = Path(os.getcwd()) / 'output' / 'analysis'
+        self.output_dir = Path(get_user_data_dir('output', 'analysis'))
         self._worker = None
         self._setup_ui()
 
@@ -1669,12 +1723,6 @@ class AnalysisPanel(QWidget):
             item.setChecked(False)
 
     @staticmethod
-    def _is_discrete(samples):
-        if not samples:
-            return False
-        return all(abs(v - round(v)) < 1e-9 for v in samples[:min(200, len(samples))])
-
-    @staticmethod
     def _unique_count(samples):
         if not samples:
             return 0
@@ -1684,34 +1732,6 @@ class AnalysisPanel(QWidget):
             if len(seen) > 2:
                 break
         return len(seen)
-
-    @staticmethod
-    def _hist_params(samples, color, alpha_val, label):
-        import numpy as np
-        n = AnalysisPanel._unique_count(samples)
-        if n <= 1:
-            lo = float(samples[0]) if samples else 0.0
-            return {
-                'bins': [lo - 0.5, lo + 0.5], 'density': False,
-                'align': 'mid', 'edgecolor': color, 'alpha': alpha_val,
-                'label': label, 'rwidth': 0.8,
-            }
-        is_d = AnalysisPanel._is_discrete(samples)
-        if is_d:
-            lo = int(min(samples))
-            hi = int(max(samples)) + 1
-            bins = list(range(lo, hi + 1)) if hi > lo else [lo - 0.5, lo + 0.5]
-            return {'bins': bins, 'density': False, 'align': 'left', 'edgecolor': color, 'alpha': alpha_val, 'label': label, 'rwidth': 0.8}
-        vals = np.array(samples)
-        q1, q3 = np.percentile(vals, [25, 75])
-        iqr = max(q3 - q1, 1e-9)
-        span = max(vals) - min(vals)
-        if span > 0 and iqr / span < 0.05:
-            nbins = max(50, min(200, int(len(samples) / 20)))
-        else:
-            from gacha_simulator.core.distribution import freedman_diaconis_bins
-            nbins = freedman_diaconis_bins(samples)
-        return {'bins': nbins, 'density': True, 'edgecolor': color, 'alpha': alpha_val, 'label': label}
 
     def _on_preset_threshold(self, preset_type):
         if not self.results:
