@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """GachaStat PyInstaller 构建配置 —— 文件夹分发（onedir）模式"""
 
+import os
 import sys
 from pathlib import Path
 
@@ -113,25 +114,33 @@ _QT_DLL_EXCLUDE_PREFIXES = [
 a.binaries = [
     (name, path, typ)
     for (name, path, typ) in a.binaries
-    if not any(name.startswith(prefix) for prefix in _QT_DLL_EXCLUDE_PREFIXES)
+    if not any(os.path.basename(name).startswith(prefix) for prefix in _QT_DLL_EXCLUDE_PREFIXES)
 ]
 
-# ── 过滤 plotly 无用数据 ─────────────────────────────────────────────
+# ── 过滤 plotly 无用数据 + 未使用的 Qt QML 目录 ────────────────────
 # widgetbundle.js: Jupyter Notebook 插件（桌面应用不需要）
 # datasets/: 内置示例数据（gapminder.csv, election.csv 等）
-# 同时过滤多余的 C 库副本（libcrypto/libssl 只需一份）
 _PLOTLY_EXCLUDE_PREFIXES = [
     'plotly/package_data/widgetbundle.js',
 ]
 _PLOTLY_EXCLUDE_DIRS = [
     'plotly/package_data/datasets/',
 ]
+_QT_QML_EXCLUDE_DIRS = [
+    'PyQt6/Qt6/qml/QtMultimedia/',
+    'PyQt6/Qt6/qml/QtQuick3D/',
+    'PyQt6/Qt6/qml/QtSensors/',
+    'PyQt6/Qt6/qml/QtTest/',
+    'PyQt6/Qt6/qml/QtTextToSpeech/',
+    'PyQt6/Qt6/qml/QtRemoteObjects/',
+]
 
 a.datas = [
     (name, path, typ)
     for (name, path, typ) in a.datas
-    if name not in _PLOTLY_EXCLUDE_PREFIXES
-    and not any(name.startswith(d) for d in _PLOTLY_EXCLUDE_DIRS)
+    if name.replace('\\', '/') not in _PLOTLY_EXCLUDE_PREFIXES
+    and not any(name.replace('\\', '/').startswith(d) for d in _PLOTLY_EXCLUDE_DIRS)
+    and not any(name.replace('\\', '/').startswith(d) for d in _QT_QML_EXCLUDE_DIRS)
 ]
 
 
