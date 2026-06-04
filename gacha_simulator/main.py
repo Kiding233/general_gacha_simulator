@@ -14,13 +14,18 @@ if parent_dir not in sys.path:
 # 不会触发这些导入，仅加载轻量的 sys/os 路径配置。
 
 if __name__ == '__main__':
+    # Windows spawn 模式 + PyInstaller 打包的必要调用
+    from multiprocessing import freeze_support
+    freeze_support()
+
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
     from gacha_simulator.gui import MainWindow
     from gacha_simulator._version import __version__
 
-    _ICON_PATH = os.path.join(this_dir, 'gacha_simulator', 'resources', 'app_icon.png')
+    from gacha_simulator.paths import get_resource
+    _ICON_PATH = get_resource('app_icon.png')
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv)
