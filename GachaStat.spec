@@ -74,6 +74,8 @@ a = Analysis(
         'PyQt6.QtSensors',
         'PyQt6.QtSerialPort',
         'PyQt6.QtTest',
+        'numba',
+        'llvmlite',
     ],
 
     win_no_prefer_redirects=False,
@@ -89,10 +91,8 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='GachaStat',
     debug=False,
     bootloader_ignore_signals=False,
@@ -106,4 +106,15 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(_SPEC_DIR / 'gacha_simulator' / 'resources' / 'app_icon.png'),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='GachaStat',
 )
