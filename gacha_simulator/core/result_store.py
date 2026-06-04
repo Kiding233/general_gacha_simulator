@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -210,6 +209,7 @@ class ResultStore(QObject):
         self._datasets[new] = ds
         if self._current_name == old:
             self._current_name = new
+            self.current_changed.emit(new)
         self.datasets_changed.emit()
         return True
 
@@ -278,19 +278,21 @@ class ResultStore(QObject):
             fps.append((n, ds.fingerprint))
 
         dims = {}
-        base_name, base_fp = fps[0]
-        for other_name, other_fp in fps[1:]:
-            pair_key = f"{base_name} vs {other_name}"
-            dims[pair_key] = {}
-            for attr in ['strategy_name', 'config_hash', 'stop_condition',
-                         'seed_start', 'seed_end', 'num_simulations']:
-                a = getattr(base_fp, attr)
-                b = getattr(other_fp, attr)
-                dims[pair_key][attr] = 'same' if a == b else f'different: {a} ≠ {b}'
-            for attr in ['target_cards', 'initial_resources', 'pool_ids']:
-                a = getattr(base_fp, attr)
-                b = getattr(other_fp, attr)
-                dims[pair_key][attr] = 'same' if a == b else f'different'
+        for i in range(len(fps)):
+            for j in range(i + 1, len(fps)):
+                name_a, fp_a = fps[i]
+                name_b, fp_b = fps[j]
+                pair_key = f"{name_a} vs {name_b}"
+                dims[pair_key] = {}
+                for attr in ['strategy_name', 'config_hash', 'stop_condition',
+                             'seed_start', 'seed_end', 'num_simulations']:
+                    a = getattr(fp_a, attr)
+                    b = getattr(fp_b, attr)
+                    dims[pair_key][attr] = 'same' if a == b else f'different: {a} ≠ {b}'
+                for attr in ['target_cards', 'initial_resources', 'pool_ids']:
+                    a = getattr(fp_a, attr)
+                    b = getattr(fp_b, attr)
+                    dims[pair_key][attr] = 'same' if a == b else f'different'
         return ComparabilityDiff(
             names=tuple(names),
             dimensions=dimensions_to_flat(dims, names),
