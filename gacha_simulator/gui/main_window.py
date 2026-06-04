@@ -21,7 +21,7 @@ from .retreat_panel import RetreatPanel
 from .retreat_search_panel import RetreatSearchPanel
 from .worst_impact_panel import WorstImpactPanel
 from .process_analysis_panel import ProcessAnalysisPanel
-from .strategy_comparison_panel import StrategyComparisonPanel  # 保留至 Phase 2 移除
+from .comparison_analysis_panel import ComparisonAnalysisPanel
 from ..core.result_store import (
     ResultStore, StoredDataset, ComparabilityFingerprint, compute_config_hash,
 )
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
 
         self.process_analysis_panel = ProcessAnalysisPanel()
 
-        self.strategy_comparison_panel = StrategyComparisonPanel()
+        self.comparison_analysis_panel = ComparisonAnalysisPanel(self.result_store)
 
         # 数据管理面板
         self.data_manager_panel = DataManagerPanel(self.result_store)
@@ -108,7 +108,6 @@ class MainWindow(QMainWindow):
         self.retreat_panel.set_config_panel(self.config_panel)
         self.retreat_search_panel.set_store(self._store)
         self.retreat_search_panel.set_config_panel(self.config_panel)
-        self.strategy_comparison_panel.set_store(self._store)
         self.worst_impact_panel.set_config_panel(self.config_panel)
 
         self.tabs.addTab(self.config_panel, "配置")
@@ -119,7 +118,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.resource_search_panel, "最少资源")
         self.tabs.addTab(self.retreat_tab, "退路分析")
         self.tabs.addTab(self.worst_impact_panel, "最差影响")
-        self.tabs.addTab(self.strategy_comparison_panel, "策略比较")
+        self.tabs.addTab(self.comparison_analysis_panel, "比较分析")
         self.tabs.addTab(self.data_manager_panel, "数据管理")
         self.tabs.addTab(self.sensitivity_panel, "敏感度分析")
 
@@ -175,7 +174,7 @@ class MainWindow(QMainWindow):
         self.retreat_panel.status_update.connect(self.status_bar.showMessage)
         self.retreat_search_panel.status_update.connect(self.status_bar.showMessage)
         self.worst_impact_panel.status_update.connect(self.status_bar.showMessage)
-        self.strategy_comparison_panel.status_update.connect(self.status_bar.showMessage)
+        self.comparison_analysis_panel.status_update.connect(self.status_bar.showMessage)
         self.data_manager_panel.load_requested.connect(self._load_dataset_for_analysis)
         self.data_manager_panel.compare_requested.connect(self._on_compare_datasets)
         self.data_manager_panel.status_update.connect(self.status_bar.showMessage)
@@ -188,7 +187,6 @@ class MainWindow(QMainWindow):
         self.resource_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
         self.retreat_search_panel.set_store(self._store)
-        self.strategy_comparison_panel.set_store(self._store)
 
     def _on_tab_changed(self, index):
         widget = self.tabs.widget(index)
@@ -201,8 +199,6 @@ class MainWindow(QMainWindow):
             self.retreat_search_panel.set_store(self._store)
         elif widget is self.worst_impact_panel:
             self.worst_impact_panel.set_store(self._store)
-        elif widget is self.strategy_comparison_panel:
-            self.strategy_comparison_panel.set_store(self._store)
         elif widget is self.data_manager_panel:
             self.data_manager_panel._refresh_table()
 
@@ -497,7 +493,8 @@ class MainWindow(QMainWindow):
             if self.tabs.tabText(i) == "比较分析":
                 self.tabs.setCurrentIndex(i)
                 break
-        self.status_bar.showMessage(f"已选择 {len(names)} 个数据集进行比较")
+        self.comparison_analysis_panel.set_datasets(names)
+        self.status_bar.showMessage(f"正在比较 {len(names)} 个数据集")
 
 
     def show_about(self):

@@ -57,6 +57,14 @@ from .worst_impact import (
     WorstImpactAnalyzer, WorstImpactResult, ConditionalResourceDistribution,
     DrawTargetStrategy,
 )
+from .result_store import (
+    ResultStore, StoredDataset, ComparabilityFingerprint, ComparabilityDiff, compute_config_hash,
+)
+from .comparison_analyzer import (
+    DescriptiveStats, HypothesisTestResult, ParetoFrontier,
+    dd_bootstrap_test, compute_dominance_matrix, compute_pvalue_matrix,
+    compute_gdr_values_for_datasets, holm_bonferroni, benjamini_hochberg,
+)
 from .bootstrap import BootstrapEngine, BootstrapResult
 from .streaming import StreamingAnalyzer, StreamingSuccessCounter, SharedResultCollector, DrawSequenceExtractor, extract_aggregate, extract_process, WorkerLocalExtractor, merge_extraction_packets
 from .process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
@@ -116,4 +124,8 @@ __all__ = [
     'to_event_type_sequence', 'to_event_type_set', 'to_custom_pattern', 'to_raw_trajectory',
     'to_success_sequence', 'to_success_set', 'to_success_count', 'to_success_custom',
     'EVENT_MODE_MAP', 'SUCCESS_MODE_MAP',
+    'ResultStore', 'StoredDataset', 'ComparabilityFingerprint', 'ComparabilityDiff', 'compute_config_hash',
+    'DescriptiveStats', 'HypothesisTestResult', 'ParetoFrontier',
+    'dd_bootstrap_test', 'compute_dominance_matrix', 'compute_pvalue_matrix',
+    'compute_gdr_values_for_datasets', 'holm_bonferroni', 'benjamini_hochberg',
 ]
