@@ -1,7 +1,4 @@
 import os
-import matplotlib
-import matplotlib.font_manager as fm
-import matplotlib.pyplot as plt
 
 _FONT_CONFIGURED = False
 
@@ -44,9 +41,13 @@ def _find_chinese_font():
 
 
 def configure_chinese_font():
+    """配置 matplotlib 中文字体（惰性导入——仅调用时加载 matplotlib）。"""
     global _FONT_CONFIGURED
     if _FONT_CONFIGURED:
         return
+
+    import matplotlib.font_manager as fm
+    import matplotlib.pyplot as plt
 
     font_path = _find_chinese_font()
 

@@ -24,10 +24,7 @@ a = Analysis(
         'PyQt6.QtWebEngineCore',
         'PyQt6.QtWebEngineWidgets',
 
-        # matplotlib 后端
-        'matplotlib.backends.backend_qtagg',
-
-        # scipy C 扩展（首版构建后根据 ImportError 补充）
+        # scipy C 扩展
         'scipy.special._ufuncs',
         'scipy.stats._stats',
         'scipy.stats._stats_mstats_common',
@@ -70,8 +67,15 @@ a = Analysis(
         'PyQt6.QtSensors',
         'PyQt6.QtSerialPort',
         'PyQt6.QtTest',
+        # 未使用的传递依赖
+        'pandas',
+        'statsmodels',
+        'lxml',
         'numba',
         'llvmlite',
+        # font_config.py 惰性导入——无调用方，可安全排除
+        'matplotlib',
+        'PIL',
     ],
 
     win_no_prefer_redirects=False,
@@ -79,6 +83,56 @@ a = Analysis(
     cipher=None,
     noarchive=False,
 )
+
+
+# ── 过滤未使用的 Qt6 C++ DLL ──────────────────────────────────────────
+# QtWebEngine 依赖链已包含所有必需 DLL，以下为确定不需要的模块。
+_QT_DLL_EXCLUDE_PREFIXES = [
+    'Qt6Pdf', 'Qt6PdfQuick',
+    'Qt6Quick3D',             # 3D 渲染（含 RuntimeRender/Physics/Particles/Xr/Asset* 等）
+    'Qt6Multimedia', 'Qt6MultimediaQuick',
+    'Qt6SpatialAudio',
+    'Qt6Sensors', 'Qt6SensorsQuick',
+    'Qt6SerialPort',
+    'Qt6Test', 'Qt6QuickTest',
+    'Qt6TextToSpeech',
+    'Qt6RemoteObjects',
+    'Qt6StateMachine',
+    'Qt6QuickTimeline',
+    'Qt6QuickShapes',
+    'Qt6QuickEffects',
+    'Qt6QuickParticles',
+    'Qt6QuickVectorImage',
+    'Qt6Svg',
+    # 额外 QML 皮肤（项目只使用默认 Fusion 风格）
+    'Qt6QuickControls2Imagine',
+    'Qt6QuickControls2Material',
+    'Qt6QuickControls2Universal',
+]
+
+a.binaries = [
+    (name, path, typ)
+    for (name, path, typ) in a.binaries
+    if not any(name.startswith(prefix) for prefix in _QT_DLL_EXCLUDE_PREFIXES)
+]
+
+# ── 过滤 plotly 无用数据 ─────────────────────────────────────────────
+# widgetbundle.js: Jupyter Notebook 插件（桌面应用不需要）
+# datasets/: 内置示例数据（gapminder.csv, election.csv 等）
+# 同时过滤多余的 C 库副本（libcrypto/libssl 只需一份）
+_PLOTLY_EXCLUDE_PREFIXES = [
+    'plotly/package_data/widgetbundle.js',
+]
+_PLOTLY_EXCLUDE_DIRS = [
+    'plotly/package_data/datasets/',
+]
+
+a.datas = [
+    (name, path, typ)
+    for (name, path, typ) in a.datas
+    if name not in _PLOTLY_EXCLUDE_PREFIXES
+    and not any(name.startswith(d) for d in _PLOTLY_EXCLUDE_DIRS)
+]
 
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
