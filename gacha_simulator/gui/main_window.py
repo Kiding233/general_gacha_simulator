@@ -16,10 +16,8 @@ from PyQt6.QtGui import QAction, QIcon
 from .config_panel import ConfigPanel
 from .gacha_panel import GachaPanel
 from .analysis_panel import AnalysisPanel
-from .strategy_panel import StrategyPanel
-from .resource_search_panel import ResourceSearchPanel
 from .retreat_panel import RetreatPanel
-from .retreat_search_panel import RetreatSearchPanel
+from .plan_search_panel import PlanSearchPanel
 from .worst_impact_panel import WorstImpactPanel
 from .process_analysis_panel import ProcessAnalysisPanel
 from .comparison_analysis_panel import ComparisonAnalysisPanel
@@ -44,7 +42,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GachaStat")
-        self.setGeometry(100, 100, 1400, 900)
+        # 根据屏幕可用空间自适应窗口大小，避免超出屏幕
+        screen_geo = self.screen().availableGeometry()
+        w = min(1400, int(screen_geo.width() * 0.85))
+        h = min(900, int(screen_geo.height() * 0.85))
+        self.resize(w, h)
+        # 居中显示
+        x = (screen_geo.width() - w) // 2 + screen_geo.x()
+        y = (screen_geo.height() - h) // 2 + screen_geo.y()
+        self.move(x, y)
+        # 允许用户自由缩小窗口（子面板最小高度设得过高时会撑大窗口，
+        # 此处显式设置主窗口自身的最小尺寸，确保用户可拖拽缩小）
+        self.setMinimumSize(800, 500)
         if os.path.exists(_ICON_PATH):
             self.setWindowIcon(QIcon(_ICON_PATH))
 
@@ -70,19 +79,10 @@ class MainWindow(QMainWindow):
         self.config_panel = ConfigPanel()
         self.gacha_panel = GachaPanel()
         self.analysis_panel = AnalysisPanel()
-        self.strategy_panel = StrategyPanel()
-        self.resource_search_panel = ResourceSearchPanel()
-
+        # 方案搜索面板（三合一，P8 面板合并）
+        self.plan_search_panel = PlanSearchPanel()
+        # 脆弱性分析面板（独立一级 Tab）
         self.retreat_panel = RetreatPanel()
-        self.retreat_search_panel = RetreatSearchPanel()
-
-        self.retreat_tab = QWidget()
-        retreat_tab_layout = QVBoxLayout(self.retreat_tab)
-        retreat_tab_layout.setContentsMargins(0, 0, 0, 0)
-        self.retreat_sub_tabs = QTabWidget()
-        self.retreat_sub_tabs.addTab(self.retreat_panel, "脆弱性分析")
-        self.retreat_sub_tabs.addTab(self.retreat_search_panel, "方案搜索")
-        retreat_tab_layout.addWidget(self.retreat_sub_tabs)
 
         self.worst_impact_panel = WorstImpactPanel()
         self.worst_impact_panel.set_store(self._store)
@@ -102,14 +102,9 @@ class MainWindow(QMainWindow):
         self.config_panel.set_store(self._store)
         self.gacha_panel.set_config_panel(self.config_panel)
         self.analysis_panel.set_store(self._store)
-        self.strategy_panel.set_store(self._store)
-        self.strategy_panel.set_config_panel(self.config_panel)
-        self.resource_search_panel.set_store(self._store)
-        self.resource_search_panel.set_config_panel(self.config_panel)
+        self.plan_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
         self.retreat_panel.set_config_panel(self.config_panel)
-        self.retreat_search_panel.set_store(self._store)
-        self.retreat_search_panel.set_config_panel(self.config_panel)
         self.worst_impact_panel.set_config_panel(self.config_panel)
 
         self.tabs.addTab(self.config_panel, "配置")
@@ -117,9 +112,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.data_manager_panel, "数据管理")
         self.tabs.addTab(self.analysis_panel, "统计分析")
         self.tabs.addTab(self.process_analysis_panel, "过程分析")
-        self.tabs.addTab(self.strategy_panel, "最多目标卡")
-        self.tabs.addTab(self.resource_search_panel, "最少资源")
-        self.tabs.addTab(self.retreat_tab, "退路分析")
+        self.tabs.addTab(self.plan_search_panel, "方案搜索")
+        self.tabs.addTab(self.retreat_panel, "脆弱性分析")
         self.tabs.addTab(self.worst_impact_panel, "最差影响")
         self.tabs.addTab(self.comparison_analysis_panel, "比较分析")
         self.tabs.addTab(self.sensitivity_panel, "敏感度分析")
@@ -174,10 +168,8 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.gacha_panel.simulation_finished.connect(self.on_simulation_finished)
         self.gacha_panel.status_update.connect(self.status_bar.showMessage)
-        self.strategy_panel.status_update.connect(self.status_bar.showMessage)
-        self.resource_search_panel.status_update.connect(self.status_bar.showMessage)
+        self.plan_search_panel.status_update.connect(self.status_bar.showMessage)
         self.retreat_panel.status_update.connect(self.status_bar.showMessage)
-        self.retreat_search_panel.status_update.connect(self.status_bar.showMessage)
         self.worst_impact_panel.status_update.connect(self.status_bar.showMessage)
         self.comparison_analysis_panel.status_update.connect(self.status_bar.showMessage)
         self.data_manager_panel.load_requested.connect(self._load_dataset_for_analysis)
@@ -185,24 +177,19 @@ class MainWindow(QMainWindow):
         self.data_manager_panel.status_update.connect(self.status_bar.showMessage)
         self.result_store.current_changed.connect(self._on_current_dataset_changed)
         self.config_panel.config_changed.connect(self._on_config_changed)
-        self.retreat_panel.vulnerability_finished.connect(self.retreat_search_panel.set_vulnerability_result)
+        self.retreat_panel.vulnerability_finished.connect(self.plan_search_panel.set_vulnerability_result)
 
     def _on_config_changed(self, config):
         self.config_panel.apply_to_store()
-        self.strategy_panel.set_store(self._store)
-        self.resource_search_panel.set_store(self._store)
+        self.plan_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
-        self.retreat_search_panel.set_store(self._store)
 
     def _on_tab_changed(self, index):
         widget = self.tabs.widget(index)
-        if widget is self.strategy_panel:
-            self.strategy_panel.set_store(self._store)
-        elif widget is self.resource_search_panel:
-            self.resource_search_panel.set_store(self._store)
-        elif widget is self.retreat_tab:
+        if widget is self.plan_search_panel:
+            self.plan_search_panel.set_store(self._store)
+        elif widget is self.retreat_panel:
             self.retreat_panel.set_store(self._store)
-            self.retreat_search_panel.set_store(self._store)
         elif widget is self.worst_impact_panel:
             self.worst_impact_panel.set_store(self._store)
         elif widget is self.data_manager_panel:
@@ -212,8 +199,7 @@ class MainWindow(QMainWindow):
         try:
             load_store_from_directory(_DEFAULT_CONFIG_DIR, self._store)
             self.config_panel.refresh_from_store()
-            self.strategy_panel.set_store(self._store)
-            self.resource_search_panel.set_store(self._store)
+            self.plan_search_panel.set_store(self._store)
             self.status_bar.showMessage(f"已加载默认配置: {_DEFAULT_CONFIG_DIR}")
         except Exception as e:
             traceback.print_exc()
@@ -226,8 +212,7 @@ class MainWindow(QMainWindow):
                 self.config_panel.apply_to_store()
                 load_store_from_directory(path, self._store)
                 self.config_panel.refresh_from_store()
-                self.strategy_panel.set_store(self._store)
-                self.resource_search_panel.set_store(self._store)
+                self.plan_search_panel.set_store(self._store)
                 self.status_bar.showMessage(f"配置已导入: {path}")
             except Exception as e:
                 traceback.print_exc()
