@@ -296,6 +296,100 @@ class RetreatSearchEngine:
 
         return result
 
+    def search_max_targets_forward(self, candidate_specs: Dict[str, int]) -> RetreatSearchResult:
+        """前进法：从空目标集开始，按抽取意愿降序逐个添加，直到成功率跌破阈值回退一步。
+
+        Args:
+            candidate_specs: 候选卡及其目标数量 {card_id: qty}，全部可获取时纳入
+        Returns:
+            RetreatSearchResult，其中 points 按添加顺序排列，最后一个是最终有效方案
+        """
+        self._should_stop = False
+
+        candidate_specs = self._filter_obtainable_targets(candidate_specs)
+        if not candidate_specs:
+            self.progress_callback("所有候选卡在截断时间线中均不可获取，搜索终止", 100)
+            return RetreatSearchResult(
+                from_pool_id=self.from_pool_id,
+                base_resource=self.base_resource,
+                pity_init=dict(self.pity_counter_init),
+                search_mode='forward',
+            )
+
+        result = RetreatSearchResult(
+            from_pool_id=self.from_pool_id,
+            base_resource=self.base_resource,
+            pity_init=dict(self.pity_counter_init),
+            search_mode='forward',
+        )
+
+        env = self._build_truncated_env(candidate_specs, self.base_resource)
+
+        # 没有后续池子的情况，直接返回成功（所有候选卡均可获得）
+        if not env.pools:
+            result.points.append(RetreatSearchPoint(
+                extra_resource=0.0,
+                target_specs=dict(candidate_specs),
+                success_probability=1.0,
+            ))
+            self.progress_callback("没有后续池子，已成功", 100)
+            return result
+
+        # 按抽取意愿降序排列
+        sorted_ids = sorted(
+            candidate_specs.keys(),
+            key=lambda cid: self.desire_weights.get(cid, 1.0),
+            reverse=True,
+        )
+
+        current_specs: Dict[str, int] = {}
+        last_valid_specs: Dict[str, int] = {}
+        last_valid_prob = 1.0
+
+        total_steps = len(sorted_ids)
+        for i, card_id in enumerate(sorted_ids):
+            if self._should_stop:
+                break
+
+            pct = int((i / max(total_steps, 1)) * 95) + 5
+            self.progress_callback(f"前进法: 尝试添加 {card_id}", pct)
+
+            current_specs[card_id] = candidate_specs[card_id]
+            env = self._build_truncated_env(current_specs, self.base_resource)
+            prob = self._simulate_with_resource(env, current_specs, self.base_resource)
+
+            result.points.append(RetreatSearchPoint(
+                extra_resource=0.0,
+                target_specs=dict(current_specs),
+                success_probability=prob,
+            ))
+
+            if prob >= self.success_threshold:
+                last_valid_specs = dict(current_specs)
+                last_valid_prob = prob
+            else:
+                # 回退到上一个有效状态；如果第一步就失败，使用仅含第一张卡的方案
+                if not last_valid_specs:
+                    last_valid_specs = {card_id: candidate_specs[card_id]}
+                    last_valid_prob = prob
+                self.progress_callback(
+                    f"前进法完成: 添加 {card_id} 跌破阈值 (P={prob:.2%}), "
+                    f"回退到 {len(last_valid_specs)} 卡, P={last_valid_prob:.2%}",
+                    100,
+                )
+                break
+
+        # 如果所有候选卡都添加成功
+        if not self._should_stop and len(current_specs) == len(sorted_ids):
+            last_valid_specs = dict(current_specs)
+            last_valid_prob = result.points[-1].success_probability if result.points else 1.0
+            self.progress_callback(
+                f"前进法完成: 全部 {len(last_valid_specs)} 张候选卡均已添加, P={last_valid_prob:.2%}",
+                100,
+            )
+
+        return result
+
     def search_pareto(self, target_specs: Dict[str, int]) -> RetreatSearchResult:
         self._should_stop = False
 
