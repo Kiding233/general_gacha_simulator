@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
+[DEPRECATED — P8 面板合并]
 策略分析面板 - 目标卡权重配置与目标规划
+已被 PlanSearchPanel (plan_search_panel.py) 替代，将于后续版本移除。
 """
 
 import sys

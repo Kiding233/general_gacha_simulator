@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
+[DEPRECATED — P8 面板合并]
 资源搜索面板 - 二分搜索最少资源使得成功率≥阈值
+已被 PlanSearchPanel (plan_search_panel.py) 替代，将于后续版本移除。
 """
 
 import sys

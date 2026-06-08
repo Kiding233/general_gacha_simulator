@@ -1,3 +1,7 @@
+"""[DEPRECATED — P8 面板合并]
+退路方案搜索面板
+已被 PlanSearchPanel (plan_search_panel.py) 替代，将于后续版本移除。
+"""
 import sys
 import os
 import traceback

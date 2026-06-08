@@ -162,15 +162,8 @@ class PlanSearchEngine:
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)
 
     def _extract_cost_per_draw(self, env):
-        for p in env.pools:
-            cost = p.cost
-            if isinstance(cost, list) and cost:
-                for opt in cost:
-                    if isinstance(opt, dict):
-                        return float(list(opt.values())[0])
-            elif isinstance(cost, dict):
-                return float(list(cost.values())[0])
-        return 160
+        """[DEPRECATED] 请使用模块级 get_cost_per_draw(env.pools)"""
+        return get_cost_per_draw(env.pools)
 
     def search_min_resource(self, target_specs: Dict[str, int],
                             progress_base: int = 0, progress_span: int = 100) -> RetreatSearchResult:
@@ -533,3 +526,30 @@ class PlanSearchEngine:
 
 # 向后兼容别名——旧代码可继续使用 RetreatSearchEngine
 RetreatSearchEngine = PlanSearchEngine
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 工具函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_cost_per_draw(pools) -> float:
+    """从池列表中提取单抽资源成本（取首个有效值）。
+
+    注意：多池成本不同时不存在正确值——此函数仅返回近似值。
+    二分搜索在资源空间运行，cost 不影响搜索正确性。
+    """
+    if not pools:
+        return 160
+    for p in pools:
+        cost = getattr(p, 'cost', None)
+        if cost is None:
+            continue
+        if isinstance(cost, (int, float)) and cost > 0:
+            return float(cost)
+        if isinstance(cost, list) and cost:
+            for opt in cost:
+                if isinstance(opt, dict):
+                    return float(list(opt.values())[0])
+        elif isinstance(cost, dict):
+            return float(list(cost.values())[0])
+    return 160
