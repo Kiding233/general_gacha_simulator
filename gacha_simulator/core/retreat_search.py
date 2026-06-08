@@ -11,14 +11,56 @@ class RetreatSearchPoint:
 
 
 @dataclass
-class RetreatSearchResult:
-    from_pool_id: Optional[str]  # None = 完整时间线模式
-    base_resource: float
-    pity_init: Dict[str, int]
-    search_mode: str
+class PlanSearchResult:
+    """统一方案搜索结果——兼容旧 RetreatSearchResult 的全部字段。"""
+    search_mode: str  # 'min_resource' | 'forward' | 'backward' | 'pareto'
+    # 向后兼容字段（旧 RetreatSearchResult）
+    from_pool_id: Optional[str] = None  # None = 完整时间线模式
+    base_resource: float = 0.0
+    pity_init: Dict[str, int] = field(default_factory=dict)
     points: List[RetreatSearchPoint] = field(default_factory=list)
-    resource_only_result: Optional[RetreatSearchResult] = None  # 纯资源搜索结果
-    target_only_result: Optional[RetreatSearchResult] = None  # 纯目标卡搜索结果
+    resource_only_result: Optional[PlanSearchResult] = None   # type: ignore
+    target_only_result: Optional[PlanSearchResult] = None     # type: ignore
+
+    # 新增字段
+    start_mode: str = 'full_timeline'  # 'full_timeline' | 'from_retreat'
+    success: bool = True
+
+    # 最少资源
+    min_resource: Optional[float] = None
+    binary_steps: List = field(default_factory=list)  # ResourceSearchStep 列表
+
+    # 最多目标卡
+    forward_result: Optional[any] = None   # type: ignore  # ForwardResult
+    backward_result: Optional[any] = None  # type: ignore  # BackwardResult
+
+    # Pareto
+    pareto_points: List[RetreatSearchPoint] = field(default_factory=list)
+
+    # 元数据
+    cost_per_draw: float = 160.0
+    target_specs: Dict[str, int] = field(default_factory=dict)
+    total_iterations: int = 0
+    final_success_probability: float = 0.0
+
+    def __post_init__(self):
+        # 推断 start_mode
+        if not self.start_mode or self.start_mode == 'full_timeline':
+            self.start_mode = 'full_timeline' if self.from_pool_id is None else 'from_retreat'
+        # 最少资源结果自动填充兼容字段
+        if self.min_resource is not None and not self.points:
+            self.points = [RetreatSearchPoint(
+                extra_resource=self.min_resource - self.base_resource,
+                target_specs=dict(self.target_specs),
+                success_probability=self.final_success_probability,
+            )]
+        # Pareto 结果自动同步
+        if self.pareto_points and not self.points:
+            self.points = list(self.pareto_points)
+
+
+# 向后兼容别名
+RetreatSearchResult = PlanSearchResult
 
 
 class PlanSearchEngine:
@@ -214,6 +256,12 @@ class PlanSearchEngine:
             target_specs=dict(target_specs),
             success_probability=final_prob,
         ))
+        result.success = final_prob >= self.success_threshold
+        result.min_resource = self.base_resource + r_hi
+        result.final_success_probability = final_prob
+        result.total_iterations = doubling + binary_iter + 1  # +1 最终验证
+        result.cost_per_draw = cost_per_draw
+        result.target_specs = dict(target_specs)
         _emit(f"最少额外资源: +{r_hi:.0f}, P={final_prob:.2%}", 100)
         return result
 
