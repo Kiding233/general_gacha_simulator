@@ -1,0 +1,235 @@
+<h2>方案搜索面板 v6 — 起始状态与现有退路搜索完全一致</h2>
+<p class="subtitle">左侧模拟稿复刻 retreat_search_panel.py 的 source_group 布局；右侧对比原始代码结构</p>
+
+<div class="split">
+  <!-- ===== 左：合并后的 PlanSearchPanel 起始状态（选池子后） ===== -->
+  <div class="mockup">
+    <div class="mockup-header">PlanSearchPanel · 起始状态 — 选择 pool_2 后</div>
+    <div class="mockup-body" style="padding: 12px; background: #fff; font-size: 13px;">
+
+      <!-- 搜索模式 -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">搜索模式</legend>
+        <div style="display: flex; gap: 6px;">
+          <span style="padding: 5px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 最少资源</span>
+          <span style="padding: 5px 14px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 最多目标卡</span>
+          <span style="padding: 5px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ Pareto前沿</span>
+        </div>
+      </fieldset>
+
+      <!-- ===== 起始状态 — 完全复刻现有 retreat_search_panel 的 source_group ===== -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">起始状态（来自脆弱性分析）</legend>
+
+        <!-- 起始池: QComboBox -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #555; min-width: 50px;">起始池:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 20px 4px 10px; border-radius: 3px; font-size: 12px; flex: 1;">pool_2 ▼</span>
+        </div>
+
+        <!-- 基准资源: QComboBox + QLineEdit 同行 -->
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #555; min-width: 50px;">基准资源:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 8px; border-radius: 3px; font-size: 12px;">50%分位 ▼</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 8px; border-radius: 3px; font-size: 12px; color: #999; flex: 1;">58640</span>
+        </div>
+
+        <!-- 保底水位 — 内嵌 QGroupBox -->
+        <fieldset style="border: 1px solid #d5d5d5; border-radius: 4px; padding: 8px 10px; margin-top: 2px;">
+          <legend style="font-size: 12px; color: #555; font-weight: bold; padding: 0 4px;">保底水位</legend>
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+              <th style="text-align: left; padding: 3px 6px;">计数器</th>
+              <th style="text-align: center; padding: 3px 6px;">均值</th>
+              <th style="text-align: center; padding: 3px 6px;">中位</th>
+              <th style="text-align: center; padding: 3px 6px;">25%</th>
+              <th style="text-align: center; padding: 3px 6px;">75%</th>
+              <th style="text-align: center; padding: 3px 6px;">初始值</th>
+            </tr>
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 3px 6px;">pity_soft</td>
+              <td style="text-align: center;">45.2</td>
+              <td style="text-align: center;">44.0</td>
+              <td style="text-align: center;">38.0</td>
+              <td style="text-align: center;">52.1</td>
+              <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 1px 10px; border-radius: 2px; background: #fff;">45</span></td>
+            </tr>
+            <tr>
+              <td style="padding: 3px 6px;">pity_hard</td>
+              <td style="text-align: center;">62.1</td>
+              <td style="text-align: center;">63.0</td>
+              <td style="text-align: center;">55.0</td>
+              <td style="text-align: center;">70.3</td>
+              <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 1px 10px; border-radius: 2px; background: #fff;">63</span></td>
+            </tr>
+          </table>
+        </fieldset>
+      </fieldset>
+
+      <!-- 权重表（其余 GroupBox 略，和 v5 一致） -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">目标卡权重配置</legend>
+        <div style="color: #888; font-size: 10px; margin-bottom: 6px;">前进法按「抽取意愿」降序 · 后退法按「错失代价」升序</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+            <th style="text-align: left; padding: 4px 8px;">卡ID</th>
+            <th style="text-align: center; padding: 4px 8px; width: 75px;">抽取意愿</th>
+            <th style="text-align: center; padding: 4px 8px; width: 75px;">错失代价</th>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_a</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">2.5</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">1.2</span></td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_b</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">1.0</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">0.3</span></td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_c</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">0.8</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 10px; border-radius: 3px; background: #fff;">1.8</span></td>
+          </tr>
+        </table>
+        <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+          <span style="color: #555; font-size: 12px;">搜索方向:</span>
+          <span style="padding: 4px 14px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 前进法</span>
+          <span style="padding: 4px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 后退法</span>
+        </div>
+      </fieldset>
+
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">搜索参数</legend>
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; color: #555;">
+          <span>当前策略:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #f5f5f5;">Smart</span>
+          <span>GDR指标:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">all_targets ▼</span>
+          <span>GDR阈值:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">1.0</span>
+          <span>成功率阈值:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">0.95</span>
+          <span>模拟次数:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">1000</span>
+          <span>并行进程:</span><span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">4</span>
+        </div>
+        <div style="border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">
+          <div style="font-size: 11px; color: #888; margin-bottom: 4px;">二分搜索参数</div>
+          <div style="display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 11px;">
+            <span>起始上界:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">55000</span>
+            <span>起始下界:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">0</span>
+            <span>精度(抽):</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">1</span>
+            <span>最大迭代:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">30</span>
+            <span>单抽成本:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">160</span>
+          </div>
+        </div>
+      </fieldset>
+
+      <div style="display: flex; gap: 8px;">
+        <span style="background: #4CAF50; color: white; font-weight: bold; padding: 8px 28px; border-radius: 4px; font-size: 13px;">▶ 开始搜索</span>
+        <span style="background: #f44336; color: white; padding: 8px 16px; border-radius: 4px; font-size: 13px;">⏹ 取消</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 右：原始代码结构对照 ===== -->
+  <div class="mockup">
+    <div class="mockup-header">对照：retreat_search_panel.py _setup_ui() 原始结构</div>
+    <div class="mockup-body" style="padding: 12px; background: #1e1e1e; font-family: monospace; font-size: 12px; line-height: 1.6; color: #d4d4d4;">
+<pre style="margin: 0; white-space: pre-wrap;">
+<span style="color: #6a9955;"># retreat_search_panel.py:250-280</span>
+
+source_group = QGroupBox(<span style="color: #ce9178;">"起始状态（来自脆弱性分析）"</span>)
+source_form = QFormLayout(source_group)
+
+<span style="color: #569cd6;">self.</span>pool_combo = QComboBox()                    <span style="color: #6a9955;"># 起始池</span>
+source_form.addRow(<span style="color: #ce9178;">"起始池:"</span>, <span style="color: #569cd6;">self.</span>pool_combo)
+
+<span style="color: #569cd6;">self.</span>resource_combo = QComboBox()               <span style="color: #6a9955;"># VI下限/均值/上限/分位/自定义</span>
+<span style="color: #569cd6;">self.</span>resource_manual_input = QLineEdit(<span style="color: #ce9178;">"0"</span>)    <span style="color: #6a9955;"># 同行手动输入</span>
+resource_row = QHBoxLayout()
+resource_row.addWidget(QLabel(<span style="color: #ce9178;">"基准资源:"</span>))
+resource_row.addWidget(<span style="color: #569cd6;">self.</span>resource_combo)
+resource_row.addWidget(<span style="color: #569cd6;">self.</span>resource_manual_input)
+source_form.addRow(resource_row)
+
+pity_group = QGroupBox(<span style="color: #ce9178;">"保底水位"</span>)            <span style="color: #6a9955;"># 内嵌子 GroupBox</span>
+pity_layout = QVBoxLayout(pity_group)
+<span style="color: #569cd6;">self.</span>pity_table = QTableWidget()               <span style="color: #6a9955;"># 6列: 计数器|均值|中位|25%|75%|初始值</span>
+<span style="color: #569cd6;">self.</span>pity_table.setColumnCount(6)
+<span style="color: #569cd6;">self.</span>pity_table.setHorizontalHeaderLabels([
+    <span style="color: #ce9178;">"计数器"</span>, <span style="color: #ce9178;">"均值"</span>, <span style="color: #ce9178;">"中位"</span>, <span style="color: #ce9178;">"25%"</span>, <span style="color: #ce9178;">"75%"</span>, <span style="color: #ce9178;">"初始值"</span>])
+pity_layout.addWidget(<span style="color: #569cd6;">self.</span>pity_table)
+source_form.addRow(pity_group)
+</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 未选池子 vs 选池子后的两种形态 ===== -->
+<h3 style="margin-top: 20px;">起始状态 — 两种形态（同一位置、互斥切换）</h3>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">形态 A：未选池子 = "(从头开始)"</div>
+    <div class="mockup-body" style="padding: 12px; background: #fff;">
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">起始状态</legend>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12px; color: #555; min-width: 50px;">起始池:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 20px 4px 10px; border-radius: 3px; font-size: 12px; flex: 1;">(从头开始) ▼</span>
+        </div>
+        <div style="border: 1px dashed #ddd; border-radius: 4px; padding: 10px; background: #fafafa; margin-top: 8px; color: #aaa; font-size: 11px; text-align: center;">
+          选择起始池后才显示基准资源与保底水位编辑<br>当前使用配置页默认初始值
+        </div>
+      </fieldset>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">形态 B：选择 pool_2 后 — 与现有 UI 完全一致</div>
+    <div class="mockup-body" style="padding: 12px; background: #fff;">
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">起始状态（来自脆弱性分析）</legend>
+
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #555; min-width: 50px;">起始池:</span>
+          <span style="border: 1px solid #1976d2; background: #e3f2fd; padding: 4px 20px 4px 10px; border-radius: 3px; font-size: 12px; color: #1565c0; flex: 1;">pool_2 ▼</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+          <span style="font-size: 12px; color: #555; min-width: 50px;">基准资源:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 8px; border-radius: 3px; font-size: 12px;">50%分位 ▼</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 8px; border-radius: 3px; font-size: 12px; color: #555; flex: 1;">58640</span>
+        </div>
+
+        <fieldset style="border: 1px solid #d5d5d5; border-radius: 4px; padding: 8px 10px;">
+          <legend style="font-size: 12px; color: #555; font-weight: bold; padding: 0 4px;">保底水位</legend>
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+              <th style="text-align: left; padding: 3px 6px;">计数器</th><th style="text-align: center; padding: 3px 6px;">均值</th>
+              <th style="text-align: center; padding: 3px 6px;">中位</th><th style="text-align: center; padding: 3px 6px;">25%</th>
+              <th style="text-align: center; padding: 3px 6px;">75%</th><th style="text-align: center; padding: 3px 6px;">初始值</th>
+            </tr>
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 3px 6px;">pity_soft</td><td style="text-align: center;">45.2</td>
+              <td style="text-align: center;">44.0</td><td style="text-align: center;">38.0</td>
+              <td style="text-align: center;">52.1</td>
+              <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 1px 10px; border-radius: 2px; background: #fff;">45</span></td>
+            </tr>
+            <tr>
+              <td style="padding: 3px 6px;">pity_hard</td><td style="text-align: center;">62.1</td>
+              <td style="text-align: center;">63.0</td><td style="text-align: center;">55.0</td>
+              <td style="text-align: center;">70.3</td>
+              <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 1px 10px; border-radius: 2px; background: #fff;">63</span></td>
+            </tr>
+          </table>
+        </fieldset>
+      </fieldset>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 差异说明 ===== -->
+<div class="section" style="margin-top: 16px;">
+  <p style="font-size: 12px; color: #555;">
+    <b>与现有 retreat_search_panel 的唯一差异：</b>下拉框起始池新增一项 <code>(从头开始)</code>，
+    作为第一项（index=0），选中时隐藏基准资源 + 保底水位区域，Title 从「起始状态（来自脆弱性分析）」简化为「起始状态」。
+    选中其他池子时，布局、字段、列名均与现有代码 100% 一致。
+  </p>
+</div>

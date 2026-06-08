@@ -45,6 +45,8 @@ class RetreatWorker(QThread):
         card_value_weights=None,
         no_draw_resource=None,
         no_draw_pool_resources=None,
+        cost_per_draw=None,
+        use_draw_units=False,
     ):
         super().__init__()
         self.simulation_results = simulation_results
@@ -60,6 +62,8 @@ class RetreatWorker(QThread):
         self.card_value_weights = card_value_weights
         self.no_draw_resource = no_draw_resource
         self.no_draw_pool_resources = no_draw_pool_resources or {}
+        self.cost_per_draw = cost_per_draw
+        self.use_draw_units = use_draw_units
 
     def run(self):
         try:
@@ -77,6 +81,8 @@ class RetreatWorker(QThread):
                 desire_weights=self.desire_weights,
                 miss_cost_weights=self.miss_cost_weights,
                 card_value_weights=self.card_value_weights,
+                cost_per_draw=self.cost_per_draw,
+                use_draw_units=self.use_draw_units,
             )
 
             self.progress.emit("正在生成图表...", 60)
@@ -227,6 +233,22 @@ class RetreatPanel(QWidget):
                 pool_names[pe.pool_id] = getattr(pe, 'name', pe.pool_id)
         return pool_names
 
+    def _extract_cost_per_draw(self):
+        """从配置中提取单抽成本，默认 160。"""
+        if self._store is None or not self._store.pools:
+            return 160
+        for pe in self._store.pools:
+            cost_str = getattr(pe, 'cost', '')
+            if not cost_str:
+                continue
+            try:
+                parts = cost_str.split(':')
+                if len(parts) == 2:
+                    return int(float(parts[1]))
+            except (ValueError, IndexError):
+                continue
+        return 160
+
     def _run_analysis(self):
         if not self._simulation_results:
             self.status_label.setText("请先运行批量模拟")
@@ -243,6 +265,7 @@ class RetreatPanel(QWidget):
         num_bins = self.num_bins_spin.value()
         num_curve = self.num_curve_spin.value()
         pool_names = self._get_pool_names()
+        cost_per_draw = self._extract_cost_per_draw()
 
         desire_weights = None
         miss_cost_weights = None
@@ -266,6 +289,7 @@ class RetreatPanel(QWidget):
             card_value_weights=card_value_weights,
             no_draw_resource=getattr(self, '_no_draw_resource', None),
             no_draw_pool_resources=getattr(self, '_no_draw_pool_resources', {}),
+            cost_per_draw=cost_per_draw,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)

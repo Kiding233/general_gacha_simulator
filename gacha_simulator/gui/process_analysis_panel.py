@@ -769,6 +769,7 @@ class ProcessAnalysisPanel(QWidget):
 
         from ..visualization.chart_spec import histogram, ChartAnnotation
         import numpy as np
+        from ..core.gdr_binning import compute_bins
 
         from ..core.gdr import UNIFIED_GDR_REGISTRY
         gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
@@ -778,13 +779,16 @@ class ProcessAnalysisPanel(QWidget):
         mean_val = float(np.mean(samples))
         median_val = float(np.median(samples))
 
+        bin_result = compute_bins(gdr_key, samples)
         spec = histogram(
             samples=samples,
             title="条件GDR分布",
             xlabel=display_name,
-            ylabel="频次",
+            ylabel="频数" if not bin_result.density else "频次",
             mean_line=True,
             quantile_lines=[0.5],
+            density=bin_result.density,
+            **bin_result.to_layout_hints(),
         )
         self.cond_chart_webview.set_chart(spec)
 

@@ -1,0 +1,171 @@
+<h2>方案搜索面板 — 完整布局预览</h2>
+<p class="subtitle">左栏配置 + 右栏结果。模式是第一公民，退路起点是可选附加条件。</p>
+
+<div class="mockup">
+  <div class="mockup-header">PlanSearchPanel — 模式: 最多目标卡 · 前进法 · 起点: 从头开始</div>
+  <div class="mockup-body" style="display: flex; gap: 14px; font-size: 13px; background: #f5f5f5; padding: 12px; border-radius: 4px;">
+
+    <!-- 左栏：配置 -->
+    <div style="width: 340px; min-width: 340px; border: 1px solid #d0d0d0; border-radius: 6px; padding: 12px; background: #ffffff;">
+
+      <!-- 搜索模式 -->
+      <div style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+        <div style="font-weight: bold; font-size: 13px; color: #333; margin-bottom: 8px;">▼ 搜索模式</div>
+        <div style="display: flex; gap: 6px;">
+          <span style="padding: 5px 12px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 最少资源</span>
+          <span style="padding: 5px 12px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 最多目标卡</span>
+          <span style="padding: 5px 12px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ Pareto前沿</span>
+        </div>
+      </div>
+
+      <!-- 退路起点 -->
+      <div style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+        <div style="font-weight: bold; font-size: 13px; color: #333; margin-bottom: 6px;">▼ 退路起点 (可选)</div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <span style="font-size: 12px; color: #555;">起始池:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 20px 4px 10px; border-radius: 3px; font-size: 12px;">(从头开始) ▼</span>
+          <span style="color: #999; font-size: 11px;">选择退路点池子后才展开以下参数</span>
+        </div>
+        <div style="border: 1px dashed #ddd; border-radius: 4px; padding: 14px; background: #fafafa;">
+          <div style="color: #bbb; font-size: 11px; text-align: center;">
+            基准资源 &amp; 保底水位编辑区 — 选择池子后显示
+          </div>
+        </div>
+      </div>
+
+      <!-- 权重表 -->
+      <div style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+        <div style="font-weight: bold; font-size: 13px; color: #333; margin-bottom: 4px;">▼ 目标卡权重</div>
+        <div style="color: #888; font-size: 10px; margin-bottom: 8px;">前进法按「渴望」降序添加 · 后退法按「代价」升序移除</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tr style="background: #f5f5f5; border-bottom: 2px solid #e0e0e0;">
+            <th style="text-align: left; padding: 4px 8px; color: #555;">卡ID</th>
+            <th style="text-align: center; padding: 4px 8px; color: #555;">渴望 ↑</th>
+            <th style="text-align: center; padding: 4px 8px; color: #555;">代价 ↑</th>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px;">card_a</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">2.5</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.2</span></td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px;">card_b</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.0</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">0.3</span></td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px;">card_c</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">0.8</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.8</span></td>
+          </tr>
+        </table>
+        <div style="margin-top: 10px; display: flex; gap: 8px;">
+          <span style="padding: 4px 14px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 前进法</span>
+          <span style="padding: 4px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 后退法</span>
+        </div>
+      </div>
+
+      <!-- 搜索参数 -->
+      <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+        <div style="font-weight: bold; font-size: 13px; color: #333; margin-bottom: 6px;">▼ 搜索参数</div>
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; color: #555;">
+          <span>模拟次数:</span><span><span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; background: #fff;">1000</span></span>
+          <span>成功率阈值:</span><span><span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; background: #fff;">0.95</span></span>
+          <span>GDR指标:</span><span><span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; background: #fff;">all_targets ▼</span></span>
+          <span>GDR阈值:</span><span><span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; background: #fff;">1.0</span></span>
+          <span>并行进程:</span><span><span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; background: #fff;">4</span></span>
+        </div>
+      </div>
+
+      <!-- 按钮 -->
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="background: #4CAF50; color: white; font-weight: bold; padding: 7px 26px; border-radius: 4px; font-size: 13px;">▶ 开始搜索</span>
+        <span style="background: #f44336; color: white; padding: 7px 14px; border-radius: 4px; font-size: 13px;">⏹ 取消</span>
+        <span style="margin-left: auto; font-size: 11px; color: #888;">策略: Smart</span>
+      </div>
+    </div>
+
+    <!-- 右栏：结果 -->
+    <div style="flex: 1; border: 1px solid #d0d0d0; border-radius: 6px; background: #ffffff; display: flex; flex-direction: column; min-height: 0;">
+
+      <!-- 快照栏 -->
+      <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #e8e8e8; background: #fafafa; border-radius: 6px 6px 0 0;">
+        <span style="font-size: 11px; color: #888;">📋 结果快照:</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px; cursor: pointer;">&lt;</span>
+        <span style="border: 1px solid #1976d2; background: #fff; padding: 4px 16px; border-radius: 3px; font-size: 12px; color: #333;">最多目标卡·前进v1 @17:48 ▼</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px; cursor: pointer;">&gt;</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px; color: #f44336; cursor: pointer;">×</span>
+        <span style="font-size: 10px; color: #999; margin-left: auto;">3个快照</span>
+      </div>
+
+      <!-- 结果摘要 -->
+      <div style="padding: 12px 16px; border-bottom: 1px solid #eee; background: #f9fbfd;">
+        <div style="display: flex; gap: 24px; font-size: 13px;">
+          <span><b style="color: #555;">方法:</b> 前进法</span>
+          <span><b style="color: #555;">最终目标集:</b> <span style="color: #1976d2;">card_a, card_b, card_c</span></span>
+          <span><b style="color: #555;">成功率:</b> <span style="color: #4CAF50; font-weight: bold;">96.1%</span></span>
+        </div>
+      </div>
+
+      <!-- 图表区 -->
+      <div style="flex: 1; padding: 16px; border-bottom: 1px solid #eee; background: #fff; min-height: 180px;">
+        <div style="font-weight: bold; font-size: 12px; color: #555; margin-bottom: 10px;">成功率阶梯图 (前进法)</div>
+        <div style="border: 1px solid #e8e8e8; border-radius: 4px; padding: 16px; background: #fcfcfc;">
+          <pre style="font-size: 11px; color: #1976d2; line-height: 1.7; margin: 0; font-family: monospace;">
+    P ↑
+1.00 ┤     ●──●
+0.96 ┤   ●╱
+0.92 ┤  ●╱
+0.88 ┤ ╱
+0.84 ┤╱
+     └─────────→ 目标卡数
+     0  1  2  3  4
+   <span style="color: #e53935;">─ ─ 阈值 95%</span>
+          </pre>
+        </div>
+      </div>
+
+      <!-- 步骤表 -->
+      <div style="padding: 12px 16px;">
+        <div style="font-weight: bold; font-size: 12px; color: #555; margin-bottom: 8px;">步骤详情</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tr style="background: #f5f5f5; border-bottom: 2px solid #e0e0e0;">
+            <th style="text-align: left; padding: 5px 10px; color: #555;">步骤</th>
+            <th style="text-align: left; padding: 5px 10px; color: #555;">操作</th>
+            <th style="text-align: left; padding: 5px 10px; color: #555;">卡ID</th>
+            <th style="text-align: center; padding: 5px 10px; color: #555;">目标集大小</th>
+            <th style="text-align: right; padding: 5px 10px; color: #555;">成功率</th>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 5px 10px;">1</td>
+            <td style="color: #4CAF50; padding: 5px 10px;">+ 添加</td>
+            <td style="padding: 5px 10px;">card_a</td>
+            <td style="text-align: center; padding: 5px 10px;">1</td>
+            <td style="text-align: right; padding: 5px 10px;">99.8%</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 5px 10px;">2</td>
+            <td style="color: #4CAF50; padding: 5px 10px;">+ 添加</td>
+            <td style="padding: 5px 10px;">card_b</td>
+            <td style="text-align: center; padding: 5px 10px;">2</td>
+            <td style="text-align: right; padding: 5px 10px;">98.5%</td>
+          </tr>
+          <tr style="background: #e8f5e9; border-bottom: 1px solid #c8e6c9;">
+            <td style="padding: 5px 10px;">3</td>
+            <td style="color: #4CAF50; padding: 5px 10px;">+ 添加</td>
+            <td style="padding: 5px 10px;">card_c</td>
+            <td style="text-align: center; padding: 5px 10px;">3</td>
+            <td style="text-align: right; padding: 5px 10px; font-weight: bold;">96.1% ← 最后有效</td>
+          </tr>
+          <tr>
+            <td style="padding: 5px 10px;">4</td>
+            <td style="color: #f44336; padding: 5px 10px;">+ 添加</td>
+            <td style="padding: 5px 10px;">card_d</td>
+            <td style="text-align: center; padding: 5px 10px;">4</td>
+            <td style="text-align: right; padding: 5px 10px; color: #f44336;">89.2% ✗ 回退</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

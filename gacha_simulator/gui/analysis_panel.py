@@ -1707,7 +1707,7 @@ class AnalysisPanel(QWidget):
         from gacha_simulator.gui.chart_webview import ChartWebView
         self.chart_webview = ChartWebView()
         self.chart_webview.setVisible(False)
-        self.chart_webview.setMinimumHeight(800)
+        self.chart_webview.setMinimumHeight(300)
         self.chart_webview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._results_layout.addWidget(self.chart_webview)
 

@@ -17,6 +17,8 @@ class DescriptiveStats:
     median: float
     std: float
     skewness: float
+    kurtosis: float
+    var_05: float
     cvar_05: float
     success_rate: float
     min_val: float
@@ -30,7 +32,8 @@ class DescriptiveStats:
         if n == 0:
             return cls(name=name, gdr_key=gdr_key, mean=float('nan'),
                        median=float('nan'), std=float('nan'), skewness=float('nan'),
-                       cvar_05=float('nan'), success_rate=float('nan'),
+                       kurtosis=float('nan'), var_05=float('nan'), cvar_05=float('nan'),
+                       success_rate=float('nan'),
                        min_val=float('nan'), max_val=float('nan'), n=0)
 
         mean_v = float(np.mean(values))
@@ -39,15 +42,22 @@ class DescriptiveStats:
         # 偏度：Fisher-Pearson 标准化矩
         if std_v > 1e-15 and n > 2:
             skewness_v = float(sp_stats.skew(values, bias=False))
+            kurtosis_v = float(sp_stats.kurtosis(values, bias=False))
         else:
             skewness_v = 0.0
+            kurtosis_v = 0.0
 
-        # CVaR₀.₀₅
+        # VaR₀.₀₅（5% 分位数） + CVaR₀.₀₅（尾部条件均值）
         alpha = 0.05
+        sorted_v = np.sort(values)
         if lower_is_better:
-            cvar_v = float(np.mean(np.sort(values)[-int(n * alpha):])) if n > 1 else mean_v
+            tail = sorted_v[-int(n * alpha):] if n > 1 else values
+            cvar_v = float(np.mean(tail))
+            var_v = float(sorted_v[-max(1, int(n * alpha))])
         else:
-            cvar_v = float(np.mean(np.sort(values)[:max(1, int(n * alpha))]))
+            tail = sorted_v[:max(1, int(n * alpha))]
+            cvar_v = float(np.mean(tail))
+            var_v = float(sorted_v[max(0, int(n * alpha) - 1)])
 
         # 成功率
         if lower_is_better:
@@ -59,7 +69,8 @@ class DescriptiveStats:
         return cls(
             name=name, gdr_key=gdr_key,
             mean=mean_v, median=median_v, std=std_v,
-            skewness=skewness_v, cvar_05=cvar_v,
+            skewness=skewness_v, kurtosis=kurtosis_v,
+            var_05=var_v, cvar_05=cvar_v,
             success_rate=success_rate_v,
             min_val=float(np.min(values)), max_val=float(np.max(values)),
             n=n,
@@ -247,11 +258,14 @@ def compute_dominance_matrix(
     n_bootstrap: int = 2000,
     rng_seed: int = 42,
 ) -> Dict[str, Any]:
-    """计算 n×n 的 j 阶占优矩阵（上半三角）。
+    """计算 n×n j 阶占优矩阵（双向，含下三角）。
+
+    matrix[i][j] = p 值，检验行 i 是否 j 阶随机占优列 j。
+    上下三角分别独立 bootstrap——行 i 占优列 j 不等价于列 j 被行 i 占优。
 
     Returns:
         dict with keys:
-            matrix: List[List[Optional[float]]] — p 值矩阵
+            matrix: List[List[Optional[float]]] — p 值矩阵（非对角满）
             dominates: List[List[bool]] — 行是否占优列
             names: List[str]
             order: int
@@ -261,13 +275,22 @@ def compute_dominance_matrix(
     dominates = [[False] * n for _ in range(n)]
 
     for i in range(n):
-        for j in range(i + 1, n):
+        for j in range(n):
+            if i == j:
+                continue
             result = dd_bootstrap_test(
                 values_list[i], values_list[j],
                 order=order, n_bootstrap=n_bootstrap, rng_seed=rng_seed,
             )
             matrix[i][j] = result['p_value']
             dominates[i][j] = result['dominates']
+
+    # 双向裁决：双方均 p<0.05 → 占优关系不确定（分布交叉或样本噪声），双方均判 False
+    for i in range(n):
+        for j in range(i + 1, n):
+            if dominates[i][j] and dominates[j][i]:
+                dominates[i][j] = False
+                dominates[j][i] = False
 
     return {
         'matrix': matrix,

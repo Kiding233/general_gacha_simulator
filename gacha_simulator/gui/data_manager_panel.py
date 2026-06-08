@@ -280,7 +280,188 @@ class DataManagerPanel(QWidget):
         item = self._table.item(row, 1)
         if item:
             name = item.text()
-            self.load_requested.emit(name)
+            self._show_dataset_detail(name)
+
+    def _show_dataset_detail(self, name: str):
+        """弹出数据集详情窗口——结构化文本展示全部数据"""
+        ds = self._store.get(name)
+        if ds is None:
+            return
+
+        import json
+        from PyQt6.QtWidgets import QDialog, QTextEdit, QVBoxLayout as VBox, QDialogButtonBox
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"数据集详情: {name}")
+        dlg.resize(800, 650)
+
+        layout = VBox(dlg)
+        editor = QTextEdit()
+        editor.setReadOnly(True)
+        editor.setStyleSheet("font-family:Consolas,'Microsoft YaHei',monospace;font-size:13px;")
+        layout.addWidget(editor)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        # 构建文本
+        lines = []
+        fp = ds.fingerprint
+
+        def kv(k, v):
+            lines.append(f"{k}: {v}")
+
+        def section(title):
+            lines.append("")
+            lines.append(f"{'='*60}")
+            lines.append(f"  {title}")
+            lines.append(f"{'='*60}")
+
+        def kv_dict(k, d, indent="  "):
+            if not d:
+                kv(k, "{}")
+                return
+            lines.append(f"{k}:")
+            for dk, dv in sorted(d.items()):
+                lines.append(f"{indent}{dk}: {dv}")
+
+        # ── 指纹 ──
+        section("指纹 (ComparabilityFingerprint)")
+        kv("策略名称", fp.strategy_name)
+        kv("停止条件", fp.stop_condition)
+        kv("种子范围", f"{fp.seed_start} – {fp.seed_end}")
+        kv("模拟次数", fp.num_simulations)
+        kv("池子列表", ", ".join(fp.pool_ids))
+        kv("配置Hash", fp.config_hash)
+        kv("创建时间", fp.created_at)
+        kv_dict("目标卡", fp.target_cards)
+        kv_dict("初始资源", fp.initial_resources)
+
+        # ── 数据集摘要 ──
+        section("数据集摘要")
+        kv("名称", ds.name)
+        kv("备注", ds.notes or "(无)")
+        kv("创建时间", ds.created_at)
+        kv("策略", ds.strategy_name)
+        kv("模拟次数", ds.num_simulations)
+        kv("不抽卡资源量", ds.no_draw_resource)
+
+        # ── 聚合数据 ──
+        section("聚合数据 (aggregate_data)")
+        agg = ds.aggregate_data
+        kv("条目数", len(agg) if isinstance(agg, list) else str(type(agg)))
+        if isinstance(agg, list) and agg:
+            # 提取所有顶层键
+            sample = agg[0]
+            if isinstance(sample, dict):
+                keys = list(sample.keys())
+                kv("字段", ", ".join(keys))
+                # 每个字段的统计摘要
+                for key in keys:
+                    vals = [d.get(key) for d in agg if key in d]
+                    if vals and isinstance(vals[0], (int, float)):
+                        import numpy as np
+                        arr = np.array(vals, dtype=float)
+                        lines.append(f"  {key}: mean={arr.mean():.4f}, "
+                                    f"std={arr.std():.4f}, "
+                                    f"min={arr.min():.4f}, max={arr.max():.4f}")
+                    elif vals and isinstance(vals[0], (list, dict)):
+                        kv(f"  {key}", f"({len(vals)} 条, 类型={type(vals[0]).__name__})")
+                    else:
+                        unique = set(str(v) for v in vals[:20])
+                        preview = ", ".join(sorted(unique)[:5])
+                        kv(f"  {key}", f"{preview}" + ("..." if len(unique) > 5 else ""))
+
+        # ── 原始 JSON（前 3 条聚合数据） ──
+        section("原始数据 (前 3 条)")
+        if isinstance(agg, list) and agg:
+            preview = agg[:3]
+            lines.append(json.dumps(preview, indent=2, ensure_ascii=False, default=str))
+        else:
+            lines.append(str(agg)[:2000])
+
+        # ── 其他数据 ──
+        section("其他数据")
+        kv("目标卡 (target_specs)", json.dumps(ds.target_specs, ensure_ascii=False))
+        kv("目标ID", ", ".join(ds.target_ids) if ds.target_ids else "(空)")
+        kv("SSR ID", ", ".join(ds.ssr_ids) if ds.ssr_ids else "(空)")
+
+        gdr = ds.gdr_context
+        if gdr and isinstance(gdr, dict):
+            kv_dict("GDR上下文", gdr)
+        else:
+            kv("GDR上下文", str(gdr))
+
+        kv("池结束时间", json.dumps(ds.pool_end_times, ensure_ascii=False, default=str))
+        kv("池类型", json.dumps(ds.pool_types, ensure_ascii=False))
+
+        # 抽卡序列摘要
+        seqs = ds.draw_sequences
+        kv("抽卡序列", f"({len(seqs)} 条模拟)" if isinstance(seqs, list) else str(type(seqs)))
+
+        # 热力图摘要
+        hm = ds.heatmap_data
+        if hm and isinstance(hm, dict):
+            lines.append("热力图数据:")
+            for hk in sorted(hm.keys()):
+                hv = hm[hk]
+                if isinstance(hv, dict):
+                    lines.append(f"  {hk}: {len(hv)} 个条目")
+                elif isinstance(hv, list):
+                    lines.append(f"  {hk}: [{len(hv)} 条]")
+                else:
+                    lines.append(f"  {hk}: {hv}")
+
+        # 累积快照
+        cs = ds.cumulative_snapshots
+        if cs and isinstance(cs, dict):
+            kv("累积快照", ", ".join(sorted(cs.keys())))
+
+        # 转变标记
+        tf = ds.transition_flags
+        kv("转变标记", f"({len(tf)} 条)" if isinstance(tf, list) else str(type(tf)))
+
+        # 不抽卡池资源
+        ndpr = ds.no_draw_pool_resources
+        if ndpr:
+            kv_dict("不抽卡池资源", ndpr)
+
+        # 初始资源
+        ir = ds.initial_resources
+        if ir:
+            kv_dict("初始资源", ir)
+
+        # ── 分析缓存 ──
+        cache = ds.cached_analysis
+        if cache:
+            section("分析缓存")
+            for ck in sorted(cache.keys()):
+                cv = cache[ck]
+                if isinstance(cv, (dict, list)):
+                    kv(ck, f"({type(cv).__name__}, {len(cv)} 元素)")
+                else:
+                    kv(ck, str(cv)[:200])
+
+        # ── 完整 JSON dump（可选，放在最后） ──
+        section("完整序列化 (to_dict)")
+        try:
+            full = ds.to_dict()
+            # 移除过大的字段，避免窗口卡顿
+            for huge_key in ['aggregate_data', 'draw_sequences', 'heatmap_data',
+                              'cumulative_snapshots', 'transition_flags']:
+                if huge_key in full:
+                    val = full[huge_key]
+                    if isinstance(val, list):
+                        full[huge_key] = f"<{len(val)} items, omitted>"
+                    elif isinstance(val, dict):
+                        full[huge_key] = f"<{len(val)} keys, omitted>"
+            lines.append(json.dumps(full, indent=2, ensure_ascii=False, default=str))
+        except Exception as e:
+            lines.append(f"序列化失败: {e}")
+
+        editor.setPlainText("\n".join(lines))
+        dlg.exec()
 
     def _on_compare_clicked(self):
         names = self._get_checked_names()

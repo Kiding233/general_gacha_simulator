@@ -1,4 +1,4 @@
-# EVT 改进——离散型与退化分布处理
+# P25 EVT 改进——离散型与退化分布处理
 
 > 创建日期：2026-05-28 | 状态：设计中（v4——新增 MLE-IC 极端分位数稳定性分析 + Bootstrap 兼容性 + TIB vs 百分位法）
 > 前置：P24 EVT 尾部拟合（已实现）
@@ -753,7 +753,7 @@ def _bootstrap_tail_gpd(self, data: np.ndarray, q: float) -> BootstrapResult:
                            'GPD-param (unified EVT)', n, self.B)
 ```
 
-### 7.3 Bootstrap 计划（`docs/Bootstrap稳定性分析改进计划.md`）的修改建议
+### 7.3 Bootstrap 计划（`docs/P18 Bootstrap稳定性分析改进计划.md`）的修改建议
 
 基于以上分析，Bootstrap 计划需新增/修改以下条目：
 
@@ -951,7 +951,7 @@ def _evt_var_discrete(q, xi, beta, u, phi):
 - [ ] **7.2 统一 GPD 拟合路径**：`_bootstrap_tail_gpd()` 委托 `evt_tail.fit_gpd_lower()`（`bootstrap.py`，~30 行）
 - [ ] **7.3 B2.9 TIB 升级**：将 GPD-param Bootstrap 的 CI 构造从百分位法替换为检验反演 Bootstrap（`bootstrap.py`，~100 行，优先级高于 MLE-IC）
 - [ ] **7.3 B3.0**：VaR CI 从「待实现」升级为可用，附带百分位法已知限制警告（`analysis_panel.py` + `bootstrap.py`）
-- [ ] 更新 `docs/Bootstrap稳定性分析改进计划.md`——新增 B2.8 + B2.9 条目 + 修改问题 2 + 更新 §7.4 VaR CI 状态
+- [ ] 更新 `docs/P18 Bootstrap稳定性分析改进计划.md`——新增 B2.8 + B2.9 条目 + 修改问题 2 + 更新 §7.4 VaR CI 状态
 - [ ] **（可选——低优先级）** 对 B 类边际 GDR（δ/σ > 0.1）实施 MLE-IC 拟合路径（§三.4-§三.5）
 
 ### 9.4 中期（可选）

@@ -60,6 +60,9 @@ from .worst_impact import (
 from .result_store import (
     ResultStore, StoredDataset, ComparabilityFingerprint, ComparabilityDiff, compute_config_hash,
 )
+from .gdr_binning import (
+    BinningResult, compute_bins, detect_step_size, compute_aligned_bins,
+)
 from .comparison_analyzer import (
     DescriptiveStats, HypothesisTestResult, ParetoFrontier,
     dd_bootstrap_test, compute_dominance_matrix, compute_pvalue_matrix,
@@ -125,6 +128,7 @@ __all__ = [
     'to_success_sequence', 'to_success_set', 'to_success_count', 'to_success_custom',
     'EVENT_MODE_MAP', 'SUCCESS_MODE_MAP',
     'ResultStore', 'StoredDataset', 'ComparabilityFingerprint', 'ComparabilityDiff', 'compute_config_hash',
+    'BinningResult', 'compute_bins', 'detect_step_size', 'compute_aligned_bins',
     'DescriptiveStats', 'HypothesisTestResult', 'ParetoFrontier',
     'dd_bootstrap_test', 'compute_dominance_matrix', 'compute_pvalue_matrix',
     'compute_gdr_values_for_datasets', 'holm_bonferroni', 'benjamini_hochberg',

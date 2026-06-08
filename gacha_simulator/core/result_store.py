@@ -147,12 +147,12 @@ class ComparabilityDiff:
         return diff_dims == {'strategy_name'}
 
     def all_same(self) -> bool:
-        """全部相同——变异分析"""
+        """所有维度相同"""
         return all(v == 'same' for v in self.dimensions.values())
 
     def mode_label(self) -> str:
         if self.all_same():
-            return '变异分析——比较的是蒙特卡洛噪声幅度，适合评估 N 是否足够及结果可复现性'
+            return '所有维度相同'
         if self.only_strategy_differs():
             return '策略比较——同一环境下策略的选择差异。同种子可配对比较。'
         strategy_diff = self.dimensions.get('strategy_name', 'same') != 'same'
@@ -163,7 +163,7 @@ class ComparabilityDiff:
         if strategy_diff and config_diff:
             return '多重差异——策略和配置均不同，结论需谨慎归因'
         if config_diff and not strategy_diff:
-            return '不同配置对比——同一策略在不同环境下的鲁棒性'
+            return '不同配置对比——同一策略在不同配置下表现的差异'
         return '部分维度不同，请检查差异矩阵'
 
 

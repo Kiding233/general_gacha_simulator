@@ -257,6 +257,11 @@ class PlotlyRenderer:
 
     def _build_histogram(self, s: ChartSpec) -> go.Figure:
         d: HistogramData = s.data
+        bar_mode = s.layout_hints.get("bar_mode", False)
+
+        if bar_mode:
+            return self._build_bar_from_grid(s)
+
         nbins = s.layout_hints.get("nbins", None)
         color = s.layout_hints.get("color", "#1f77b4")
         bin_edges = s.layout_hints.get("bin_edges", None)
@@ -273,6 +278,22 @@ class PlotlyRenderer:
                 size=(bin_edges[1] - bin_edges[0]) if len(bin_edges) > 1 else None,
             )
         fig.add_trace(go.Histogram(**hist_kwargs))
+        # 渲染叠加轨迹 — 共享 xbins 确保对齐
+        if d.overlays:
+            for ov in d.overlays:
+                ov_kwargs = dict(
+                    x=ov.samples, marker_color=ov.color,
+                    opacity=ov.opacity, name=ov.label or None,
+                    hovertemplate="值: %{x:.2f}<br>频数: %{y}<extra></extra>",
+                )
+                if nbins is not None:
+                    ov_kwargs["nbinsx"] = nbins
+                if bin_edges is not None:
+                    ov_kwargs["xbins"] = dict(
+                        start=bin_edges[0], end=bin_edges[-1] + (bin_edges[1] - bin_edges[0]) * 1.000001 if len(bin_edges) > 1 else bin_edges[-1],
+                        size=(bin_edges[1] - bin_edges[0]) if len(bin_edges) > 1 else None,
+                    )
+                fig.add_trace(go.Histogram(**ov_kwargs))
         # 收集所有需要标注的竖线，按 x 坐标交错分配 y 偏移量以避免文字重叠
         line_anns = []
         if d.mean_line:
@@ -294,6 +315,42 @@ class PlotlyRenderer:
         if all_y:
             fig.update_yaxes(range=[0, max(all_y) * 1.25])
         fig.update_layout(bargap=0.05, hovermode="x")
+        return fig
+
+    def _build_bar_from_grid(self, s: ChartSpec) -> go.Figure:
+        """有限格点柱状图：每个实际取值一根柱子。
+
+        由 compute_bins() 返回的 bar_mode=True 触发。x 轴是格点值（可能间隔不均一），
+        go.Histogram 无法正确处理——用 go.Bar 显式指定 (x, y) 坐标对。
+        """
+        bar_x = s.layout_hints.get("bar_x")
+        bar_y = s.layout_hints.get("bar_y")
+        color = s.layout_hints.get("color", "#1f77b4")
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=bar_x, y=bar_y,
+            marker_color=color,
+            hovertemplate="值: %{x:.4f}<br>频数: %{y}<extra></extra>",
+        ))
+
+        # 复用现有注解系统（均值线、分位数线等）
+        self._apply_annotations(fig, s)
+
+        # 渲染叠加轨迹——将 overlays 也转为 (bar_x, bar_y) 坐标对
+        data: HistogramData = s.data
+        bin_edges = s.layout_hints.get("bin_edges")
+        if data.overlays and bin_edges is not None:
+            for ov in data.overlays:
+                ov_counts, _ = np.histogram(ov.samples, bins=bin_edges)
+                fig.add_trace(go.Bar(
+                    x=bar_x, y=ov_counts,
+                    marker_color=ov.color,
+                    opacity=ov.opacity,
+                    name=ov.label or None,
+                    hovertemplate="值: %{x:.4f}<br>频数: %{y}<extra></extra>",
+                ))
+        fig.update_layout(bargap=0.15, hovermode="x")
         return fig
 
     def _build_cdf(self, s: ChartSpec) -> go.Figure:
