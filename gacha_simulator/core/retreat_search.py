@@ -12,7 +12,7 @@ class RetreatSearchPoint:
 
 @dataclass
 class RetreatSearchResult:
-    from_pool_id: str
+    from_pool_id: Optional[str]  # None = 完整时间线模式
     base_resource: float
     pity_init: Dict[str, int]
     search_mode: str
@@ -21,13 +21,19 @@ class RetreatSearchResult:
     target_only_result: Optional[RetreatSearchResult] = None  # 纯目标卡搜索结果
 
 
-class RetreatSearchEngine:
+class PlanSearchEngine:
+    """统一方案搜索引擎——支持完整时间线与截断时间线（退路点）两种模式。
+
+    from_pool_id=None  → 完整时间线，使用 SimulationEnvBuilder.from_config_store()
+    from_pool_id=str   → 截断时间线，使用 RetreatConfigBuilder.build()
+    """
+
     def __init__(
         self,
         config_store,
-        from_pool_id: str,
-        base_resource: float,
-        pity_counter_init: Dict[str, int],
+        from_pool_id: Optional[str] = None,
+        base_resource: float = 0.0,
+        pity_counter_init: Optional[Dict[str, int]] = None,
         miss_cost_weights: Optional[Dict[str, float]] = None,
         desire_weights: Optional[Dict[str, float]] = None,
         card_value_weights: Optional[Dict[str, float]] = None,
@@ -45,7 +51,7 @@ class RetreatSearchEngine:
         self.config_store = config_store
         self.from_pool_id = from_pool_id
         self.base_resource = base_resource
-        self.pity_counter_init = pity_counter_init
+        self.pity_counter_init = pity_counter_init or {}
         self.miss_cost_weights = miss_cost_weights or {}
         self.desire_weights = desire_weights or {}
         self.card_value_weights = card_value_weights or {}
@@ -64,17 +70,33 @@ class RetreatSearchEngine:
     def stop(self):
         self._should_stop = True
 
-    def _build_truncated_env(self, target_specs, initial_resource_value):
-        from .retreat_config import RetreatConfigBuilder
-        truncated_store = RetreatConfigBuilder.build(
-            original_store=self.config_store,
-            from_pool_id=self.from_pool_id,
-            initial_resources={'draw_resource': initial_resource_value},
-            pity_counter_init=self.pity_counter_init,
-        )
-        from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
-        env = SimulationEnvBuilder.from_config_store(truncated_store)
-        return env
+    def _build_env(self, target_specs, initial_resource_value):
+        """构建模拟环境——根据 from_pool_id 分叉：
+        - None: 完整时间线（SimulationEnvBuilder）
+        - str:  截断时间线（RetreatConfigBuilder）
+        """
+        if self.from_pool_id is None:
+            # 完整时间线模式
+            from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
+            env = SimulationEnvBuilder.from_config_store(self.config_store)
+            ir = dict(env.initial_resources)
+            ir['draw_resource'] = initial_resource_value
+            env.initial_resources = ir
+            return env
+        else:
+            # 截断时间线模式（退路点）
+            from .retreat_config import RetreatConfigBuilder
+            truncated_store = RetreatConfigBuilder.build(
+                original_store=self.config_store,
+                from_pool_id=self.from_pool_id,
+                initial_resources={'draw_resource': initial_resource_value},
+                pity_counter_init=self.pity_counter_init,
+            )
+            from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
+            return SimulationEnvBuilder.from_config_store(truncated_store)
+
+    # 保留旧方法名作为别名，向后兼容
+    _build_truncated_env = _build_env
 
     def _simulate_with_resource(self, env, target_specs, resource_value):
         # 如果没有剩余池子，那么没有任务已完成，成功率 100%
@@ -208,8 +230,16 @@ class RetreatSearchEngine:
         return obtainable
 
     def _filter_obtainable_targets(self, target_specs: Dict[str, int]) -> Dict[str, int]:
-        """预过滤：移除截断时间线中不可获取的卡，通过 progress_callback 告知用户"""
-        env = self._build_truncated_env(target_specs, self.base_resource)
+        """预过滤：移除不可获取的卡。
+
+        完整时间线模式（from_pool_id=None）：所有卡均可获取，不做过滤。
+        截断时间线模式：只保留截断后池子中实际可获取的卡。
+        """
+        # 完整时间线模式：所有卡均可获取
+        if self.from_pool_id is None:
+            return dict(target_specs)
+
+        env = self._build_env(target_specs, self.base_resource)
         obtainable = self._get_obtainable_card_ids(env)
 
         unobtainable = [cid for cid in target_specs if cid not in obtainable]
@@ -451,3 +481,7 @@ class RetreatSearchEngine:
 
         self.progress_callback("Pareto搜索完成", 100)
         return result
+
+
+# 向后兼容别名——旧代码可继续使用 RetreatSearchEngine
+RetreatSearchEngine = PlanSearchEngine
