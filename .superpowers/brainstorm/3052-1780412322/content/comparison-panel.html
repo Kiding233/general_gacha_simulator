@@ -1,0 +1,195 @@
+<h2>比较分析面板 —— 布局方案</h2>
+<p class="subtitle">从数据管理 Tab 勾选 2+ 数据集 → 点击「开始比较」→ 进入此面板</p>
+
+<div class="mockup" style="margin-top:16px;">
+  <div class="mockup-header">比较分析面板</div>
+  <div class="mockup-body">
+
+    <!-- 顶部：GDR选择器 + 运行 -->
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;padding:10px 12px;background:#f8f9fa;border-radius:6px;">
+      <span style="font-size:13px;font-weight:bold;">GDR 指标</span>
+      <select style="padding:6px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+        <option>target_achievement</option>
+        <option>resource_efficiency</option>
+        <option>target_collection</option>
+        <option>weighted_satisfaction</option>
+      </select>
+      <span style="font-size:13px;font-weight:bold;">阈值</span>
+      <input style="width:60px;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;" value="1.0">
+      <span style="font-size:13px;font-weight:bold;">校正方法</span>
+      <select style="padding:6px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+        <option>Benjamini-Hochberg (FDR)</option>
+        <option>Holm-Bonferroni (FWER)</option>
+        <option>原始 p 值</option>
+      </select>
+      <button class="mock-button" style="background:#1976d2;color:#fff;">运行分析</button>
+    </div>
+
+    <!-- 左侧：矩阵区 -->
+    <div style="display:flex;gap:16px;margin-bottom:16px;">
+
+      <!-- L2 占优矩阵 -->
+      <div style="flex:1;border:1px solid #e0e0e0;border-radius:6px;padding:12px;">
+        <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">L2 随机占优</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:center;">
+          <tr>
+            <th style="padding:6px;border-bottom:2px solid #ddd;width:40px;"></th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">A</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">B</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">C</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">D</th>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">A</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;background:#e8f5e9;color:#2e7d32;">FSD</td>
+            <td style="padding:6px;color:#999;">—</td>
+            <td style="padding:6px;color:#999;">—</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">B</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#999;">—</td>
+            <td style="padding:6px;background:#e8f5e9;color:#2e7d32;">SSD</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">C</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#999;">—</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">D</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+          </tr>
+        </table>
+        <div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5;">
+          A FSD B：对一切递增效用者，A 严格优于 B<br>
+          B SSD D：对一切风险厌恶者，B 严格优于 D<br>
+          C、D 互不占优 → 进入 L4 帕累托前沿
+        </div>
+      </div>
+
+      <!-- L3 p值矩阵 -->
+      <div style="flex:1;border:1px solid #e0e0e0;border-radius:6px;padding:12px;">
+        <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">L3 假设检验 (BH校正)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:center;">
+          <tr>
+            <th style="padding:6px;border-bottom:2px solid #ddd;width:40px;"></th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">A</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">B</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">C</th>
+            <th style="padding:6px;border-bottom:2px solid #ddd;">D</th>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">A</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;background:#fff3e0;color:#e65100;">.032 *</td>
+            <td style="padding:6px;color:#666;">.451</td>
+            <td style="padding:6px;background:#fce4ec;color:#c62828;">.003 **</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">B</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#666;">.124</td>
+            <td style="padding:6px;color:#666;">.089</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">C</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;background:#fff3e0;color:#e65100;">.041 *</td>
+          </tr>
+          <tr>
+            <td style="padding:6px;font-weight:bold;">D</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+            <td style="padding:6px;color:#ccc;">—</td>
+          </tr>
+        </table>
+        <div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5;">
+          * p &lt; .05 &nbsp;&nbsp; ** p &lt; .01<br>
+          检验方法：KS / MWU / t-test（置换检验暂缓引入）
+        </div>
+      </div>
+    </div>
+
+    <!-- L4 帕累托前沿 -->
+    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;margin-bottom:16px;">
+      <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">L4 均值-CVaR 帕累托前沿</div>
+      <div style="display:flex;gap:16px;">
+        <div style="flex:1;background:#fafafa;border-radius:4px;padding:40px 20px;text-align:center;position:relative;min-height:200px;">
+          <!-- 模拟散点图 -->
+          <div style="position:absolute;left:30px;bottom:30px;font-size:11px;color:#888;">← CVaR₀.₀₅ (越低越好)</div>
+          <div style="position:absolute;left:30px;top:30px;font-size:11px;color:#888;transform:rotate(-90deg);transform-origin:left;">均值 ↑</div>
+          <!-- 前沿点 -->
+          <div style="position:absolute;left:130px;top:40px;">
+            <span style="display:inline-block;width:16px;height:16px;background:#1976d2;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>
+            <span style="font-size:11px;margin-left:4px;position:relative;top:-3px;">A (smart)</span>
+          </div>
+          <div style="position:absolute;left:160px;top:90px;">
+            <span style="display:inline-block;width:16px;height:16px;background:#1976d2;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>
+            <span style="font-size:11px;margin-left:4px;position:relative;top:-3px;">B (pool_quota)</span>
+          </div>
+          <div style="position:absolute;left:200px;top:70px;">
+            <span style="display:inline-block;width:16px;height:16px;background:#1976d2;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>
+            <span style="font-size:11px;margin-left:4px;position:relative;top:-3px;">C (target_hunt)</span>
+          </div>
+          <!-- 被支配点 -->
+          <div style="position:absolute;left:80px;top:120px;">
+            <span style="display:inline-block;width:14px;height:14px;background:#e0e0e0;border-radius:50%;border:2px solid #ccc;"></span>
+            <span style="font-size:11px;margin-left:4px;color:#999;position:relative;top:-3px;">D (fixed_100)</span>
+          </div>
+          <!-- 前沿线 -->
+          <svg style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;">
+            <polyline points="130,40 160,90 200,70" fill="none" stroke="#1976d2" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.4"/>
+          </svg>
+        </div>
+        <div style="flex:0 0 240px;font-size:12px;">
+          <div style="margin-bottom:8px;font-weight:bold;">图例</div>
+          <div style="margin-bottom:4px;"><span style="display:inline-block;width:12px;height:12px;background:#1976d2;border-radius:50%;vertical-align:middle;margin-right:6px;"></span> 前沿策略（非支配）</div>
+          <div style="margin-bottom:4px;"><span style="display:inline-block;width:12px;height:12px;background:#e0e0e0;border-radius:50%;border:1px solid #ccc;vertical-align:middle;margin-right:6px;"></span> 被支配策略</div>
+          <div style="margin-bottom:12px;"><span style="display:inline-block;width:20px;height:1.5px;background:#1976d2;vertical-align:middle;margin-right:6px;border-top:1px dashed #1976d2;"></span> 前沿边界</div>
+          <div style="background:#f5f5f5;padding:8px;border-radius:4px;line-height:1.5;">
+            <strong>解释</strong><br>
+            D 被 A 支配（均值更低且 CVaR 更高）。<br>
+            A / B / C 互不支配，均在前沿。三者代表不同的风险-收益取舍。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 可视化 Tab -->
+    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;">
+      <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #eee;">
+        <span style="padding:8px 16px;background:#1976d2;color:#fff;border-radius:4px 4px 0 0;font-size:13px;font-weight:bold;">ECDF 叠加</span>
+        <span style="padding:8px 16px;background:#f5f5f5;color:#666;border-radius:4px 4px 0 0;font-size:13px;">箱线图</span>
+        <span style="padding:8px 16px;background:#f5f5f5;color:#666;border-radius:4px 4px 0 0;font-size:13px;">效应量热力图</span>
+      </div>
+      <div class="placeholder" style="min-height:200px;display:flex;align-items:center;justify-content:center;">
+        ECDF 叠加图（Plotly 渲染）—— 4 条 CDF 曲线，不同颜色，交叉点高亮
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px;">
+  <h3>交互规则</h3>
+  <ul style="font-size:13px;color:#555;line-height:1.8;">
+    <li><strong>切 GDR 指标</strong>：L2/L3/L4 全部即时刷新，无需重新跑模拟</li>
+    <li><strong>悬停矩阵格子</strong>：tooltip 显示原始 p 值 + 检验方法 + 效应量</li>
+    <li><strong>点击散点图上的点</strong>：高亮该策略在 L2/L3 中的行/列</li>
+    <li><strong>切换校正方法</strong>：p 值矩阵即时切换（BH ⇄ Holm ⇄ raw）</li>
+    <li><strong>L2 占优判定</strong>：先用确定性 ✓/— 快速预览，勾选「Bootstrap 检验」后跑 DD Bootstrap</li>
+    <li><strong>图表 Tab 切换</strong>：ECDF 叠加 / 箱线图 / 效应量热力图</li>
+  </ul>
+</div>

@@ -1,0 +1,216 @@
+<h2>数据管理 Tab —— 两种布局方案</h2>
+<p class="subtitle">核心任务：浏览数据集 → 勾选对比 → 加载分析 | 点击选择一个方案</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>上下分割 —— 表格在上，详情在下</h3>
+      <p>Excel 风格：上方完整数据表，下方按需展开差异矩阵</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>左右分割 —— 列表在左，详情在右</h3>
+      <p>邮件客户端风格：左侧紧凑列表，右侧大面板展示差异/操作</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>方案 A：上下分割</h3>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">数据管理 Tab — 上下分割布局</div>
+  <div class="mockup-body">
+    <!-- 工具栏 -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+      <button class="mock-button">加载分析</button>
+      <button class="mock-button">重命名</button>
+      <button class="mock-button">删除</button>
+      <button class="mock-button">导出...</button>
+      <button class="mock-button">导入...</button>
+      <span style="margin-left:auto;color:#888;">当前加载：smart_0602_1430</span>
+    </div>
+
+    <!-- 数据集表格 -->
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;">
+      <thead>
+        <tr style="background:#f5f5f5;">
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;width:30px;">☐</th>
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">名称</th>
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">策略</th>
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">配置</th>
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">时间</th>
+          <th style="padding:8px;text-align:right;border-bottom:2px solid #ddd;">N</th>
+          <th style="padding:8px;text-align:left;border-bottom:2px solid #ddd;">备注</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#e3f2fd;">
+          <td style="padding:8px;border-bottom:1px solid #eee;"><input type="checkbox" checked></td>
+          <td style="padding:8px;border-bottom:1px solid #eee;font-weight:bold;">smart_0602_1430</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">smart</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">默认</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">06/02 14:30</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">1000</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;color:#888;">当前加载</td>
+        </tr>
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid #eee;"><input type="checkbox"></td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">pool_quota_0602_1435</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">pool_quota</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">默认</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">06/02 14:35</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">1000</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;"></td>
+        </tr>
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid #eee;"><input type="checkbox"></td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">smart_highres_0602</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">smart</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">高资源</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;">06/02 15:00</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">500</td>
+          <td style="padding:8px;border-bottom:1px solid #eee;"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 底部：差异矩阵 + 操作按钮 -->
+    <div style="background:#fff;border:1px solid #e0e0e0;border-radius:4px;padding:12px;">
+      <div style="font-weight:bold;margin-bottom:8px;">可比性检查（已选 2 个数据集）</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:8px;">
+        <tr style="border-bottom:1px solid #eee;">
+          <td style="padding:4px 8px;color:#888;width:100px;">维度</td>
+          <td style="padding:4px 8px;font-weight:bold;">smart_0602_1430</td>
+          <td style="padding:4px 8px;font-weight:bold;">pool_quota_0602_1435</td>
+          <td style="padding:4px 8px;width:60px;"></td>
+        </tr>
+        <tr style="border-bottom:1px solid #eee;background:#f9fff9;">
+          <td style="padding:4px 8px;">配置</td>
+          <td style="padding:4px 8px;">默认</td>
+          <td style="padding:4px 8px;">默认</td>
+          <td style="padding:4px 8px;color:#4caf50;">✓</td>
+        </tr>
+        <tr style="border-bottom:1px solid #eee;background:#fff9f0;">
+          <td style="padding:4px 8px;">策略</td>
+          <td style="padding:4px 8px;">smart</td>
+          <td style="padding:4px 8px;">pool_quota</td>
+          <td style="padding:4px 8px;color:#f5a623;">⚠ 不同</td>
+        </tr>
+        <tr style="border-bottom:1px solid #eee;background:#f9fff9;">
+          <td style="padding:4px 8px;">目标卡</td>
+          <td style="padding:4px 8px;">{1001,1002}</td>
+          <td style="padding:4px 8px;">{1001,1002}</td>
+          <td style="padding:4px 8px;color:#4caf50;">✓</td>
+        </tr>
+        <tr style="border-bottom:1px solid #eee;background:#f9fff9;">
+          <td style="padding:4px 8px;">种子</td>
+          <td style="padding:4px 8px;">1-1000</td>
+          <td style="padding:4px 8px;">1-1000</td>
+          <td style="padding:4px 8px;color:#4caf50;">✓</td>
+        </tr>
+        <tr style="border-bottom:1px solid #eee;background:#f9fff9;">
+          <td style="padding:4px 8px;">N</td>
+          <td style="padding:4px 8px;">1000</td>
+          <td style="padding:4px 8px;">1000</td>
+          <td style="padding:4px 8px;color:#4caf50;">✓</td>
+        </tr>
+      </table>
+      <div style="font-size:12px;color:#888;margin-bottom:8px;">
+        ⚠ 策略不同 → 策略比较模式。比较的是同一环境下策略的选择差异。
+      </div>
+      <button class="mock-button" style="background:#1976d2;color:#fff;padding:8px 24px;">开始比较分析 →</button>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>方案 B：左右分割</h3>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">数据管理 Tab — 左右分割布局</div>
+  <div class="mockup-body">
+    <div style="display:flex;gap:12px;min-height:360px;">
+      <!-- 左侧：表格 + 工具栏 -->
+      <div style="flex:0 0 60%;display:flex;flex-direction:column;">
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <button class="mock-button">加载</button>
+          <button class="mock-button">重命名</button>
+          <button class="mock-button">删除</button>
+          <button class="mock-button">导出...</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:#f5f5f5;">
+              <th style="padding:6px;text-align:left;border-bottom:2px solid #ddd;width:24px;">☐</th>
+              <th style="padding:6px;text-align:left;border-bottom:2px solid #ddd;">名称</th>
+              <th style="padding:6px;text-align:left;border-bottom:2px solid #ddd;">策略</th>
+              <th style="padding:6px;text-align:right;border-bottom:2px solid #ddd;">N</th>
+              <th style="padding:6px;text-align:left;border-bottom:2px solid #ddd;">时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background:#e3f2fd;">
+              <td style="padding:6px;border-bottom:1px solid #eee;"><input type="checkbox" checked></td>
+              <td style="padding:6px;border-bottom:1px solid #eee;font-weight:bold;">smart_0602_1430</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">smart</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;">1000</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">14:30</td>
+            </tr>
+            <tr>
+              <td style="padding:6px;border-bottom:1px solid #eee;"><input type="checkbox" checked></td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">pool_quota_0602</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">pool_quota</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;">1000</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">14:35</td>
+            </tr>
+            <tr>
+              <td style="padding:6px;border-bottom:1px solid #eee;"><input type="checkbox"></td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">smart_highres</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">smart</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;">500</td>
+              <td style="padding:6px;border-bottom:1px solid #eee;">15:00</td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="font-size:11px;color:#888;margin-top:4px;">当前加载：smart_0602_1430 | 已选 2 项</div>
+      </div>
+
+      <!-- 右侧：差异面板 -->
+      <div style="flex:1;border:1px solid #e0e0e0;border-radius:4px;padding:12px;display:flex;flex-direction:column;">
+        <div style="font-weight:bold;font-size:14px;margin-bottom:8px;">可比性检查</div>
+        <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:8px;">
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:3px 6px;color:#888;">配置</td>
+            <td style="padding:3px 6px;color:#4caf50;">✓ 相同</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:3px 6px;color:#888;">策略</td>
+            <td style="padding:3px 6px;color:#f5a623;">⚠ smart ≠ pool_quota</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:3px 6px;color:#888;">目标卡</td>
+            <td style="padding:3px 6px;color:#4caf50;">✓ 相同</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:3px 6px;color:#888;">种子</td>
+            <td style="padding:3px 6px;color:#4caf50;">✓ 相同 (1-1000)</td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:3px 6px;color:#888;">N</td>
+            <td style="padding:3px 6px;color:#4caf50;">✓ 相同 (1000)</td>
+          </tr>
+        </table>
+        <div style="font-size:11px;background:#fff9f0;border-left:3px solid #f5a623;padding:6px 8px;margin-bottom:12px;border-radius:2px;">
+          策略不同 → 策略比较模式。比较的是同一环境下策略的选择差异。
+        </div>
+        <button class="mock-button" style="background:#1976d2;color:#fff;padding:8px 16px;width:100%;margin-top:auto;">开始比较分析 →</button>
+      </div>
+    </div>
+  </div>
+</div>

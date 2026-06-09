@@ -8,7 +8,7 @@ from ..core import (
     SimulationCollector, InfoVectorCollector, CompactCollector,
 )
 from ..core.pity import PityEngine, PityState
-from ..core.pool import NO_CARD_ID as _NO_CARD_ID
+from ..core.pool import NO_CARD_ID as _NO_CARD_ID, compute_bonus_resources
 
 
 class SimulationStats:
@@ -67,6 +67,7 @@ class GachaService:
         pity_engine: Optional[PityEngine] = None,
         pity_state: Optional[PityState] = None,
         ssr_ids: Optional[set] = None,
+        card_defs: Optional[List] = None,
     ):
         self.pools = {p.id: p for p in pools}
         self.strategy = strategy
@@ -77,6 +78,7 @@ class GachaService:
         self.pity_engine = pity_engine
         self.pity_state = pity_state or PityState()
         self.ssr_ids = ssr_ids or set()
+        self.card_defs = card_defs or []
         self.session_id = str(uuid.uuid4())
         self._pools_list = list(self.pools.values())
 
@@ -95,6 +97,12 @@ class GachaService:
         state = initial_state.clone()
         pity_state = self.pity_state.clone()
         stats = SimulationStats()
+        _initial_counts = {}
+        for cd in self.card_defs:
+            ic = cd.get('initial_count', 0) if isinstance(cd, dict) else getattr(cd, 'initial_count', 0)
+            if ic > 0:
+                cid = cd['card_id'] if isinstance(cd, dict) else cd.card_id
+                _initial_counts[cid] = ic
         pools_list = self._pools_list
         real_time = state.real_time
         resources = state.resources
@@ -211,7 +219,15 @@ class GachaService:
                 if pity_triggered:
                     stats.pity_triggers += 1
 
-                rg = reward.resources_gained or {}
+                rg = dict(reward.resources_gained or {})
+                if reward.first_time_bonus or reward.nth_time_bonus or reward.excess_bonus:
+                    ac_new = stats.acquired_counts.get(reward.id, 0)
+                    init = _initial_counts.get(reward.id, 0)
+                    total_before = init + ac_new - 1
+                    total_after = init + ac_new
+                    bonus = compute_bonus_resources(reward, total_before, total_after)
+                    for k, v in bonus.items():
+                        rg[k] = rg.get(k, 0) + v
                 if rg:
                     for k, v in rg.items():
                         resources[k] = resources.get(k, 0) + v
@@ -292,6 +308,7 @@ class GachaService:
             result.pity_triggers = stats.pity_triggers
             result.final_resources = dict(resources)
             result.final_time = real_time
+            result.pool_types = {pid: p.pool_type for pid, p in self.pools.items()}
             result.strategy_name = type(self.strategy).__name__
             result.generated_at = time.time()
             return result

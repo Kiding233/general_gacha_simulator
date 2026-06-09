@@ -14,6 +14,31 @@ class GDRContext:
     collection_sets: Dict[str, Set[str]] = field(default_factory=dict)
     weapon_character_map: Dict[str, str] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为 JSON 兼容的 dict。Set 类型字段转为 list。"""
+        return {
+            'target_specs': dict(self.target_specs),
+            'ssr_ids': list(self.ssr_ids),
+            'all_drawable_ids': list(self.all_drawable_ids),
+            'initial_resources': dict(self.initial_resources),
+            'resource_gain_per_day': dict(self.resource_gain_per_day),
+            'collection_sets': {k: list(v) for k, v in self.collection_sets.items()},
+            'weapon_character_map': dict(self.weapon_character_map),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'GDRContext':
+        """从 dict 反序列化。list 字段转回 set。"""
+        return cls(
+            target_specs={str(k): int(v) for k, v in d.get('target_specs', {}).items()},
+            ssr_ids=set(d.get('ssr_ids', [])),
+            all_drawable_ids=[str(x) for x in d.get('all_drawable_ids', [])],
+            initial_resources={str(k): float(v) for k, v in d.get('initial_resources', {}).items()},
+            resource_gain_per_day={str(k): float(v) for k, v in d.get('resource_gain_per_day', {}).items()},
+            collection_sets={str(k): set(v) for k, v in d.get('collection_sets', {}).items()},
+            weapon_character_map={str(k): str(v) for k, v in d.get('weapon_character_map', {}).items()},
+        )
+
 
 class WeightedGDRConfig:
     def __init__(self, weight_config, scheme_map: Dict[str, str] = None):
@@ -389,6 +414,53 @@ def _gdr_total_card_value(compact, target_specs, card_value_weights=None, **kwar
     return total_value
 
 
+def _gdr_target_card_draws(compact, target_specs, **kw):
+    """不去重计数：所有目标卡的出现次数之和。用于 per_pool_target 判定。"""
+    return sum(
+        compact.get('card_counts', {}).get(cid, 0)
+        for cid in target_specs
+    )
+
+
+def _gdr_resource_per_card(compact, target_specs, **kw):
+    """每张目标卡的资源消耗。越低越好。"""
+    consumed = compact.get('total_consumed', {}).get('draw_resource', 0)
+    obtained = sum(
+        min(compact.get('card_counts', {}).get(cid, 0), qty)
+        for cid, qty in target_specs.items()
+    )
+    if obtained <= 0:
+        return float('nan')
+    return consumed / obtained
+
+
+def _gdr_resource_consumed(compact, target_specs, **kw):
+    """总资源消耗。越低越好。"""
+    return compact.get('total_consumed', {}).get('draw_resource', 0)
+
+
+def _gdr_draw_conversion_efficiency(compact, target_specs,
+                                     cost_per_draw=160, **kw):
+    """抽数转化效率 = 实际抽数 / (资源消耗 / 每抽成本)。越高越好。
+
+    只计入类型为「角色」或「武器」的抽卡池的抽数，兑换池和资源池不计入。
+    pool_type 为空时默认视为「角色」（计入）。
+    """
+    resource_consumed = compact.get('total_consumed', {}).get('draw_resource', 0)
+    if resource_consumed <= 0 or cost_per_draw <= 0:
+        return 0.0
+    pool_types = compact.get('pool_types', {})
+    pool_draw_counts = compact.get('pool_draw_counts', {})
+    draw_pool_draws = 0
+    for pid, cnt in pool_draw_counts.items():
+        pt = pool_types.get(pid, '角色')
+        if pt in ('角色', '武器', ''):
+            draw_pool_draws += cnt
+    if draw_pool_draws == 0:
+        draw_pool_draws = compact.get('total_draws', 0)
+    return (draw_pool_draws * cost_per_draw) / resource_consumed
+
+
 class GDRDefinition(NamedTuple):
     key: str
     display_name: str
@@ -399,6 +471,7 @@ class GDRDefinition(NamedTuple):
     needs_weapon_map: bool = False
     needs_weights: str = ''
     category: str = 'basic'
+    lower_is_better: bool = False
 
 
 UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
@@ -438,6 +511,14 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
         compute_from_compact=_gdr_resource_remaining,
         compute_from_history=resource_remaining,
     ),
+    'resource_consumed': GDRDefinition(
+        key='resource_consumed',
+        display_name='资源消耗',
+        default_threshold=0.0,
+        compute_from_compact=_gdr_resource_consumed,
+        lower_is_better=True,
+        category='resource',
+    ),
     'extra_target': GDRDefinition(
         key='extra_target',
         display_name='额外目标卡',
@@ -461,10 +542,18 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
     ),
     'resource_efficiency': GDRDefinition(
         key='resource_efficiency',
-        display_name='资源转化效率',
+        display_name='目标卡出卡效率',
         default_threshold=0.01,
         compute_from_compact=_gdr_resource_efficiency,
         compute_from_history=resource_efficiency,
+    ),
+    'resource_per_card': GDRDefinition(
+        key='resource_per_card',
+        display_name='每目标卡资源消耗',
+        default_threshold=0.0,
+        compute_from_compact=_gdr_resource_per_card,
+        lower_is_better=True,
+        category='resource',
     ),
     'per_pool_draw_rate': GDRDefinition(
         key='per_pool_draw_rate',
@@ -480,6 +569,12 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
         compute_from_compact=_gdr_weapon_character_ratio,
         compute_from_history=weapon_character_ratio,
         needs_weapon_map=True,
+    ),
+    'target_card_draws': GDRDefinition(
+        key='target_card_draws',
+        display_name='目标卡出数',
+        default_threshold=1.0,
+        compute_from_compact=_gdr_target_card_draws,
     ),
     'weighted_satisfaction': GDRDefinition(
         key='weighted_satisfaction',
@@ -498,6 +593,13 @@ UNIFIED_GDR_REGISTRY: Dict[str, GDRDefinition] = {
         compute_from_history=None,
         needs_weights='card_value',
         category='weighted',
+    ),
+    'draw_conversion_efficiency': GDRDefinition(
+        key='draw_conversion_efficiency',
+        display_name='抽数转化效率',
+        default_threshold=0.0,
+        compute_from_compact=_gdr_draw_conversion_efficiency,
+        category='resource',
     ),
 }
 
@@ -617,6 +719,7 @@ def compute_gdr_from_compact(
     card_value_weights: Dict[str, float] = None,
     ssr_ids: Set[str] = None,
     weapon_character_map: Dict[str, str] = None,
+    **gdr_kwargs,
 ) -> float:
     defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
     if defn is None:
@@ -629,6 +732,7 @@ def compute_gdr_from_compact(
         card_value_weights=card_value_weights,
         ssr_ids=ssr_ids,
         weapon_character_map=weapon_character_map,
+        **gdr_kwargs,
     )
 
 
@@ -646,11 +750,12 @@ class SuccessChecker:
         self.ssr_ids = ssr_ids
         self.weapon_character_map = weapon_character_map
 
+        defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
         if gdr_threshold is None:
-            defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
             self.gdr_threshold = defn.default_threshold if defn else 1.0
         else:
             self.gdr_threshold = gdr_threshold
+        self.lower_is_better = defn.lower_is_better if defn else False
 
     def compute_gdr(self, compact_or_aggregate):
         defn = UNIFIED_GDR_REGISTRY.get(self.gdr_key)
@@ -667,7 +772,10 @@ class SuccessChecker:
         )
 
     def is_success(self, compact_or_aggregate):
-        return self.compute_gdr(compact_or_aggregate) >= self.gdr_threshold
+        val = self.compute_gdr(compact_or_aggregate)
+        if self.lower_is_better:
+            return val <= self.gdr_threshold
+        return val >= self.gdr_threshold
 
     def check_batch(self, results):
         total = 0
@@ -703,6 +811,8 @@ def compute_success_probability(
     total_needed = sum(target_specs.values())
     if total_needed == 0 and gdr_key == 'target_achievement':
         return 1.0
+    defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
+    lower_is_better = defn.lower_is_better if defn else False
     success_count = 0
     for h in valid:
         val = compute_gdr_from_compact(
@@ -710,15 +820,20 @@ def compute_success_probability(
             desire_weights, miss_cost_weights, card_value_weights,
             ssr_ids, weapon_character_map,
         )
-        if val >= gdr_threshold:
-            success_count += 1
+        if lower_is_better:
+            if val <= gdr_threshold:
+                success_count += 1
+        else:
+            if val >= gdr_threshold:
+                success_count += 1
     return success_count / len(valid)
 
 
 def populate_gdr_combo(combo):
     combo.clear()
     for key, defn in UNIFIED_GDR_REGISTRY.items():
-        combo.addItem(defn.display_name, key)
+        display = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+        combo.addItem(display, key)
 
 
 def get_default_threshold(gdr_key: str) -> float:
@@ -730,7 +845,8 @@ def compute_gdr_from_cumulative(cum_snapshot, target_specs, gdr_key,
                                  desire_weights=None, miss_cost_weights=None,
                                  card_value_weights=None, ssr_ids=None,
                                  weapon_character_map=None,
-                                 initial_resources=None):
+                                 initial_resources=None,
+                                 **gdr_kwargs):
     cum_consumed = cum_snapshot.get('cumulative_consumed', {})
     cum_gained = cum_snapshot.get('cumulative_gained', {})
     pool_end_resource = cum_snapshot.get('pool_end_resource')
@@ -759,4 +875,5 @@ def compute_gdr_from_cumulative(cum_snapshot, target_specs, gdr_key,
         pseudo_compact, target_specs, gdr_key,
         desire_weights, miss_cost_weights, card_value_weights,
         ssr_ids, weapon_character_map,
+        **gdr_kwargs,
     )

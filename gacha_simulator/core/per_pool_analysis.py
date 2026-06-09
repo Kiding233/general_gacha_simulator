@@ -1,5 +1,6 @@
 from typing import List, Dict, Set, Optional, Any, Callable
 from dataclasses import dataclass, field
+import warnings
 from .gdr import GDRContext, _count_draws, _total_resource_consumed
 
 
@@ -186,6 +187,15 @@ def compute_transition_matrices(
     target_ids: Set[str] = None,
     success_func: Callable = None,
 ) -> List[TransitionMatrix]:
+    """[deprecated] 基于 InfoVector 历史路径的转移矩阵计算。
+
+    请改用 compute_transition_matrices_from_flags() + compute_transition_flags_from_gdr()。
+    """
+    warnings.warn(
+        "compute_transition_matrices() 已废弃，请使用 "
+        "compute_transition_matrices_from_flags() + compute_transition_flags_from_gdr()",
+        DeprecationWarning, stacklevel=2,
+    )
     sorted_pools = sorted(pool_end_times.items(), key=lambda x: x[1])
     pool_ids_ordered = [pid for pid, _ in sorted_pools]
 
@@ -212,6 +222,23 @@ def compute_transition_matrices(
             flags.append(success_func(h, end_time))
         success_flags_per_sim.append(flags)
 
+    return compute_transition_matrices_from_flags(success_flags_per_sim, pool_ids_ordered)
+
+
+def compute_transition_matrices_from_flags(
+    success_flags_per_sim: List[List[bool]],
+    pool_ids_ordered: List[str],
+) -> List[TransitionMatrix]:
+    """从布尔矩阵计算转移矩阵（纯函数）。
+
+    Args:
+        success_flags_per_sim: [模拟索引][池索引] → 该池结束时是否成功
+        pool_ids_ordered: 按结束时间排序的池ID列表
+    """
+    n_sims = len(success_flags_per_sim)
+    if n_sims == 0:
+        return []
+
     n_pools = len(pool_ids_ordered)
     results = []
     for i in range(n_pools):
@@ -221,8 +248,18 @@ def compute_transition_matrices(
         if i == 0:
             before = [False] * n_sims
         else:
-            before = [success_flags_per_sim[s][i - 1] for s in range(n_sims)]
-        after = [success_flags_per_sim[s][i] for s in range(n_sims)]
+            before = [
+                success_flags_per_sim[s][i - 1]
+                if s < len(success_flags_per_sim) and i - 1 < len(success_flags_per_sim[s])
+                else False
+                for s in range(n_sims)
+            ]
+        after = [
+            success_flags_per_sim[s][i]
+            if s < len(success_flags_per_sim) and i < len(success_flags_per_sim[s])
+            else False
+            for s in range(n_sims)
+        ]
 
         ss = sum(1 for b, a in zip(before, after) if b and a)
         sf = sum(1 for b, a in zip(before, after) if b and not a)
@@ -243,3 +280,54 @@ def compute_transition_matrices(
             success_rate_after=s_after / n_sims,
         ))
     return results
+
+
+def compute_transition_flags_from_gdr(
+    cumulative_snapshots: Dict[str, List[Dict]],
+    pool_ids_ordered: List[str],
+    target_specs: Dict[str, int],
+    gdr_key: str = 'all_targets',
+    threshold: float = 1.0,
+    scope: str = 'cumulative',
+    aggregates: List[Dict] = None,
+    ssr_ids: Set[str] = None,
+    **gdr_kwargs,
+) -> List[List[bool]]:
+    """通过 GDR 框架逐池判定成功/失败，替代硬编码的 _compute_transition_flags()。"""
+    from .process_trace import compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
+
+    if scope == 'cumulative':
+        n_sims = len(next(iter(cumulative_snapshots.values()), [])) if cumulative_snapshots else 0
+    else:
+        n_sims = len(aggregates) if aggregates else 0
+
+    if n_sims == 0:
+        return []
+
+    from .gdr import UNIFIED_GDR_REGISTRY
+    gdr_defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
+    lower_is_better = gdr_defn.lower_is_better if gdr_defn else False
+
+    flags_per_sim = [[] for _ in range(n_sims)]
+    for pool_id in pool_ids_ordered:
+        for sim_idx in range(n_sims):
+            if scope == 'cumulative':
+                snaps = cumulative_snapshots.get(pool_id, [])
+                snap = snaps[sim_idx] if sim_idx < len(snaps) else {}
+                val = compute_pool_gdr_cumulative(
+                    snap, pool_id, target_specs, gdr_key,
+                    ssr_ids=ssr_ids, **gdr_kwargs,
+                )
+            else:
+                agg = aggregates[sim_idx] if aggregates and sim_idx < len(aggregates) else {}
+                val = compute_pool_gdr_single_pool(
+                    agg, pool_id, target_specs, gdr_key,
+                    ssr_ids=ssr_ids, **gdr_kwargs,
+                )
+            if val is None:
+                flags_per_sim[sim_idx].append(False)
+            elif lower_is_better:
+                flags_per_sim[sim_idx].append(val <= threshold)
+            else:
+                flags_per_sim[sim_idx].append(val >= threshold)
+    return flags_per_sim

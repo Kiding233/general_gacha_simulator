@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-GachaStat — 一个灵活的抽卡（gacha）概率模拟与统计分析系统，支持多池子、保底机制、资源管理、多种抽卡策略，以及丰富的后验分析（GDR/脆弱性/最差影响/过程分析/策略比较）。当前版本 v1.9.0。
+GachaStat — 一个灵活的抽卡（gacha）概率模拟与统计分析系统，支持多池子、保底机制、资源管理、多种抽卡策略，以及丰富的后验分析（GDR/脆弱性/最差影响/过程分析/策略比较）。当前版本 v1.10.0。
 
 ## 技术栈
 
@@ -131,7 +131,7 @@ SharedResultCollector.on_result(compact) → 边提取边丢弃 → 各面板读
 
 `MainWindow` 包含 10 个 Tab：配置 → 批量模拟 → 统计分析 → 过程分析 → 最多目标卡 → 最少资源 → 退路分析 → 最差影响 → 策略比较 → 敏感度分析（开发中）。
 
-所有面板使用 **QThread + Worker** 模式执行模拟，通过 `progress`/`finished`/`error` 信号通信。图表使用 matplotlib 渲染到临时 PNG，通过 `QLabel.setPixmap()` 显示。中文字体通过 `visualization/font_config.py` 配置。
+所有面板使用 **QThread + Worker** 模式执行模拟，通过 `progress`/`finished`/`error` 信号通信。图表使用 Plotly 通过 `ChartWebView` (PyQt6-WebEngine) 渲染，旧 matplotlib 路径仅保留中文字体配置。
 
 面板通过 `set_store(ConfigStore)` 和 `set_config_panel()` 接收配置，通过 `status_update` 信号报告状态栏消息。
 
@@ -155,24 +155,39 @@ SharedResultCollector.on_result(compact) → 边提取边丢弃 → 各面板读
 - 所有分析面板从 `CompactResult` 列表提取数据，不再使用旧的 `InfoVector` 路径
 - 策略不维护可变运行时状态（`acquired`、`pool_draw_counts` 等由 `StrategyContext` 传入）
 
-### 计划文件约定
+### 文档与计划约定
 
-- 当我要求做计划时，应在 `docs/` 文件夹内新建一个独立的 `.md` 文件作为计划文件（而非写入 Claude 内部 plans 目录），计划文件应使用中文命名，命名应能体现计划主题
-- 所有大型计划文件均应在 `docs/计划汇总.md` 中登记，注明日期、状态（已完成/进行中/未执行）及简要说明
-- 当我要求更新/更正/更改已有计划时，应**在原文件上增量修改**，尽可能**不整段删除或缩减概括**原有的内容，而只做：**标记**（标注状态、依赖、风险）、**替换**（更正错误的部分）、**更正**（修正描述或方案）和**补充**（追加新内容）。保留历史讨论痕迹有助于后续回溯决策上下文
-- 将计划文件移入 `archive/` 前，如该计划中有**搁置**（shelved）或**放弃**（abandoned）的条目，应先将搁置条目的内容补充到 `docs/搁置计划记录.md` 中，再执行归档
+项目文档按面板/子系统聚合在 `docs/01-活跃/` 下。每个模块文件夹内含六文件：
+`00-档案`（设计意图）→ `01-理论`（假设/局限）→ `02-实施`（代码位置）→ `03-审计`（对齐检查）
+→ `04-问题`（P0/P1/P2动态待办）→ `05-笔记`（临时捕获）。
+
+完整改进计划作为主题计划文件放在模块文件夹内，不被拆散。
+
+- **单一入口**：`docs/01-活跃/00-本周聚焦.md`——每周只聚焦一个模块
+- **全局索引**：`docs/00-meta/模块状态矩阵.md`——P编号+一句话+文件位置
+- **新计划归入对应模块文件夹**，不新建独立文件在顶层；计划文件中文命名；**在模块状态矩阵注册编号后，将编号置于文件名最前面**（如 `P30 策略文档补充计划.md`）
+- **搁置条目**在 `docs/00-meta/搁置计划记录.md` 中登记，标注归属模块
+- **模块完成后整包移入** `docs/03-归档/`
+- **不维护全局计划汇总**——模块状态矩阵为精简索引
+- 计划文件**增量修改**：标注/替换/更正/补充，不整段删除
+- 归档前搁置条目需先补充到搁置记录
+
+### 文档维护工作流
+
+- **每次会话结束时**：将关键结论写入当前模块的 `05-笔记.md`（带日期）；如有代码变更则更新 `02-实施.md`
+- **新建模块时**：创建六文件骨架 → 读实际代码填写 `02-实施.md` → 从审查报告拆入 `01-理论.md`
+- **计划完成时**：主题计划 → `99-历史/`；更新 `02-实施.md` + `04-问题.md` + `模块状态矩阵.md`
+- **每周清理时**：清理 `05-笔记.md` + `04-收件箱/`；更新 `00-本周聚焦.md` + `模块状态矩阵.md`
 
 ## 已知问题
 
 1. **weapon_character_ratio 始终为 0**：`GDRContext.weapon_character_map` 无配置入口，需在配置系统新增角色-武器对应表
-2. **per_pool_analysis.py 的 success_func 默认值**：`compute_transition_matrices()` 的 `success_func` 参数默认为 `None` 时，使用内联逻辑遍历 `List[InfoVector]` 按 `action_type == 'draw'` 判断（line 196-206）。调用方可通过传入基于 `SuccessChecker` 的 lambda 覆盖，但当前调用方（`analysis_panel.py`）未传入自定义 `success_func`
-3. **多面板 CPU 争抢**：各面板 Worker 线程无全局协调
-4. **`_extract_cost_per_draw` 只取第一个池**：`resource_search_panel.py`（line 80-91）和 `retreat_search.py`（line 107+）的实现均遍历池列表但只返回第一个有效成本值，多池成本不同时可能不准确
-5. **转变分析不显示结果图片**（2026-05-24 发现）：代码逻辑存在于 `analysis_panel.py:1265-1355`，但 `transition_flags` 可能因 `DrawSequenceExtractor._update_transition()` 首行的 `if not self._pool_end_times: return` 而未被填充，导致四层守卫条件中某层跳过、静默无输出。也缺少显式的错误提示——当所有守卫都失败时用户看不到任何原因说明。P11 实施时应一并修复（添加 else 分支输出警告、确保数据链路完整）
+2. **多面板 CPU 争抢**：各面板 Worker 线程无全局协调
+3. **`_extract_cost_per_draw` 只取第一个池**：`resource_search_panel.py`（line 80-91）和 `retreat_search.py`（line 107+）的实现均遍历池列表但只返回第一个有效成本值，多池成本不同时可能不准确
 
 ## 未完成计划
 
-见 `docs/计划汇总.md`——计划状态动态变化，以该文件为准，此处不重复。
+见 `docs/00-meta/模块状态矩阵.md` 和各模块 `04-问题.md`。
 
 ## 扩展指南
 

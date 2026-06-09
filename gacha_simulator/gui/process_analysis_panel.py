@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-import os
-import tempfile
 from collections import Counter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
@@ -10,7 +8,9 @@ from PyQt6.QtWidgets import (
     QTabWidget, QSizePolicy, QProgressBar, QSpinBox, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QColor
+
+from .chart_webview import ChartWebView
 
 from ..core.process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
 from ..core.process_analysis import (
@@ -18,9 +18,14 @@ from ..core.process_analysis import (
     EVENT_MODE_MAP, SUCCESS_MODE_MAP,
     _get_event_label, get_event_type_order, _hashable,
 )
-from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact
+from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact, populate_gdr_combo, get_default_threshold
 
-_gdr_key_to_display = {key: defn.display_name for key, defn in UNIFIED_GDR_REGISTRY.items()}
+_gdr_key_to_display = {}
+def _refresh_gdr_display_map():
+    _gdr_key_to_display.clear()
+    for key, defn in UNIFIED_GDR_REGISTRY.items():
+        _gdr_key_to_display[key] = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
+_refresh_gdr_display_map()
 
 
 class _NoWheelComboBox(QComboBox):
@@ -84,9 +89,7 @@ class ProcessAnalysisPanel(QWidget):
 
         gdr_layout.addWidget(QLabel("GDR 指标"))
         self.gdr_combo = _NoWheelComboBox()
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            display = defn.display_name
-            self.gdr_combo.addItem(display, key)
+        populate_gdr_combo(self.gdr_combo)
         gdr_layout.addWidget(self.gdr_combo)
 
         gdr_layout.addWidget(QLabel("成功阈值"))
@@ -105,6 +108,18 @@ class ProcessAnalysisPanel(QWidget):
         gdr_layout.addWidget(self.pool_gdr_mode)
 
         layout.addWidget(gdr_group)
+
+        ci_group = QGroupBox("置信区间")
+        ci_layout = QGridLayout(ci_group)
+        ci_layout.addWidget(QLabel("置信水平:"), 0, 0)
+        self.conf_level_spin = _NoWheelDoubleSpinBox()
+        self.conf_level_spin.setRange(0.80, 0.99)
+        self.conf_level_spin.setValue(0.95)
+        self.conf_level_spin.setSingleStep(0.01)
+        self.conf_level_spin.setDecimals(2)
+        self.conf_level_spin.setToolTip("Wilson 得分区间的置信水平（80%~99%）")
+        ci_layout.addWidget(self.conf_level_spin, 0, 1)
+        layout.addWidget(ci_group)
 
         mode_group = QGroupBox("模式配置")
         mode_layout = QVBoxLayout(mode_group)
@@ -194,7 +209,6 @@ class ProcessAnalysisPanel(QWidget):
         self.ab_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.ab_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.ab_table.clicked.connect(self._on_ab_row_clicked)
-        layout.addWidget(self.ab_table)
 
         self.cond_dist_group = QGroupBox("条件GDR分布")
         self.cond_dist_group.setCheckable(True)
@@ -209,8 +223,7 @@ class ProcessAnalysisPanel(QWidget):
         ctrl_row = QHBoxLayout()
         ctrl_row.addWidget(QLabel("GDR指标"))
         self.cond_gdr_combo = _NoWheelComboBox()
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            self.cond_gdr_combo.addItem(defn.display_name, key)
+        populate_gdr_combo(self.cond_gdr_combo)
         self.cond_gdr_combo.currentIndexChanged.connect(self._on_cond_gdr_changed)
         ctrl_row.addWidget(self.cond_gdr_combo)
 
@@ -230,12 +243,15 @@ class ProcessAnalysisPanel(QWidget):
         self.cond_sample_label = QLabel("样本数: -")
         cond_layout.addWidget(self.cond_sample_label)
 
-        self.cond_chart_label = QLabel()
-        self.cond_chart_label.setMinimumHeight(300)
-        self.cond_chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cond_layout.addWidget(self.cond_chart_label)
+        self.cond_chart_webview = ChartWebView(shrinkable=True)
+        cond_layout.addWidget(self.cond_chart_webview)
 
-        layout.addWidget(self.cond_dist_group)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self.ab_table)
+        splitter.addWidget(self.cond_dist_group)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter)
         return widget
 
     def _build_trace_tab(self):
@@ -348,7 +364,6 @@ class ProcessAnalysisPanel(QWidget):
         return self.success_n_spin.value()
 
     def _on_gdr_changed(self, index):
-        from gacha_simulator.core.gdr import get_default_threshold
         key = self.gdr_combo.currentData()
         default = get_default_threshold(key)
         self.threshold_spin.setValue(default)
@@ -416,11 +431,15 @@ class ProcessAnalysisPanel(QWidget):
             bb_results = compute_bb(self._traces, success_mode, success_n, success_op)
             self._fill_bb_table(bb_results)
 
-            ab_results = compute_ab(self._traces, event_mode, success_mode, custom_constraints, success_n, success_op)
-            self._fill_ab_table(ab_results)
+            conf_level = self.conf_level_spin.value()
 
-            ba_results = compute_ba(self._traces, event_mode, success_mode, custom_constraints, success_op)
-            self._fill_ba_table(ba_results)
+            ab_results = compute_ab(self._traces, event_mode, success_mode,
+                                    custom_constraints, success_n, success_op, conf_level)
+            self._fill_ab_table(ab_results, conf_level)
+
+            ba_results = compute_ba(self._traces, event_mode, success_mode,
+                                    custom_constraints, success_op, conf_level)
+            self._fill_ba_table(ba_results, conf_level)
 
             self._update_trace_nav()
             self._show_trace_detail(0)
@@ -470,7 +489,12 @@ class ProcessAnalysisPanel(QWidget):
                     weapon_character_map, initial_resources,
                 )
                 pool_gdr_values[pid] = pool_gdr_val if pool_gdr_val is not None else 0.0
-                pool_success[pid] = (pool_gdr_val is not None and pool_gdr_val >= checker.gdr_threshold)
+                if pool_gdr_val is None:
+                    pool_success[pid] = False
+                elif checker.lower_is_better:
+                    pool_success[pid] = pool_gdr_val <= checker.gdr_threshold
+                else:
+                    pool_success[pid] = pool_gdr_val >= checker.gdr_threshold
 
             traces.append(SampleTrace(
                 events=events_list,
@@ -571,6 +595,9 @@ class ProcessAnalysisPanel(QWidget):
             self.aa_table.setItem(i, 2, QTableWidgetItem(f"{row['probability']:.4f}"))
             self.aa_table.setItem(i, 3, QTableWidgetItem(f"{row['cumulative_probability']:.4f}"))
 
+        self.aa_table.resizeColumnsToContents()
+        self.aa_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
     def _fill_bb_table(self, results):
         self.bb_table.clear()
 
@@ -607,13 +634,19 @@ class ProcessAnalysisPanel(QWidget):
             self.bb_table.setItem(i, 2, QTableWidgetItem(f"{row['probability']:.4f}"))
             self.bb_table.setItem(i, 3, QTableWidgetItem(f"{row['cumulative_probability']:.4f}"))
 
-    def _fill_ab_table(self, results):
+        self.bb_table.resizeColumnsToContents()
+        self.bb_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+    def _fill_ab_table(self, results, conf_level=0.95):
         self._ab_results = results
         self._selected_ab_row = None
         self.ab_table.clear()
-        self.ab_table.setColumnCount(6)
+        self.ab_table.setColumnCount(8)
+        ci_label = f"{conf_level:.0%} CI"
         self.ab_table.setHorizontalHeaderLabels([
-            '事件组合', 'P(成功|组合)', 'P(失败|组合)', '出现次数', '成功数', '失败数'
+            '事件组合', 'P(成功|组合)', ci_label,
+            'P(失败|组合)', ci_label,
+            '出现次数', '成功数', '失败数',
         ])
         self.ab_table.setRowCount(len(results))
         self.ab_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -621,12 +654,44 @@ class ProcessAnalysisPanel(QWidget):
 
         for i, row in enumerate(results):
             text = self._format_event_pattern(row['event_pattern'], event_mode)
-            self.ab_table.setItem(i, 0, QTableWidgetItem(text))
-            self.ab_table.setItem(i, 1, QTableWidgetItem(f"{row['overall_success_prob']:.4f}"))
-            self.ab_table.setItem(i, 2, QTableWidgetItem(f"{1 - row['overall_success_prob']:.4f}"))
-            self.ab_table.setItem(i, 3, QTableWidgetItem(str(row['count'])))
-            self.ab_table.setItem(i, 4, QTableWidgetItem(str(row['success_count'])))
-            self.ab_table.setItem(i, 5, QTableWidgetItem(str(row['failure_count'])))
+            low_sample = row.get('low_sample', False)
+            prob = row['overall_success_prob']
+
+            if low_sample:
+                prob_text = f"{row['success_count']}/{row['count']}"
+                fail_text = f"{row['failure_count']}/{row['count']}"
+                ci_success = "—"
+                ci_failure = "—"
+            else:
+                wl = row['wilson_ci_lower']
+                wu = row['wilson_ci_upper']
+                prob_text = f"{prob:.4f}"
+                fail_text = f"{1 - prob:.4f}"
+                ci_success = f"[{wl:.4f}, {wu:.4f}]"
+                ci_failure = f"[{1 - wu:.4f}, {1 - wl:.4f}]"
+
+            items = [
+                QTableWidgetItem(text),
+                QTableWidgetItem(prob_text),
+                QTableWidgetItem(ci_success),
+                QTableWidgetItem(fail_text),
+                QTableWidgetItem(ci_failure),
+                QTableWidgetItem(str(row['count'])),
+                QTableWidgetItem(str(row['success_count'])),
+                QTableWidgetItem(str(row['failure_count'])),
+            ]
+
+            if low_sample:
+                gray = QColor(160, 160, 160)
+                for item in items:
+                    item.setForeground(gray)
+                    item.setToolTip("样本不足（N<5），不显示概率估计")
+
+            for col, item in enumerate(items):
+                self.ab_table.setItem(i, col, item)
+
+        self.ab_table.resizeColumnsToContents()
+        self.ab_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
     def _on_ab_row_clicked(self, index):
         row = index.row()
@@ -683,78 +748,56 @@ class ProcessAnalysisPanel(QWidget):
             filtered.append(t)
 
         n = len(filtered)
+        total = result['count']
         from datetime import datetime
         self.cond_update_label.setText(f"已更新: {datetime.now().strftime('%H:%M:%S')}  |  GDR: {gdr_name}  |  条件: {cond_text}")
 
         if n == 0:
-            self.cond_sample_label.setText("样本数: 0")
-            self.cond_chart_label.clear()
-            self.cond_chart_label.setText("无匹配样本")
+            self.cond_sample_label.setText(f"样本数: 0（该组合总数: {total}，过滤条件: {cond_text}）")
+            self.cond_chart_webview.show_message("无匹配样本")
             return
 
         values = [t.gdr_value for t in filtered]
-        self.cond_sample_label.setText(f"样本数: {n}")
+        self.cond_sample_label.setText(f"样本数: {n}（该组合总数: {total}，过滤条件: {cond_text}）")
         self._plot_cond_dist(values, gdr_key)
 
     def _plot_cond_dist(self, values, gdr_key):
         n = len(values)
-        if n < 10:
-            self.cond_chart_label.setText(f"样本量不足（n={n}），无法显示分布")
+        if n < 5:
+            self.cond_chart_webview.show_message(f"样本量不足（n={n}<5），无法显示分布")
             return
 
-        from gacha_simulator.core.distribution import freedman_diaconis_bins
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
+        from ..visualization.chart_spec import histogram, ChartAnnotation
+        import numpy as np
+        from ..core.gdr_binning import compute_bins
 
-        fig, ax = plt.subplots(figsize=(8, 5))
-
+        from ..core.gdr import UNIFIED_GDR_REGISTRY
         gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
         display_name = gdr_def.display_name if gdr_def else gdr_key
 
-        try:
-            bins = freedman_diaconis_bins(values)
-        except Exception:
-            bins = 20
+        samples = np.array(values, dtype=float)
+        mean_val = float(np.mean(samples))
+        median_val = float(np.median(samples))
 
-        ax.hist(values, bins=bins, density=False, edgecolor='black', alpha=0.7)
+        bin_result = compute_bins(gdr_key, samples)
+        spec = histogram(
+            samples=samples,
+            title="条件GDR分布",
+            xlabel=display_name,
+            ylabel="频数" if not bin_result.density else "频次",
+            mean_line=True,
+            quantile_lines=[0.5],
+            density=bin_result.density,
+            **bin_result.to_layout_hints(),
+        )
+        self.cond_chart_webview.set_chart(spec)
 
-        mean_val = sum(values) / n
-        sorted_vals = sorted(values)
-        median_val = sorted_vals[n // 2]
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=1, label=f'均值={mean_val:.3f}')
-        ax.axvline(median_val, color='blue', linestyle=':', linewidth=1, label=f'中位数={median_val:.3f}')
-
-        ax.set_xlabel(display_name)
-        ax.set_ylabel('频次')
-        ax.set_title('条件GDR分布')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        try:
-            fig.savefig(tmp.name, dpi=150, bbox_inches='tight')
-            plt.close(fig)
-
-            pixmap = QPixmap(tmp.name)
-            self.cond_chart_label.setPixmap(pixmap.scaled(
-                self.cond_chart_label.width(), self.cond_chart_label.height(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
-        finally:
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-
-    def _fill_ba_table(self, results):
+    def _fill_ba_table(self, results, conf_level=0.95):
         self.ba_table.clear()
-        self.ba_table.setColumnCount(5)
+        self.ba_table.setColumnCount(7)
+        ci_label = f"{conf_level:.0%} CI"
         self.ba_table.setHorizontalHeaderLabels([
-            '事件组合', 'P(组合|成功)', 'P(组合|失败)', '比值', '出现次数'
+            '事件组合', 'P(组合|成功)', ci_label, 'P(组合|失败)', ci_label, '比值', '出现次数'
         ])
         self.ba_table.setRowCount(len(results))
         self.ba_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -763,12 +806,45 @@ class ProcessAnalysisPanel(QWidget):
         for i, row in enumerate(results):
             text = self._format_event_pattern(row['event_pattern'], event_mode)
             ratio = row['ratio']
-            ratio_text = f"{ratio:.2f}" if ratio != float('inf') else "∞"
-            self.ba_table.setItem(i, 0, QTableWidgetItem(text))
-            self.ba_table.setItem(i, 1, QTableWidgetItem(f"{row['p_given_success']:.4f}"))
-            self.ba_table.setItem(i, 2, QTableWidgetItem(f"{row['p_given_failure']:.4f}"))
-            self.ba_table.setItem(i, 3, QTableWidgetItem(ratio_text))
-            self.ba_table.setItem(i, 4, QTableWidgetItem(str(row['count'])))
+            if ratio is None or ratio == float('inf'):
+                ratio_text = "∞"
+            else:
+                ratio_text = f"{ratio:.2f}"
+
+            low_sample = row.get('low_sample', False)
+
+            if low_sample:
+                p_s_text = f"(N={row['count']})"
+                p_f_text = f"(N={row['count']})"
+                ci_s_text = "—"
+                ci_f_text = "—"
+            else:
+                p_s_text = f"{row['p_given_success']:.4f}"
+                p_f_text = f"{row['p_given_failure']:.4f}"
+                ci_s_text = f"[{row['p_given_success_wilson_lower']:.4f}, {row['p_given_success_wilson_upper']:.4f}]"
+                ci_f_text = f"[{row['p_given_failure_wilson_lower']:.4f}, {row['p_given_failure_wilson_upper']:.4f}]"
+
+            items = [
+                QTableWidgetItem(text),
+                QTableWidgetItem(p_s_text),
+                QTableWidgetItem(ci_s_text),
+                QTableWidgetItem(p_f_text),
+                QTableWidgetItem(ci_f_text),
+                QTableWidgetItem(ratio_text),
+                QTableWidgetItem(str(row['count'])),
+            ]
+
+            if low_sample:
+                gray = QColor(160, 160, 160)
+                for item in items:
+                    item.setForeground(gray)
+                    item.setToolTip("样本不足（N<5），不显示概率估计")
+
+            for col, item in enumerate(items):
+                self.ba_table.setItem(i, col, item)
+
+        self.ba_table.resizeColumnsToContents()
+        self.ba_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
     def _get_filtered_traces(self):
         filter_mode = self.trace_filter_combo.currentData() or 'all'
@@ -829,3 +905,6 @@ class ProcessAnalysisPanel(QWidget):
             self.trace_detail_table.setItem(i, 5, QTableWidgetItem(f"{gdr_val:.4f}"))
             pool_ok = trace.pool_success.get(ev.pool_id, False)
             self.trace_detail_table.setItem(i, 6, QTableWidgetItem("✓" if pool_ok else "✗"))
+
+        self.trace_detail_table.resizeColumnsToContents()
+        self.trace_detail_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)

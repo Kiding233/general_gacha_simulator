@@ -1,7 +1,10 @@
+"""[DEPRECATED — P8 面板合并]
+退路方案搜索面板
+已被 PlanSearchPanel (plan_search_panel.py) 替代，将于后续版本移除。
+"""
 import sys
 import os
 import traceback
-import tempfile
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
@@ -10,7 +13,9 @@ from PyQt6.QtWidgets import (
     QLineEdit, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor
+from PyQt6.QtGui import QColor
+
+from .chart_webview import ChartWebView
 
 _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
@@ -142,35 +147,14 @@ class RetreatSearchPanel(QWidget):
                 break
 
     def _update_resource_presets(self, pr):
-        for btn in [self.res_vi_lower, self.res_vi_mean, self.res_vi_upper,
-                    self.res_p25, self.res_p50, self.res_p75]:
-            btn.setEnabled(False)
-        self.res_vi_lower.setText("VI下限 (--)")
-        self.res_vi_mean.setText("VI均值 (--)")
-        self.res_vi_upper.setText("VI上限 (--)")
-        self.res_p25.setText("25%分位 (--)")
-        self.res_p50.setText("50%分位 (--)")
-        self.res_p75.setText("75%分位 (--)")
-        if pr.resource_values_all:
-            import numpy as np
-            p25 = np.percentile(pr.resource_values_all, 25)
-            p50 = np.percentile(pr.resource_values_all, 50)
-            p75 = np.percentile(pr.resource_values_all, 75)
-            self.res_p25.setText(f"25%分位 ({p25:.0f})")
-            self.res_p50.setText(f"50%分位 ({p50:.0f})")
-            self.res_p75.setText(f"75%分位 ({p75:.0f})")
-            self.res_p25.setEnabled(True)
-            self.res_p50.setEnabled(True)
-            self.res_p75.setEnabled(True)
-        if pr.vulnerability_intervals:
-            vi = pr.vulnerability_intervals[0]
-            self.res_vi_lower.setText(f"VI下限 ({vi.lower:.0f})")
-            self.res_vi_mean.setText(f"VI均值 ({vi.mean:.0f})")
-            self.res_vi_upper.setText(f"VI上限 ({vi.upper:.0f})")
-            self.res_vi_lower.setEnabled(True)
-            self.res_vi_mean.setEnabled(True)
-            self.res_vi_upper.setEnabled(True)
-            self.res_vi_mean.setChecked(True)
+        items = ["VI下限", "VI均值", "VI上限", "25%分位", "50%分位", "75%分位", "自定义"]
+        self.resource_combo.blockSignals(True)
+        current = self.resource_combo.currentIndex()
+        self.resource_combo.clear()
+        self.resource_combo.addItems(items)
+        self.resource_combo.setCurrentIndex(min(current, len(items) - 1))
+        self.resource_combo.blockSignals(False)
+        self._on_resource_mode_changed(-1)
 
     def _update_pity_table(self, pr):
         self.pity_table.setRowCount(0)
@@ -193,32 +177,34 @@ class RetreatSearchPanel(QWidget):
             self.pity_table.setCellWidget(i, 5, spin)
 
     def _get_selected_resource(self):
-        if self.res_manual.isChecked():
-            return float(self.res_manual_input.text() or '0')
+        mode = self.resource_combo.currentText()
+        if mode == "自定义":
+            return float(self.resource_manual_input.text() or '0')
         pool_id = self.pool_combo.currentData()
         if not pool_id or not self._vulnerability_result:
             return 0.0
         for pr in self._vulnerability_result.pool_results:
             if pr.pool_id == pool_id:
-                if self.res_vi_lower.isChecked() or self.res_vi_mean.isChecked() or self.res_vi_upper.isChecked():
+                if mode in ("VI下限", "VI均值", "VI上限"):
                     if pr.vulnerability_intervals:
                         vi = pr.vulnerability_intervals[0]
-                        if self.res_vi_lower.isChecked():
-                            return vi.lower
-                        elif self.res_vi_mean.isChecked():
-                            return vi.mean
-                        elif self.res_vi_upper.isChecked():
-                            return vi.upper
-                elif self.res_p25.isChecked() or self.res_p50.isChecked() or self.res_p75.isChecked():
+                        return {"VI下限": vi.lower, "VI均值": vi.mean, "VI上限": vi.upper}[mode]
+                elif mode in ("25%分位", "50%分位", "75%分位"):
                     if pr.resource_values_all:
                         import numpy as np
-                        if self.res_p25.isChecked():
-                            return float(np.percentile(pr.resource_values_all, 25))
-                        elif self.res_p50.isChecked():
-                            return float(np.percentile(pr.resource_values_all, 50))
-                        elif self.res_p75.isChecked():
-                            return float(np.percentile(pr.resource_values_all, 75))
+                        pct = {"25%分位": 25, "50%分位": 50, "75%分位": 75}[mode]
+                        return float(np.percentile(pr.resource_values_all, pct))
         return 0.0
+
+    def _on_resource_mode_changed(self, index):
+        mode = self.resource_combo.currentText()
+        if mode == "自定义":
+            self.resource_manual_input.setEnabled(True)
+            self.resource_manual_input.setText("0")
+        else:
+            val = self._get_selected_resource()
+            self.resource_manual_input.setText(f"{val:.0f}")
+            self.resource_manual_input.setEnabled(False)
 
     def _get_pity_init(self):
         return dict(self._pity_init_values)
@@ -227,55 +213,35 @@ class RetreatSearchPanel(QWidget):
         return dict(self._miss_cost_weights)
 
     def _plot_pareto_chart(self, result):
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        from gacha_simulator.visualization.font_config import configure_chinese_font
-        configure_chinese_font()
+        """构造 ChartSpec 并直接渲染到 ChartWebView，不再写临时文件。"""
+        from ..visualization.chart_spec import scatter_colored
+        import numpy as np
 
         if not result.points:
-            return None
+            self.chart_webview.show_message("无数据可绘制")
+            return
 
-        extra_resources = [pt.extra_resource for pt in result.points]
-        target_counts = [sum(pt.target_specs.values()) for pt in result.points]
-        probs = [pt.success_probability for pt in result.points]
+        extra_resources = np.array([pt.extra_resource for pt in result.points], dtype=float)
+        target_counts = np.array([sum(pt.target_specs.values()) for pt in result.points], dtype=float)
+        probs = np.array([pt.success_probability for pt in result.points], dtype=float)
 
-        # 根据点数决定图表尺寸，保持紧凑
-        n = len(result.points)
-        fig_w = max(5, min(n * 0.8 + 3, 10))
-        fig_h = 5.5
+        # 按资源升序、目标数升序排列，确保连线沿 Pareto 前沿的正确走向
+        sort_idx = np.lexsort((target_counts, extra_resources))
+        extra_resources = extra_resources[sort_idx]
+        target_counts = target_counts[sort_idx]
+        probs = probs[sort_idx]
 
-        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-        scatter = ax.scatter(extra_resources, target_counts, c=probs, cmap='RdYlGn',
-                            s=80, edgecolors='black', linewidth=0.5, zorder=3)
-        cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
-        cbar.set_label('成功率')
-
-        if len(extra_resources) > 1:
-            sorted_pairs = sorted(zip(extra_resources, target_counts))
-            sx = [p[0] for p in sorted_pairs]
-            sy = [p[1] for p in sorted_pairs]
-            ax.plot(sx, sy, '--', color='gray', alpha=0.5, linewidth=1, zorder=2)
-
-        for i, pt in enumerate(result.points):
-            specs_str = ', '.join(f"{k}" for k in pt.target_specs.keys())
-            if specs_str:
-                ax.annotate(specs_str, (pt.extra_resource, target_counts[i]),
-                           textcoords="offset points", xytext=(3, 3),
-                           fontsize=6, alpha=0.7)
-
-        ax.set_xlabel('额外资源')
-        ax.set_ylabel('目标卡数量')
-        mode_labels = {'resource': '最少额外资源', 'target': '最多目标卡', 'pareto': 'Pareto前沿'}
-        ax.set_title(f'退路方案搜索 — {mode_labels.get(result.search_mode, result.search_mode)}')
-        ax.grid(True, alpha=0.3)
-        ax.margins(y=0.1)
-
-        plt.tight_layout()
-        tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        fig.savefig(tmp.name, dpi=200, bbox_inches='tight', pad_inches=0.3)
-        plt.close(fig)
-        return tmp.name
+        mode_labels = {"resource": "最少额外资源", "target": "最多目标卡", "pareto": "Pareto前沿"}
+        spec = scatter_colored(
+            x=extra_resources, y=target_counts,
+            color_values=probs, colorscale="RdYlGn", colorbar_title="成功率",
+            title=f"退路方案搜索 — {mode_labels.get(result.search_mode, result.search_mode)}",
+            xlabel="额外资源",
+            ylabel="目标卡数量",
+            mode="lines+markers",
+            line_color="black",
+        )
+        self.chart_webview.set_chart(spec)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -292,34 +258,17 @@ class RetreatSearchPanel(QWidget):
         self.pool_combo.currentIndexChanged.connect(self._on_pool_changed)
         source_form.addRow("起始池:", self.pool_combo)
 
-        res_group = QGroupBox("资源剩余值")
-        res_grid = QGridLayout(res_group)
-        res_grid.setSpacing(8)
-        res_grid.setContentsMargins(6, 6, 6, 6)
-        self.res_btn_group = QButtonGroup(self)
-        self.res_vi_lower = QRadioButton("VI下限 (--)")
-        self.res_vi_mean = QRadioButton("VI均值 (--)")
-        self.res_vi_upper = QRadioButton("VI上限 (--)")
-        self.res_p25 = QRadioButton("25%分位 (--)")
-        self.res_p50 = QRadioButton("50%分位 (--)")
-        self.res_p75 = QRadioButton("75%分位 (--)")
-        self.res_manual = QRadioButton("手动输入:")
-        self.res_manual_input = QLineEdit("0")
-        for btn in [self.res_vi_lower, self.res_vi_mean, self.res_vi_upper,
-                    self.res_p25, self.res_p50, self.res_p75, self.res_manual]:
-            self.res_btn_group.addButton(btn)
-        res_grid.addWidget(self.res_vi_lower, 0, 0)
-        res_grid.addWidget(self.res_vi_mean, 0, 1)
-        res_grid.addWidget(self.res_vi_upper, 0, 2)
-        res_grid.addWidget(self.res_p25, 1, 0)
-        res_grid.addWidget(self.res_p50, 1, 1)
-        res_grid.addWidget(self.res_p75, 1, 2)
-        manual_layout = QHBoxLayout()
-        manual_layout.addWidget(self.res_manual)
-        manual_layout.addWidget(self.res_manual_input)
-        res_grid.addLayout(manual_layout, 2, 0, 1, 3)
-        self.res_manual.setChecked(True)
-        source_form.addRow(res_group)
+        self.resource_combo = QComboBox()
+        self.resource_combo.addItems(["VI下限", "VI均值", "VI上限", "25%分位", "50%分位", "75%分位", "自定义"])
+        self.resource_combo.setCurrentIndex(6)
+        self.resource_combo.currentIndexChanged.connect(self._on_resource_mode_changed)
+        self.resource_manual_input = QLineEdit("0")
+        resource_row = QHBoxLayout()
+        resource_row.setSpacing(6)
+        resource_row.addWidget(QLabel("基准资源:"))
+        resource_row.addWidget(self.resource_combo)
+        resource_row.addWidget(self.resource_manual_input)
+        source_form.addRow(resource_row)
 
         pity_group = QGroupBox("保底水位")
         pity_layout = QVBoxLayout(pity_group)
@@ -441,10 +390,8 @@ class RetreatSearchPanel(QWidget):
 
         chart_group = QGroupBox("Pareto前沿图")
         chart_layout = QVBoxLayout(chart_group)
-        self.chart_label = QLabel()
-        self.chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.chart_label.setMinimumHeight(200)
-        chart_layout.addWidget(self.chart_label)
+        self.chart_webview = ChartWebView()
+        chart_layout.addWidget(self.chart_webview)
         right_layout.addWidget(chart_group)
 
         detail_group = QGroupBox("详细结果")
@@ -458,12 +405,16 @@ class RetreatSearchPanel(QWidget):
         detail_layout.addWidget(self.detail_table)
         right_layout.addWidget(detail_group)
 
-        scroll = QScrollArea()
-        scroll.verticalScrollBar().setSingleStep(15)
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(left_panel)
-        splitter.addWidget(scroll)
-        splitter.addWidget(right_panel)
+        left_scroll = QScrollArea()
+        left_scroll.verticalScrollBar().setSingleStep(15)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left_panel)
+        splitter.addWidget(left_scroll)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setWidget(right_panel)
+        splitter.addWidget(right_scroll)
         splitter.setSizes([400, 600])
 
     def _on_run(self):
@@ -471,7 +422,7 @@ class RetreatSearchPanel(QWidget):
             self.status_update.emit("请先加载配置")
             return
         if not self._vulnerability_result:
-            self.status_label.setText("请先在退路分析中运行脆弱性分析")
+            self.status_label.setText("请先运行脆弱性分析")
             return
 
         pool_id = self.pool_combo.currentData()
@@ -564,11 +515,14 @@ class RetreatSearchPanel(QWidget):
         from gacha_simulator.core.retreat_search import RetreatSearchResult
         assert isinstance(result, RetreatSearchResult)
 
-        lines = [f"<b>搜索模式:</b> {result.search_mode}"]
-        lines.append(f"<b>起始池:</b> {result.from_pool_id}")
-        lines.append(f"<b>基准资源:</b> {result.base_resource:.0f}")
-        lines.append(f"<b>保底初始:</b> {result.pity_init}")
-        lines.append(f"<b>结果点数:</b> {len(result.points)}")
+        mode_labels = {"resource": "最少额外资源", "target": "最多目标卡", "pareto": "Pareto前沿"}
+        mode_display = mode_labels.get(result.search_mode, result.search_mode)
+        lines = [
+            f"<b>模式:</b> {mode_display} &nbsp;|&nbsp; "
+            f"<b>起始池:</b> {result.from_pool_id} &nbsp;|&nbsp; "
+            f"<b>基准资源:</b> {result.base_resource:.0f} &nbsp;|&nbsp; "
+            f"<b>保底初始:</b> {result.pity_init}"
+        ]
 
         if result.points:
             best = result.points[-1]
@@ -577,24 +531,7 @@ class RetreatSearchPanel(QWidget):
 
         self.result_label.setText('<br>'.join(lines))
 
-        chart_path = self._plot_pareto_chart(result)
-        if chart_path:
-            self._chart_path = chart_path
-            pixmap = QPixmap(chart_path)
-            if not pixmap.isNull():
-                # 按比例缩放以适应标签宽度，保持宽高比
-                max_w = self.chart_label.width() - 20
-                max_h = 400
-                scaled = pixmap.scaled(
-                    max_w, max_h,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.chart_label.setPixmap(scaled)
-            else:
-                self.chart_label.setText("图表生成失败")
-        else:
-            self.chart_label.setText("无数据可绘制")
+        self._plot_pareto_chart(result)
 
         self.detail_table.setRowCount(len(result.points))
         for i, pt in enumerate(result.points):

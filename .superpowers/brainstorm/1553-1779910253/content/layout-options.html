@@ -1,0 +1,279 @@
+<h2>调试模式 — 三种页面布局方案</h2>
+<p class="subtitle">共同要素：可滚动单页 · 上方抽卡界面 · 下方调试数据 · 新Tab页形式</p>
+
+<div class="options" data-multiselect>
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>游戏模拟器流</h3>
+      <p>上半区完整复刻抽卡游戏界面（池名+保底+资源条+展示区+按钮），下半区网格布局 GDR 面板。上下滚动切换。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>左右分栏式</h3>
+      <p>左侧窄栏：池选择+操作按钮；右侧主区：上方抽卡展示+下方调试信息。不用滚动，但游戏感弱。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>卡片仪表盘</h3>
+      <p>所有内容以卡片组件排列，抽卡面板居中作为主卡片，GDR卡片环绕四周。灵活但可能碎片化。</p>
+    </div>
+  </div>
+</div>
+
+<hr style="margin: 32px 0; border-color: var(--border-color);">
+
+<h3>方案A 详细布局（推荐）</h3>
+<p class="subtitle">主流抽卡游戏界面 + 下方调试面板</p>
+
+<div class="mockup" style="max-width: 480px; margin: 0 auto;">
+  <div class="mockup-header">方案A：页面布局（可滚动）</div>
+  <div class="mockup-body" style="padding: 0; background: #0a0a1a; color: #e0e0e0;">
+
+    <!-- ====== 抽卡游戏区 ====== -->
+    <div style="background: linear-gradient(180deg, #1a1a3e 0%, #0d0d24 100%); min-height: 500px; position: relative;">
+
+      <!-- 顶部资源条 -->
+      <div style="display: flex; justify-content: flex-end; gap: 12px; padding: 10px 14px; background: rgba(0,0,0,0.4);">
+        <span style="background: #2a2a4a; padding: 4px 10px; border-radius: 4px; font-size: 12px;">
+          💎 <b>28800</b>
+        </span>
+        <span style="background: #2a2a4a; padding: 4px 10px; border-radius: 4px; font-size: 12px;">
+          🎫 <b>12</b>
+        </span>
+        <span style="background: #2a2a4a; padding: 4px 10px; border-radius: 4px; font-size: 12px;">
+          ⏱ <b>Day 3</b>
+        </span>
+      </div>
+
+      <!-- 池子名称 -->
+      <div style="text-align: center; padding: 14px 0 6px;">
+        <div style="font-size: 20px; font-weight: bold; color: #ffd700;">限定角色池 · 耀光之翼</div>
+      </div>
+
+      <!-- 保底信息 -->
+      <div style="text-align: center; padding: 0 0 10px;">
+        <div style="font-size: 12px; color: #aaa;">
+          软保底 73/90 · 大保底 0/1 · <span style="color: #4fc3f7;">下次SSR概率 33.2%</span>
+        </div>
+      </div>
+
+      <!-- 卡面展示区 -->
+      <div style="display: flex; justify-content: center; align-items: center; gap: 8px; padding: 16px; min-height: 200px;">
+        <div class="placeholder" style="width: 60px; height: 80px; border-radius: 6px; background: #1e1e3e; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">卡</div>
+        <div class="placeholder" style="width: 60px; height: 80px; border-radius: 6px; background: #1e1e3e; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">卡</div>
+        <div class="placeholder" style="width: 60px; height: 80px; border-radius: 6px; background: #3a2a1a; border: 2px solid #ffd700; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #ffd700;">SSR</div>
+        <div class="placeholder" style="width: 60px; height: 80px; border-radius: 6px; background: #1e1e3e; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">卡</div>
+        <div class="placeholder" style="width: 60px; height: 80px; border-radius: 6px; background: #1e1e3e; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">卡</div>
+      </div>
+
+      <!-- 底部按钮行 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(0,0,0,0.5);">
+        <!-- 左下：历史记录 -->
+        <button class="mock-button" style="background: #333; font-size: 12px; padding: 6px 14px;">📋 历史</button>
+
+        <!-- 右下：单抽 + 十连 -->
+        <div style="display: flex; gap: 8px;">
+          <button class="mock-button" style="background: #2a4a6a; font-size: 13px; padding: 8px 18px;">单抽 ×1</button>
+          <button class="mock-button" style="background: #6a3a2a; font-size: 13px; padding: 8px 18px; border: 2px solid #ff8a65;">十连 ×10</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ====== 分隔 ====== -->
+    <div style="background: #222; padding: 6px; text-align: center; font-size: 11px; color: #888;">
+      ▼ 调试信息 ▼
+    </div>
+
+    <!-- ====== 调试信息区 ====== -->
+    <div style="background: #111; padding: 12px;">
+
+      <!-- 等待控制 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+        <div style="font-size: 13px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">⏳ 等待操作</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button class="mock-button" style="font-size: 11px; padding: 4px 10px;">+1h</button>
+          <button class="mock-button" style="font-size: 11px; padding: 4px 10px;">+1d</button>
+          <button class="mock-button" style="font-size: 11px; padding: 4px 10px;">自定义…</button>
+          <button class="mock-button" style="font-size: 11px; padding: 4px 10px;">跳到下池开放</button>
+          <button class="mock-button" style="font-size: 11px; padding: 4px 10px;">跳到池子关闭前</button>
+        </div>
+      </div>
+
+      <!-- 池子切换 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+        <div style="font-size: 13px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">🎯 当前池子</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <span style="background: #ffd700; color: #000; padding: 3px 10px; border-radius: 4px; font-size: 11px;">耀光之翼</span>
+          <span style="background: #333; color: #aaa; padding: 3px 10px; border-radius: 4px; font-size: 11px;">暗影之刃</span>
+          <span style="background: #333; color: #aaa; padding: 3px 10px; border-radius: 4px; font-size: 11px;">兑换商店</span>
+        </div>
+      </div>
+
+      <!-- GDR 面板 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 10px;">
+        <div style="font-size: 13px; font-weight: bold; color: #81d4fa; margin-bottom: 8px;">📊 广义出率 (GDR)</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 11px;">
+          <!-- 表头 -->
+          <div style="color: #888; padding: 2px 4px;">指标</div><div style="color: #888; padding: 2px 4px;">值 / 阈值 / 结果</div>
+          <!-- 行 -->
+          <div style="padding: 2px 4px;">目标达成率</div><div style="padding: 2px 4px;">0.750 / 1.00 <span style="color:#ff8a65;">✗</span></div>
+          <div style="padding: 2px 4px;">收集率</div><div style="padding: 2px 4px;">0.600 / 1.00 <span style="color:#ff8a65;">✗</span></div>
+          <div style="padding: 2px 4px;">全部目标</div><div style="padding: 2px 4px;">0.000 / 1.00 <span style="color:#ff8a65;">✗</span></div>
+          <div style="padding: 2px 4px;">SSR收集率</div><div style="padding: 2px 4px;">0.200 / 0.05 <span style="color:#81c784;">✓</span></div>
+          <div style="padding: 2px 4px;">资源剩余</div><div style="padding: 2px 4px;">14400 / 0.0 <span style="color:#81c784;">✓</span></div>
+          <div style="padding: 2px 4px; color: #666;">… 等 17 项</div><div style="padding: 2px 4px; color: #666;">全部展开显示</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<hr style="margin: 32px 0; border-color: var(--border-color);">
+
+<h3>方案B 详细布局</h3>
+<p class="subtitle">左右分栏，左侧控件+右侧展示</p>
+
+<div class="mockup" style="max-width: 640px; margin: 0 auto;">
+  <div class="mockup-header">方案B：左右分栏布局</div>
+  <div class="mockup-body" style="display: flex; padding: 0; background: #0a0a1a; min-height: 400px;">
+
+    <!-- 左侧控制栏 -->
+    <div style="width: 180px; background: #111; padding: 12px; border-right: 1px solid #333;">
+      <div style="font-size: 14px; font-weight: bold; color: #ffd700; margin-bottom: 12px;">调试面板</div>
+
+      <div style="margin-bottom: 10px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 4px;">池子</div>
+        <select style="width:100%; background:#222; color:#fff; border:1px solid #444; padding:4px; border-radius:4px;">
+          <option>耀光之翼</option>
+          <option>暗影之刃</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 4px;">保底</div>
+        <div style="font-size: 11px; color:#4fc3f7;">73/90 软保底<br>0/1 大保底</div>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <button class="mock-button" style="width:100%; padding:8px;">单抽 ×1</button>
+      </div>
+      <div style="margin-bottom: 12px;">
+        <button class="mock-button" style="width:100%; padding:8px; background:#6a3a2a;">十连 ×10</button>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: #888; margin-bottom: 4px;">等待</div>
+        <button class="mock-button" style="width:100%; font-size:11px; padding:4px;">+1d</button>
+      </div>
+
+      <button class="mock-button" style="width:100%;">📋 历史记录</button>
+    </div>
+
+    <!-- 右侧主区 -->
+    <div style="flex:1; padding: 10px;">
+
+      <!-- 资源条 -->
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px;">
+        <span style="background:#2a2a4a;padding:3px 8px;border-radius:4px;font-size:11px;">💎 28800</span>
+        <span style="background:#2a2a4a;padding:3px 8px;border-radius:4px;font-size:11px;">🎫 12</span>
+      </div>
+
+      <!-- 抽卡结果 -->
+      <div style="background:#111;border-radius:6px;padding:10px;margin-bottom:8px;min-height:120px;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <div class="placeholder" style="width:48px;height:64px;border-radius:4px;background:#1e1e3e;"></div>
+        <div class="placeholder" style="width:48px;height:64px;border-radius:4px;background:#1e1e3e;"></div>
+        <div class="placeholder" style="width:48px;height:64px;border-radius:4px;background:#3a2a1a;border:1px solid #ffd700;"></div>
+      </div>
+
+      <!-- GDR 表 -->
+      <div style="background:#111;border-radius:6px;padding:8px;font-size:10px;">
+        <div style="color:#81d4fa;font-weight:bold;margin-bottom:4px;">GDR 概览</div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:2px;">
+          <div style="color:#888;">指标</div><div style="color:#888;">值</div><div style="color:#888;">阈值</div><div style="color:#888;">结果</div>
+          <div>目标达成率</div><div>0.750</div><div>1.00</div><div style="color:#ff8a65;">✗</div>
+          <div>收集率</div><div>0.600</div><div>1.00</div><div style="color:#ff8a65;">✗</div>
+          <div>SSR收集</div><div>0.200</div><div>0.05</div><div style="color:#81c784;">✓</div>
+          <div style="color:#666;">+14项…</div><div></div><div></div><div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<hr style="margin: 32px 0; border-color: var(--border-color);">
+
+<h3>方案C 详细布局</h3>
+<p class="subtitle">卡片仪表盘，抽卡面板居中</p>
+
+<div class="mockup" style="max-width: 520px; margin: 0 auto;">
+  <div class="mockup-header">方案C：仪表盘布局</div>
+  <div class="mockup-body" style="padding: 10px; background: #0a0a1a; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+
+    <!-- 资源卡片 -->
+    <div style="background:#1a1a2e;border-radius:6px;padding:8px;grid-column:1/-1;">
+      <div style="font-size:12px;color:#81d4fa;font-weight:bold;">📦 资源 & 时间</div>
+      <div style="display:flex;gap:12px;font-size:11px;margin-top:4px;">
+        <span>💎 28800</span><span>🎫 12</span><span>⏱ Day 3</span>
+      </div>
+    </div>
+
+    <!-- 池子卡片 -->
+    <div style="background:#1a1a2e;border-radius:6px;padding:8px;">
+      <div style="font-size:12px;color:#81d4fa;font-weight:bold;">🎯 当前池</div>
+      <div style="font-size:13px;color:#ffd700;font-weight:bold;">耀光之翼</div>
+      <div style="font-size:11px;color:#4fc3f7;">保底 73/90</div>
+    </div>
+
+    <!-- 操作卡片 -->
+    <div style="background:#1a1a2e;border-radius:6px;padding:8px;">
+      <div style="font-size:12px;color:#81d4fa;font-weight:bold;">🎮 操作</div>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button class="mock-button" style="padding:4px 10px;font-size:11px;">单抽</button>
+        <button class="mock-button" style="padding:4px 10px;font-size:11px;background:#6a3a2a;">十连</button>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button class="mock-button" style="padding:2px 6px;font-size:10px;">+1d</button>
+        <button class="mock-button" style="padding:2px 6px;font-size:10px;">跳到下池</button>
+      </div>
+    </div>
+
+    <!-- 抽卡结果 -->
+    <div style="background:#1a1a2e;border-radius:6px;padding:8px;grid-column:1/-1;min-height:100px;display:flex;align-items:center;justify-content:center;gap:8px;">
+      <div class="placeholder" style="width:50px;height:68px;border-radius:4px;background:#1e1e3e;"></div>
+      <div class="placeholder" style="width:50px;height:68px;border-radius:4px;background:#1e1e3e;"></div>
+      <div class="placeholder" style="width:50px;height:68px;border-radius:4px;background:#3a2a1a;border:1px solid #ffd700;"></div>
+      <div class="placeholder" style="width:50px;height:68px;border-radius:4px;background:#1e1e3e;"></div>
+    </div>
+
+    <!-- GDR 卡片 -->
+    <div style="background:#1a1a2e;border-radius:6px;padding:8px;grid-column:1/-1;">
+      <div style="font-size:12px;color:#81d4fa;font-weight:bold;">📊 GDR 状态（17项，分组折叠）</div>
+      <div style="font-size:11px;margin-top:4px;">
+        <details open><summary style="color:#ffd700;">目标达成类 (4)</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;">
+            <div>目标达成率 0.750</div><div style="color:#ff8a65;">✗ 1.00</div>
+            <div>收集率 0.600</div><div style="color:#ff8a65;">✗ 1.00</div>
+            <div>全部目标 0.000</div><div style="color:#ff8a65;">✗ 1.00</div>
+            <div>SSR收集 0.200</div><div style="color:#81c784;">✓ 0.05</div>
+          </div>
+        </details>
+        <details><summary style="color:#ffd700;">资源效率类 (5)</summary></details>
+        <details><summary style="color:#ffd700;">加权综合类 (8)</summary></details>
+      </div>
+    </div>
+
+    <!-- 历史按钮 -->
+    <div style="grid-column:1/-1; text-align:center;">
+      <button class="mock-button">📋 查看历史记录</button>
+    </div>
+
+  </div>
+</div>

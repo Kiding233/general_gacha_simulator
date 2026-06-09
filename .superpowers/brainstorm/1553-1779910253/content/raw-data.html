@@ -1,0 +1,153 @@
+<h2>原始数据面板 — 补充</h2>
+<p class="subtitle">以下内容追加到调试信息区的最底部，位于 GDR 表下方</p>
+
+<div class="mockup" style="max-width: 580px; margin: 0 auto;">
+  <div class="mockup-header">原始数据 Dump — 可折叠面板</div>
+  <div class="mockup-body" style="padding: 10px; background: #0a0a14; color: #e0e0e0;">
+
+    <!-- 原始数据区 — 可折叠 -->
+    <div style="background: #1a1a2e; border-radius: 6px; padding: 8px;">
+      <div style="font-size: 11px; font-weight: bold; color: #ffd700; margin-bottom: 6px;">
+        🔧 原始数据 (Raw Dump)
+        <span style="color: #666; font-weight: normal;">— 各数据结构的 Python repr / dict 原貌</span>
+      </div>
+
+      <!-- 折叠卡片 1: GachaState -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa; cursor: pointer;">
+          ▼ GachaState (core/state.py)
+        </div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #aaa; line-height: 1.5;">
+          GachaState(<br>
+          &nbsp;&nbsp;resources={<span style="color:#81c784;">'draw_resource'</span>: <span style="color:#ffd700;">14400</span>, <span style="color:#81c784;">'starlight'</span>: <span style="color:#ffd700;">45</span>, <span style="color:#81c784;">'special_ticket'</span>: <span style="color:#ffd700;">3</span>},<br>
+          &nbsp;&nbsp;pity_counters={<span style="color:#81c784;">'soft_耀光'</span>: <span style="color:#ffd700;">73</span>, <span style="color:#81c784;">'hard_耀光'</span>: <span style="color:#ffd700;">73</span>, <span style="color:#81c784;">'big_耀光'</span>: <span style="color:#ffd700;">1</span>},<br>
+          &nbsp;&nbsp;real_time=<span style="color:#ffd700;">259200.0</span>,<br>
+          &nbsp;&nbsp;total_actions=<span style="color:#ffd700;">52</span>,<br>
+          &nbsp;&nbsp;extra_state={<span style="color:#81c784;">'current_strategy'</span>: <span style="color:#81c784;">'smart'</span>}<br>
+          )
+        </div>
+      </div>
+
+      <!-- 折叠卡片 2:当前池子内部状态 -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ Pool: 耀光之翼 (core/pool.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+      <!-- 折叠卡片 3: CompactResult -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ CompactResult (core/result_types.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+      <!-- 折叠卡片 4: PityEngine 内部 -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ PityEngine 概率分布 (core/pity.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+      <!-- 折叠卡片 5: StrategyContext -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ StrategyContext (core/strategy.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+      <!-- 折叠卡片 6: StopCondition -->
+      <div style="background: #111; border-radius: 4px; margin-bottom: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ StopCondition (core/stop_condition.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+      <!-- 折叠卡片 7: 资源获取函数 -->
+      <div style="background: #111; border-radius: 4px; overflow: hidden;">
+        <div style="padding: 5px 8px; background: rgba(255,255,255,0.03); font-size: 10px; color: #81d4fa;">▶ ResourceGain (core/resource_gain.py)</div>
+        <div style="padding: 6px 8px; font-size: 9px; font-family: monospace; color: #555; line-height: 1.5;">
+          (collapsed)
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<hr style="margin: 28px 0; border-color: var(--border-color);">
+
+<h3>原始数据展示的细节约定</h3>
+
+<div style="max-width: 600px; margin: 0 auto;">
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+  <h4 style="color: #ffd700; margin: 0 0 6px 0;">展示方式</h4>
+  <div style="font-size: 12px; color: #aaa; line-height: 1.7;">
+    • 每个数据结构一张<strong>可折叠卡片</strong>（QGroupBox 或自定义 collapsible widget）<br>
+    • 展开后以 <code>monospace</code> 字体显示 <strong>Python repr()</strong> 或 <strong>dataclass 字段展开</strong><br>
+    • 颜色标记：键名(绿色)、数值(黄色)、字符串(蓝色)、布尔(橙色)<br>
+    • 默认全部折叠，按需点开——因为 raw dump 可能很长
+  </div>
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+  <h4 style="color: #ffd700; margin: 0 0 6px 0;">哪些数据需要 dump</h4>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px;">
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">GachaState</div>
+      <div style="color: #888;">resources / pity_counters / real_time / total_actions / extra_state</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/state.py</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">Pool (×N)</div>
+      <div style="color: #888;">id / name / cost / rewards / available_from/until / is_exchange / pool_type / _cum_weights / _adjusted_*</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/pool.py</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">CompactResult</div>
+      <div style="color: #888;">draw_card_ids[] / draw_pool_ids[] / draw_pity[] / card_counts / final_resources / total_consumed / ...</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/result_types.py .to_dict()</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">PityEngine</div>
+      <div style="color: #888;">每条保底规则: 计数器当前值 / 触发阈值 / 概率分布 / 重置条件</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/pity.py</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">StrategyContext</div>
+      <div style="color: #888;">state / current_pools[] / all_pools[] / target_cards / acquired / pool_draw_counts / total_draws / ssr_ids</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/strategy.py</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px;">
+      <div style="color: #81d4fa; font-weight: bold;">StopCondition</div>
+      <div style="color: #888;">类型名 / 参数 / .check() 当前判定 / .description()</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/stop_condition.py</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 8px; grid-column: 1 / -1;">
+      <div style="color: #81d4fa; font-weight: bold;">ResourceGain / SimulationStats</div>
+      <div style="color: #888;">ResourceGain: 各收益函数定义 · SimulationStats: total_consumed / total_gained / card_counts / pity_triggers / ...</div>
+      <div style="color: #666; font-size: 10px; margin-top: 2px;">来源: core/resource_gain.py · service/gacha_service.py</div>
+    </div>
+  </div>
+
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 12px;">
+  <h4 style="color: #ffd700; margin: 0 0 6px 0;">注意点</h4>
+  <div style="font-size: 12px; color: #aaa; line-height: 1.7;">
+    • <b>Pool 的 rewards 列表</b>可能非常长（几百张卡），应限制显示数量（如前 10 条 + "…共 N 条"）<br>
+    • <b>CompactResult 的序列数组</b>随步数增长，建议只显示最后 K 步的序列片段<br>
+    • 所有 raw dump 是<b>只读</b>的，不可编辑<br>
+    • 每次操作（抽卡/等待）后自动刷新所有展开中的卡片
+  </div>
+</div>
+
+</div>

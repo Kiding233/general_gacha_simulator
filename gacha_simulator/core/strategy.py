@@ -42,7 +42,7 @@ class StrategyContext:
         if pool is None or pool.is_exchange:
             return {}
         probs = {r.id: p for r, p in pool.rewards}
-        result = self._pity_engine.before_draw(pool_id, self._pity_state, probs)
+        result = self._pity_engine.get_probabilities(pool_id, self._pity_state, probs)
         self._pity_cache[pool_id] = result
         return result
 
@@ -471,6 +471,11 @@ def create_strategy(strategy_name: str, params: Optional[Dict[str, Any]] = None)
         return cls(target_pool_ids=p.get('target_pool_ids', []))
     elif strategy_name == 'fixed_count':
         return cls(count=p.get('count', 100))
+    elif strategy_name == 'draw_target':
+        return cls(
+            target_card_ids=set(p.get('target_card_ids', [])),
+            pool_id=p.get('pool_id', ''),
+        )
     return cls()
 
 

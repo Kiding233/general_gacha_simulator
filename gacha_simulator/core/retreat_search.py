@@ -11,23 +11,71 @@ class RetreatSearchPoint:
 
 
 @dataclass
-class RetreatSearchResult:
-    from_pool_id: str
-    base_resource: float
-    pity_init: Dict[str, int]
-    search_mode: str
+class PlanSearchResult:
+    """统一方案搜索结果——兼容旧 RetreatSearchResult 的全部字段。"""
+    search_mode: str  # 'min_resource' | 'forward' | 'backward' | 'pareto'
+    # 向后兼容字段（旧 RetreatSearchResult）
+    from_pool_id: Optional[str] = None  # None = 完整时间线模式
+    base_resource: float = 0.0
+    pity_init: Dict[str, int] = field(default_factory=dict)
     points: List[RetreatSearchPoint] = field(default_factory=list)
-    resource_only_result: Optional[RetreatSearchResult] = None  # 纯资源搜索结果
-    target_only_result: Optional[RetreatSearchResult] = None  # 纯目标卡搜索结果
+    resource_only_result: Optional[PlanSearchResult] = None   # type: ignore
+    target_only_result: Optional[PlanSearchResult] = None     # type: ignore
+
+    # 新增字段
+    start_mode: str = 'full_timeline'  # 'full_timeline' | 'from_retreat'
+    success: bool = True
+
+    # 最少资源
+    min_resource: Optional[float] = None
+    binary_steps: List = field(default_factory=list)  # ResourceSearchStep 列表
+
+    # 最多目标卡
+    forward_result: Optional[any] = None   # type: ignore  # ForwardResult
+    backward_result: Optional[any] = None  # type: ignore  # BackwardResult
+
+    # Pareto
+    pareto_points: List[RetreatSearchPoint] = field(default_factory=list)
+
+    # 元数据
+    cost_per_draw: float = 160.0
+    target_specs: Dict[str, int] = field(default_factory=dict)
+    total_iterations: int = 0
+    final_success_probability: float = 0.0
+
+    def __post_init__(self):
+        # 推断 start_mode
+        if not self.start_mode or self.start_mode == 'full_timeline':
+            self.start_mode = 'full_timeline' if self.from_pool_id is None else 'from_retreat'
+        # 最少资源结果自动填充兼容字段
+        if self.min_resource is not None and not self.points:
+            self.points = [RetreatSearchPoint(
+                extra_resource=self.min_resource - self.base_resource,
+                target_specs=dict(self.target_specs),
+                success_probability=self.final_success_probability,
+            )]
+        # Pareto 结果自动同步
+        if self.pareto_points and not self.points:
+            self.points = list(self.pareto_points)
 
 
-class RetreatSearchEngine:
+# 向后兼容别名
+RetreatSearchResult = PlanSearchResult
+
+
+class PlanSearchEngine:
+    """统一方案搜索引擎——支持完整时间线与截断时间线（退路点）两种模式。
+
+    from_pool_id=None  → 完整时间线，使用 SimulationEnvBuilder.from_config_store()
+    from_pool_id=str   → 截断时间线，使用 RetreatConfigBuilder.build()
+    """
+
     def __init__(
         self,
         config_store,
-        from_pool_id: str,
-        base_resource: float,
-        pity_counter_init: Dict[str, int],
+        from_pool_id: Optional[str] = None,
+        base_resource: float = 0.0,
+        pity_counter_init: Optional[Dict[str, int]] = None,
         miss_cost_weights: Optional[Dict[str, float]] = None,
         desire_weights: Optional[Dict[str, float]] = None,
         card_value_weights: Optional[Dict[str, float]] = None,
@@ -45,7 +93,7 @@ class RetreatSearchEngine:
         self.config_store = config_store
         self.from_pool_id = from_pool_id
         self.base_resource = base_resource
-        self.pity_counter_init = pity_counter_init
+        self.pity_counter_init = pity_counter_init or {}
         self.miss_cost_weights = miss_cost_weights or {}
         self.desire_weights = desire_weights or {}
         self.card_value_weights = card_value_weights or {}
@@ -64,17 +112,33 @@ class RetreatSearchEngine:
     def stop(self):
         self._should_stop = True
 
-    def _build_truncated_env(self, target_specs, initial_resource_value):
-        from .retreat_config import RetreatConfigBuilder
-        truncated_store = RetreatConfigBuilder.build(
-            original_store=self.config_store,
-            from_pool_id=self.from_pool_id,
-            initial_resources={'draw_resource': initial_resource_value},
-            pity_counter_init=self.pity_counter_init,
-        )
-        from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
-        env = SimulationEnvBuilder.from_config_store(truncated_store)
-        return env
+    def _build_env(self, target_specs, initial_resource_value):
+        """构建模拟环境——根据 from_pool_id 分叉：
+        - None: 完整时间线（SimulationEnvBuilder）
+        - str:  截断时间线（RetreatConfigBuilder）
+        """
+        if self.from_pool_id is None:
+            # 完整时间线模式
+            from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
+            env = SimulationEnvBuilder.from_config_store(self.config_store)
+            ir = dict(env.initial_resources)
+            ir['draw_resource'] = initial_resource_value
+            env.initial_resources = ir
+            return env
+        else:
+            # 截断时间线模式（退路点）
+            from .retreat_config import RetreatConfigBuilder
+            truncated_store = RetreatConfigBuilder.build(
+                original_store=self.config_store,
+                from_pool_id=self.from_pool_id,
+                initial_resources={'draw_resource': initial_resource_value},
+                pity_counter_init=self.pity_counter_init,
+            )
+            from gacha_simulator.service.batch_simulator import SimulationEnvBuilder
+            return SimulationEnvBuilder.from_config_store(truncated_store)
+
+    # 保留旧方法名作为别名，向后兼容
+    _build_truncated_env = _build_env
 
     def _simulate_with_resource(self, env, target_specs, resource_value):
         # 如果没有剩余池子，那么没有任务已完成，成功率 100%
@@ -85,13 +149,7 @@ class RetreatSearchEngine:
         ir = dict(env.initial_resources)
         ir['draw_resource'] = resource_value
         histories = run_batch_parallel(
-            pools=env.pools,
-            schedule_mgr=env.schedule_mgr,
-            end_time=env.end_time,
-            pity_engine=env.pity_engine,
-            resource_gain=env.resource_gain,
-            pity_state_init=env.pity_state_init,
-            card_defs=env.card_defs,
+            env=env,
             target_specs=target_specs,
             initial_resources=ir,
             num_simulations=self.num_simulations,
@@ -99,21 +157,13 @@ class RetreatSearchEngine:
             seed=0,
             strategy_name=self.strategy_name,
             strategy_params=self.strategy_params,
-            ssr_ids=env.ssr_ids,
         )
         return compute_success_probability(histories, target_specs, self.gdr_key, self.gdr_threshold,
                                            self.desire_weights, self.miss_cost_weights, self.card_value_weights)
 
     def _extract_cost_per_draw(self, env):
-        for p in env.pools:
-            cost = p.cost
-            if isinstance(cost, list) and cost:
-                for opt in cost:
-                    if isinstance(opt, dict):
-                        return float(list(opt.values())[0])
-            elif isinstance(cost, dict):
-                return float(list(cost.values())[0])
-        return 160
+        """[DEPRECATED] 请使用模块级 get_cost_per_draw(env.pools)"""
+        return get_cost_per_draw(env.pools)
 
     def search_min_resource(self, target_specs: Dict[str, int],
                             progress_base: int = 0, progress_span: int = 100) -> RetreatSearchResult:
@@ -199,6 +249,12 @@ class RetreatSearchEngine:
             target_specs=dict(target_specs),
             success_probability=final_prob,
         ))
+        result.success = final_prob >= self.success_threshold
+        result.min_resource = self.base_resource + r_hi
+        result.final_success_probability = final_prob
+        result.total_iterations = doubling + binary_iter + 1  # +1 最终验证
+        result.cost_per_draw = cost_per_draw
+        result.target_specs = dict(target_specs)
         _emit(f"最少额外资源: +{r_hi:.0f}, P={final_prob:.2%}", 100)
         return result
 
@@ -215,8 +271,16 @@ class RetreatSearchEngine:
         return obtainable
 
     def _filter_obtainable_targets(self, target_specs: Dict[str, int]) -> Dict[str, int]:
-        """预过滤：移除截断时间线中不可获取的卡，通过 progress_callback 告知用户"""
-        env = self._build_truncated_env(target_specs, self.base_resource)
+        """预过滤：移除不可获取的卡。
+
+        完整时间线模式（from_pool_id=None）：所有卡均可获取，不做过滤。
+        截断时间线模式：只保留截断后池子中实际可获取的卡。
+        """
+        # 完整时间线模式：所有卡均可获取
+        if self.from_pool_id is None:
+            return dict(target_specs)
+
+        env = self._build_env(target_specs, self.base_resource)
         obtainable = self._get_obtainable_card_ids(env)
 
         unobtainable = [cid for cid in target_specs if cid not in obtainable]
@@ -303,6 +367,100 @@ class RetreatSearchEngine:
 
         return result
 
+    def search_max_targets_forward(self, candidate_specs: Dict[str, int]) -> RetreatSearchResult:
+        """前进法：从空目标集开始，按抽取意愿降序逐个添加，直到成功率跌破阈值回退一步。
+
+        Args:
+            candidate_specs: 候选卡及其目标数量 {card_id: qty}，全部可获取时纳入
+        Returns:
+            RetreatSearchResult，其中 points 按添加顺序排列，最后一个是最终有效方案
+        """
+        self._should_stop = False
+
+        candidate_specs = self._filter_obtainable_targets(candidate_specs)
+        if not candidate_specs:
+            self.progress_callback("所有候选卡在截断时间线中均不可获取，搜索终止", 100)
+            return RetreatSearchResult(
+                from_pool_id=self.from_pool_id,
+                base_resource=self.base_resource,
+                pity_init=dict(self.pity_counter_init),
+                search_mode='forward',
+            )
+
+        result = RetreatSearchResult(
+            from_pool_id=self.from_pool_id,
+            base_resource=self.base_resource,
+            pity_init=dict(self.pity_counter_init),
+            search_mode='forward',
+        )
+
+        env = self._build_truncated_env(candidate_specs, self.base_resource)
+
+        # 没有后续池子的情况，直接返回成功（所有候选卡均可获得）
+        if not env.pools:
+            result.points.append(RetreatSearchPoint(
+                extra_resource=0.0,
+                target_specs=dict(candidate_specs),
+                success_probability=1.0,
+            ))
+            self.progress_callback("没有后续池子，已成功", 100)
+            return result
+
+        # 按抽取意愿降序排列
+        sorted_ids = sorted(
+            candidate_specs.keys(),
+            key=lambda cid: self.desire_weights.get(cid, 1.0),
+            reverse=True,
+        )
+
+        current_specs: Dict[str, int] = {}
+        last_valid_specs: Dict[str, int] = {}
+        last_valid_prob = 1.0
+
+        total_steps = len(sorted_ids)
+        for i, card_id in enumerate(sorted_ids):
+            if self._should_stop:
+                break
+
+            pct = int((i / max(total_steps, 1)) * 95) + 5
+            self.progress_callback(f"前进法: 尝试添加 {card_id}", pct)
+
+            current_specs[card_id] = candidate_specs[card_id]
+            env = self._build_truncated_env(current_specs, self.base_resource)
+            prob = self._simulate_with_resource(env, current_specs, self.base_resource)
+
+            result.points.append(RetreatSearchPoint(
+                extra_resource=0.0,
+                target_specs=dict(current_specs),
+                success_probability=prob,
+            ))
+
+            if prob >= self.success_threshold:
+                last_valid_specs = dict(current_specs)
+                last_valid_prob = prob
+            else:
+                # 回退到上一个有效状态；如果第一步就失败，使用仅含第一张卡的方案
+                if not last_valid_specs:
+                    last_valid_specs = {card_id: candidate_specs[card_id]}
+                    last_valid_prob = prob
+                self.progress_callback(
+                    f"前进法完成: 添加 {card_id} 跌破阈值 (P={prob:.2%}), "
+                    f"回退到 {len(last_valid_specs)} 卡, P={last_valid_prob:.2%}",
+                    100,
+                )
+                break
+
+        # 如果所有候选卡都添加成功
+        if not self._should_stop and len(current_specs) == len(sorted_ids):
+            last_valid_specs = dict(current_specs)
+            last_valid_prob = result.points[-1].success_probability if result.points else 1.0
+            self.progress_callback(
+                f"前进法完成: 全部 {len(last_valid_specs)} 张候选卡均已添加, P={last_valid_prob:.2%}",
+                100,
+            )
+
+        return result
+
     def search_pareto(self, target_specs: Dict[str, int]) -> RetreatSearchResult:
         self._should_stop = False
 
@@ -364,3 +522,34 @@ class RetreatSearchEngine:
 
         self.progress_callback("Pareto搜索完成", 100)
         return result
+
+
+# 向后兼容别名——旧代码可继续使用 RetreatSearchEngine
+RetreatSearchEngine = PlanSearchEngine
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 工具函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_cost_per_draw(pools) -> float:
+    """从池列表中提取单抽资源成本（取首个有效值）。
+
+    注意：多池成本不同时不存在正确值——此函数仅返回近似值。
+    二分搜索在资源空间运行，cost 不影响搜索正确性。
+    """
+    if not pools:
+        return 160
+    for p in pools:
+        cost = getattr(p, 'cost', None)
+        if cost is None:
+            continue
+        if isinstance(cost, (int, float)) and cost > 0:
+            return float(cost)
+        if isinstance(cost, list) and cost:
+            for opt in cost:
+                if isinstance(opt, dict):
+                    return float(list(opt.values())[0])
+        elif isinstance(cost, dict):
+            return float(list(cost.values())[0])
+    return 160

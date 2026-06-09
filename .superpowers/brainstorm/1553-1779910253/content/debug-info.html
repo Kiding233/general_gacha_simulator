@@ -1,0 +1,305 @@
+<h2>调试面板 — 需要展示哪些信息？</h2>
+<p class="subtitle">调试模式下用户需要观察的核心维度</p>
+
+<div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;">
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 14px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">🔍 逐步状态追踪</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0; line-height: 1.7;">
+    每执行一次操作（抽卡/等待），记录并展示：
+    <br>• 步数 · 时间戳 · 操作类型（单抽/十连/等待）· 操作对象（哪个池）
+    <br>• 抽到的卡 ID + 稀有度 + 保底触发情况
+    <br>• 资源消耗 + 资源获得 + 各类资源余额变化
+    <br>• 保底计数器变化（软保底 + 硬保底 + 大保底）
+    <br>• 策略决策痕迹：当前策略名称、为什么选这个操作
+  </p>
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 14px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">📊 GDR 实时追踪</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0; line-height: 1.7;">
+    17 种 GDR 指标 —— 每次操作后重新计算，展示变化趋势：
+    <br>• 当前值 + 与上一步的差值（↑/↓）
+    <br>• 与阈值的对比（达标 ✓ / 未达标 ✗）
+    <br>• 可选：选定一个主 GDR，画实时走势迷你图
+  </p>
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 14px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">🧩 池子快照</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0; line-height: 1.7;">
+    每个池子的当前状态一目了然：
+    <br>• 名称 · 类型 · 开启/关闭时间 · 已抽次数
+    <br>• 保底状态：软保底计数 / 硬保底计数 / 大保底标记
+    <br>• UP 卡列表 · 目标卡标记 · 当前 SSR 概率分布
+    <br>• 该池的逐池 GDR 值
+  </p>
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 14px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">📋 操作历史日志</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0; line-height: 1.7;">
+    类似控制台的滚动日志，按时间倒序或顺序：
+    <br>• [步号] 时间 | 操作 | 池子 | 结果卡 | 稀有度 | 保底? | 资源变化
+    <br>• 支持筛选：按池子 / 操作类型 / 稀有度过滤
+    <br>• 新操作自动追加，可暂停滚动
+  </p>
+</div>
+
+<div style="background: #1a1a2e; border-radius: 8px; padding: 14px;">
+  <h4 style="color: #ffd700; margin: 0 0 8px 0;">⚙️ 模拟引擎内部状态</h4>
+  <p style="font-size: 12px; color: #aaa; margin: 0; line-height: 1.7;">
+    暴露引擎内部不可见变量：
+    <br>• GachaState 全量 dump（资源、时间、各计数器）
+    <br>• PityEngine 内部状态（各保底机制的当前概率分布）
+    <br>• StrategyContext 最后一次构建时的内容
+    <br>• 可用池列表 vs 全部池列表对比
+    <br>• StopCondition 当前判定结果
+  </p>
+</div>
+
+</div>
+
+<hr style="margin: 28px 0; border-color: var(--border-color);">
+
+<h3>重新设计的页面结构</h3>
+<p class="subtitle">上半区：抽卡游戏界面（标题+展示区一体） · 下半区：密集调试信息</p>
+
+<div class="mockup" style="max-width: 580px; margin: 0 auto;">
+  <div class="mockup-header">修订后布局 — 可滚动单页</div>
+  <div class="mockup-body" style="padding: 0; background: #0d1117; color: #e0e0e0;">
+
+    <!-- ====== 上半区：抽卡游戏界面 ====== -->
+    <div style="display: flex; min-height: 480px;">
+
+      <!-- 左侧卡池列 -->
+      <div style="width: 85px; background: rgba(0,0,0,0.5); padding: 6px 4px; display: flex; flex-direction: column; gap: 3px;">
+        <div style="background: linear-gradient(135deg, #4a3728, #3a2718); border: 2px solid #c9a96e; border-radius: 5px; padding: 6px 3px; text-align: center; font-size: 9px;">
+          <div style="color: #ffd700; font-weight: bold; font-size: 10px;">耀光之翼</div>
+          <div style="color: #999;">UP角色</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; padding: 6px 3px; text-align: center; font-size: 9px;">
+          <div style="color: #ccc; font-size: 10px;">暗影之刃</div><div style="color: #666;">武器</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 5px; padding: 6px 3px; text-align: center; font-size: 9px;">
+          <div style="color: #ccc; font-size: 10px;">常驻池</div><div style="color: #666;">标准</div>
+        </div>
+      </div>
+
+      <!-- 右侧主区 -->
+      <div style="flex: 1; display: flex; flex-direction: column;">
+
+        <!-- 资源条 -->
+        <div style="display: flex; justify-content: flex-end; gap: 6px; padding: 6px 10px; background: rgba(0,0,0,0.3);">
+          <span style="font-size: 10px;">💎 <b>28,800</b></span>
+          <span style="font-size: 10px;">🎫 <b>12</b></span>
+          <span style="font-size: 10px;">⏱ <b>Day 3</b></span>
+        </div>
+
+        <!-- ====== 标题+展示区 一体（无分隔） ====== -->
+        <div style="flex: 1; display: flex; flex-direction: column; background: linear-gradient(180deg, #0f1a30 0%, #0a0f1e 100%); margin: 0; position: relative;">
+
+          <!-- 标题在展示区内 -->
+          <div style="text-align: center; padding: 12px 10px 4px;">
+            <div style="font-size: 18px; font-weight: bold;">
+              <span style="color: #fff;">耀光之翼</span>
+              <span style="color: #ffd700; font-size: 13px;"> · 限定角色</span>
+            </div>
+            <div style="margin-top: 4px; font-size: 11px; color: #aaa; display: flex; justify-content: center; gap: 14px;">
+              <span>软保底 <b style="color:#4fc3f7;">73/90</b></span>
+              <span>大保底 <b style="color:#ff8a65;">0/1</b></span>
+              <span>概率 <b style="color:#81c784;">33.2%</b></span>
+            </div>
+          </div>
+
+          <!-- 展示区主体 — 与标题无分隔线 -->
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center; margin: 6px 12px 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+            <div style="text-align: center;">
+              <div style="font-size: 48px; opacity: 0.2;">✦</div>
+              <div style="font-size: 12px; color: #555;">中央展示区</div>
+              <div style="font-size: 10px; color: #444;">(抽卡结果 · 卡面展示)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部按钮行 -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(0,0,0,0.5);">
+          <button style="background: rgba(255,255,255,0.08); color: #bbb; border: 1px solid rgba(255,255,255,0.12); padding: 7px 14px; border-radius: 5px; font-size: 12px;">📋 历史</button>
+          <div style="display: flex; gap: 8px;">
+            <button style="background: linear-gradient(180deg, #4a6a9a, #3a5a8a); color: #fff; border: 1px solid #5a8ac0; padding: 8px 18px; border-radius: 5px; font-size: 13px; font-weight: bold;">单抽</button>
+            <button style="background: linear-gradient(180deg, #9a4a3a, #7a2a1a); color: #fff; border: 2px solid #ff8a65; padding: 8px 18px; border-radius: 5px; font-size: 13px; font-weight: bold;">十连</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 分隔 ====== -->
+    <div style="background: #222; padding: 6px; text-align: center; font-size: 10px; color: #666; border-top: 1px solid #333;">
+      ▼ 调试面板 ▼
+    </div>
+
+    <!-- ====== 下半区：密集调试信息 ====== -->
+    <div style="background: #0a0a14; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+
+      <!-- 行1：等待控制 + 状态摘要 -->
+      <div style="display: flex; gap: 8px;">
+        <div style="flex: 1; background: #1a1a2e; border-radius: 6px; padding: 8px;">
+          <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 4px;">⏳ 等待</div>
+          <div style="display: flex; gap: 3px; flex-wrap: wrap;">
+            <button class="mock-button" style="font-size: 9px; padding: 2px 7px;">+1h</button>
+            <button class="mock-button" style="font-size: 9px; padding: 2px 7px;">+1d</button>
+            <button class="mock-button" style="font-size: 9px; padding: 2px 7px;">自定义</button>
+            <button class="mock-button" style="font-size: 9px; padding: 2px 7px; background: #2a4a3a;">下池开放</button>
+            <button class="mock-button" style="font-size: 9px; padding: 2px 7px; background: #4a3a2a;">池关闭前</button>
+          </div>
+        </div>
+        <div style="background: #1a1a2e; border-radius: 6px; padding: 8px; min-width: 130px;">
+          <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 4px;">📡 状态</div>
+          <div style="font-size: 10px; color: #aaa; line-height: 1.5;">
+            步数: <b style="color:#fff;">52</b> · 抽数: <b style="color:#fff;">47</b><br>
+            时间: <b style="color:#fff;">Day 3 12:00</b>
+          </div>
+        </div>
+      </div>
+
+      <!-- 行2：每池快照 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 8px;">
+        <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">🧩 池子状态</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px;">
+          <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 5px;">
+            <div style="color: #ffd700; font-weight: bold; margin-bottom: 2px;">耀光之翼 <span style="color:#888; font-weight:normal;">UP角色</span></div>
+            <div style="color: #aaa;">1-21天 · 已抽 <b>32</b> 次</div>
+            <div style="color: #4fc3f7;">软保底 73/90 · 大保底 0/1</div>
+            <div style="color: #888;">UP: 耀光(A) 暗翼(B)</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 5px;">
+            <div style="color: #aaa; font-weight: bold; margin-bottom: 2px;">暗影之刃 <span style="color:#666; font-weight:normal;">武器</span></div>
+            <div style="color: #aaa;">5-25天 · 已抽 <b>0</b> 次</div>
+            <div style="color: #888;">软保底 0/80 · 未激活</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 5px;">
+            <div style="color: #aaa; font-weight: bold; margin-bottom: 2px;">常驻池 <span style="color:#666; font-weight:normal;">标准</span></div>
+            <div style="color: #aaa;">1-999天 · 已抽 <b>15</b> 次</div>
+            <div style="color: #888;">软保底 15/90</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border-radius: 4px; padding: 5px;">
+            <div style="color: #aaa; font-weight: bold; margin-bottom: 2px;">兑换商店 <span style="color:#666; font-weight:normal;">兑换</span></div>
+            <div style="color: #888;">目标: 耀光(A) 需60凭证</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 行3：操作日志 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <div style="font-size: 11px; font-weight: bold; color: #81d4fa;">📋 操作日志</div>
+          <div style="display: flex; gap: 4px;">
+            <span style="font-size: 9px; color: #888;">筛选:</span>
+            <span style="font-size: 9px; background: #333; padding: 1px 5px; border-radius: 3px; color: #aaa;">全部</span>
+            <span style="font-size: 9px; background: #222; padding: 1px 5px; border-radius: 3px; color: #666;">抽卡</span>
+            <span style="font-size: 9px; background: #222; padding: 1px 5px; border-radius: 3px; color: #666;">等待</span>
+          </div>
+        </div>
+        <div style="font-size: 9px; font-family: monospace; max-height: 160px; overflow-y: auto; background: #0a0a14; border-radius: 4px; padding: 4px;">
+          <div style="color: #666;"># &nbsp; 时间 &nbsp; &nbsp; &nbsp; 操作 &nbsp; 池子 &nbsp; &nbsp; 结果 &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;稀有 &nbsp; 保底 &nbsp; 消耗</div>
+          <div style="color: #ccc;">52 &nbsp; 3d12:00 &nbsp; 抽卡 &nbsp; 耀光之翼 &nbsp; 耀光(A) &nbsp; &nbsp; &nbsp; ⭐⭐⭐⭐⭐ &nbsp; 是 &nbsp; -160</div>
+          <div style="color: #aaa;">51 &nbsp; 3d12:00 &nbsp; 抽卡 &nbsp; 耀光之翼 &nbsp; 暗影碎片 &nbsp; &nbsp; &nbsp; ⭐⭐⭐ &nbsp; &nbsp; &nbsp; -160</div>
+          <div style="color: #888;">50 &nbsp; 3d12:00 &nbsp; 等待 &nbsp; -- &nbsp; &nbsp; &nbsp; &nbsp; -- &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; -- &nbsp; &nbsp; &nbsp; +1200💎</div>
+          <div style="color: #aaa;">49 &nbsp; 2d12:00 &nbsp; 抽卡 &nbsp; 耀光之翼 &nbsp; 普通武器B &nbsp; &nbsp; ⭐⭐⭐ &nbsp; &nbsp; &nbsp; -160</div>
+          <div style="color: #aaa;">48 &nbsp; 2d12:00 &nbsp; 抽卡 &nbsp; 耀光之翼 &nbsp; 暗翼(B) &nbsp; &nbsp; &nbsp; &nbsp; ⭐⭐⭐⭐ &nbsp; &nbsp; -160</div>
+          <div style="color: #777;">...</div>
+        </div>
+      </div>
+
+      <!-- 行4：GDR 全表 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 8px;">
+        <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">📊 广义出率 (GDR) — 17项 · 每次操作后更新</div>
+        <div style="font-size: 9px;">
+          <div style="display: grid; grid-template-columns: 2fr 0.9fr 0.9fr 0.7fr 0.7fr; gap: 1px; background: rgba(255,255,255,0.03); border-radius: 3px; overflow: hidden;">
+            <div style="color: #777; padding: 2px 4px; background: #111;">指标名</div>
+            <div style="color: #777; padding: 2px 4px; background: #111;">当前值</div>
+            <div style="color: #777; padding: 2px 4px; background: #111;">阈值</div>
+            <div style="color: #777; padding: 2px 4px; background: #111; text-align: center;">结果</div>
+            <div style="color: #777; padding: 2px 4px; background: #111; text-align: center;">变化</div>
+
+            <div style="padding: 2px 4px;">目标达成率</div><div>0.750</div><div>1.00</div><div style="color: #ff8a65; text-align: center;">✗</div><div style="color: #81c784; text-align: center;">↑</div>
+            <div style="padding: 2px 4px; background: rgba(255,255,255,0.01);">收集率</div><div style="background: rgba(255,255,255,0.01);">0.600</div><div style="background: rgba(255,255,255,0.01);">1.00</div><div style="background: rgba(255,255,255,0.01); color: #ff8a65; text-align: center;">✗</div><div style="background: rgba(255,255,255,0.01); color: #aaa; text-align: center;">—</div>
+            <div style="padding: 2px 4px;">全部目标</div><div>0.000</div><div>1.00</div><div style="color: #ff8a65; text-align: center;">✗</div><div style="color: #aaa; text-align: center;">—</div>
+            <div style="padding: 2px 4px; background: rgba(255,255,255,0.01);">SSR收集率</div><div style="background: rgba(255,255,255,0.01);">0.200</div><div style="background: rgba(255,255,255,0.01);">0.05</div><div style="background: rgba(255,255,255,0.01); color: #81c784; text-align: center;">✓</div><div style="background: rgba(255,255,255,0.01); color: #81c784; text-align: center;">↑+0.1</div>
+            <div style="padding: 2px 4px;">资源剩余</div><div>14400</div><div>0.0</div><div style="color: #81c784; text-align: center;">✓</div><div style="color: #ff8a65; text-align: center;">↓-160</div>
+            <div style="padding: 2px 4px; background: rgba(255,255,255,0.01);">资源消耗</div><div style="background: rgba(255,255,255,0.01);">7520</div><div style="background: rgba(255,255,255,0.01);">0.0</div><div style="background: rgba(255,255,255,0.01); color: #ff8a65; text-align: center;">✗</div><div style="background: rgba(255,255,255,0.01); color: #ff8a65; text-align: center;">↑+160</div>
+            <div style="padding: 2px 4px; color: #555;">… +11项</div><div></div><div></div><div></div><div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 行5：引擎内部状态 -->
+      <div style="background: #1a1a2e; border-radius: 6px; padding: 8px;">
+        <div style="font-size: 11px; font-weight: bold; color: #81d4fa; margin-bottom: 6px;">⚙️ 引擎内部状态 (GachaState)</div>
+        <div style="display: flex; gap: 12px; font-size: 10px; color: #aaa; font-family: monospace;">
+          <div>
+            <span style="color: #888;">resources:</span> {draw_resource: 14400, starlight: 45}<br>
+            <span style="color: #888;">pity_counters:</span> {soft_耀光: 73, hard_耀光: 73}<br>
+            <span style="color: #888;">real_time:</span> 259200.0
+          </div>
+          <div>
+            <span style="color: #888;">total_actions:</span> 52<br>
+            <span style="color: #888;">stop_condition:</span> all_pools_end → False<br>
+            <span style="color: #888;">available_pools:</span> 3/4 (常驻/耀光/暗影)
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<hr style="margin: 28px 0; border-color: var(--border-color);">
+
+<h3>调试信息分区总结</h3>
+
+<div style="max-width: 640px; margin: 0 auto; font-size: 12px;">
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+
+    <div style="background: #1a1a2e; border-radius: 6px; padding: 10px;">
+      <div style="color: #81d4fa; font-weight: bold; margin-bottom: 4px;">🧩 池子状态</div>
+      <div style="color: #888; line-height: 1.6;">
+        每池一张卡片<br>
+        时间范围 · 已抽次数<br>
+        保底水位 · UP 列表<br>
+        逐池 GDR 值
+      </div>
+    </div>
+
+    <div style="background: #1a1a2e; border-radius: 6px; padding: 10px;">
+      <div style="color: #81d4fa; font-weight: bold; margin-bottom: 4px;">📋 操作日志</div>
+      <div style="color: #888; line-height: 1.6;">
+        每一步的完整记录<br>
+        时间 · 操作 · 池子 · 结果<br>
+        稀有度 · 保底 · 消耗<br>
+        支持筛选 + 滚动
+      </div>
+    </div>
+
+    <div style="background: #1a1a2e; border-radius: 6px; padding: 10px;">
+      <div style="color: #81d4fa; font-weight: bold; margin-bottom: 4px;">📊 GDR 全表 (17项)</div>
+      <div style="color: #888; line-height: 1.6;">
+        全部 GDR 当前值<br>
+        阈值对比 + 成功/失败<br>
+        与上一步的变化箭头
+      </div>
+    </div>
+
+    <div style="background: #1a1a2e; border-radius: 6px; padding: 10px;">
+      <div style="color: #81d4fa; font-weight: bold; margin-bottom: 4px;">⚙️ 引擎内部状态</div>
+      <div style="color: #888; line-height: 1.6;">
+        GachaState dump<br>
+        保底计数器原始值<br>
+        可用池 vs 全部池<br>
+        策略上下文
+      </div>
+    </div>
+
+  </div>
+</div>

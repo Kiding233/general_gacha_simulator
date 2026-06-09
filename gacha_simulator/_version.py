@@ -1,8 +1,9 @@
-__version__ = "1.9.0"
+__version__ = "2.0.0"
 
-VERSION_DISPLAY = "v1.9.0"
+VERSION_DISPLAY = "v2.0.0"
 
 VERSION_HISTORY = [
+    ("2.0.0", "2026-06-09", "PROUD — 预发布版里程碑：面板合并（3→1 方案搜索）+ 数据管理层（ResultStore + 数据管理Tab）+ 比较分析面板（L1-L4 递进分析）+ 应用打包（PyInstaller onedir，608MB）+ 统一分箱模块（GDR直方图自动检测）+ 脆弱性分析独立Tab + 文档体系重构（六文件+主题计划模式）"),
     ("1.0.0", "2026-05-07", "PROUD — 初始版本发布：核心模拟引擎、GUI、配置系统"),
     ("1.1.0", "2026-05-08", "DEFAULT — 分析面板、风险分析、经验分布"),
     ("1.1.1", "2026-05-09", "SHAME — 修复 ssr_ids 包含 SR 卡 ID 导致保底误判"),
@@ -24,4 +25,11 @@ VERSION_HISTORY = [
     ("1.7.0", "2026-05-17", "DEFAULT — 流式模拟架构重构：SharedResultCollector 边模拟边提取边丢弃，内存与 N 无关；逐抽真实资源替代线性插值/均摊近似；修复 total_gained 丢失卡片奖励、gdr_dists key 映射、空数据守卫等 9 项 bug；删除死代码 _compact_to_iv_list"),
     ("1.8.0", "2026-05-17", "DEFAULT — 过程分析功能：infer_events 轨迹推断（5种事件类型）、compute_aa/bb/ab/ba 四种交叉统计分析、4种事件模式+3种成败模式、ProcessAnalysisPanel UI 面板（4个Tab）、compact 新增 draw_pity_names/draw_pity_counter_max"),
     ("1.9.0", "2026-05-20", "DEFAULT — 策略代码5阶段重构：CompactResult dataclass 替代裸 dict、SimulationCollector 统一两种模拟模式、StrategyContext + STRATEGY_REGISTRY 统一6种策略、STOP_CONDITION_REGISTRY 统一6种停止条件、策略比较面板、保底概率缓存优化、compact 元数据（策略名/版本号/时间戳）、ssr_ids 消除脆弱匹配"),
+    ("1.9.1", "2026-05-23", "DEFAULT — 流式分析内存优化：DrawSequenceExtractor 热力图数据从逐值列表改为预分箱直方图，10万次模拟 heatmap 内存从 ~1.92 GB 降至 ~128 KB"),
+    ("1.9.2", "2026-05-24", "DEFAULT — 理论架构重构：基于理论参考.svg 重写 implementation_plan 为四层模型（假设→机制→策略→GDR→决策）+ 10类93条条目清单"),
+    ("1.9.3", "2026-05-25", "DEFAULT — 最差影响分析修复（Smart→DrawTarget + 并行化 + 去硬编码）+ Worker 全局变量消除（11→2 全局变量，单进程路径零污染）+ P12-Phase1 算法优化（预构建不可变数据，10-15% 加速）+ 脆弱性分析向量化（statsmodels→numpy 闭式解，~335x 加速）"),
+    ("1.9.4", "2026-05-26", "SHAME — 小型修复×6：resource_per_card inf→nan、CVaR 分数权重修正、空分布返回 nan、DropRateBetweenT1T2 判定修正、线程安全声明、热图尾部警告"),
+    ("1.9.5", "2026-05-26", "DEFAULT — 保底系统关键缺陷修复（查询/修改分离 + 概率归一化）+ 最差影响保底匹配修复（虚拟池 fnmatch 回退）+ 过程分析续（skip/ignore 精准判定 + 资源池事件 + Laplace 平滑）+ 脆弱性理论改进（r_grid 扩展 + 局部 logistic 回归）"),
+    ("1.9.6", "2026-05-26", "DEFAULT — Bootstrap 稳定性分析引擎（BootstrapEngine + BCa + GPD + Hill 估计器）+ GDR 扩展（+4 新指标 + lower_is_better 支持）+ P12-Phase1.5 GUI 性能优化（Extractor 移入 Worker + 单次遍历 + 轻量传输，1000 样本 10-15s → 2-3s）"),
+    ("1.10.0", "2026-05-26", "DEFAULT — 文档体系重构：计划汇总整合（24 项已完成登记）、优先级路线图、Bootstrap 计划合并、小样本概率估计改进计划独立、Laplace 平滑→Wilson 得分区间方案、4 项计划归档；版本号里程碑——1.9.x 系列 6 个补丁版本合并发布"),
 ]

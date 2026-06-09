@@ -22,9 +22,12 @@ class SampleTrace:
 
 
 def infer_events(compact: Dict, target_ids: Set[str],
-                 pool_types: Optional[Dict[str, str]] = None) -> Dict[str, PoolEvent]:
+                 pool_types: Optional[Dict[str, str]] = None,
+                 pool_target_map: Optional[Dict[str, Set[str]]] = None) -> Dict[str, PoolEvent]:
     if pool_types is None:
         pool_types = {}
+    if pool_target_map is None:
+        pool_target_map = {}
     pool_ids_list = compact.get('draw_pool_ids', [])
     card_ids = compact.get('draw_card_ids', [])
     pity_flags = compact.get('draw_pity', [])
@@ -40,22 +43,37 @@ def infer_events(compact: Dict, target_ids: Set[str],
         return _infer_from_draw_sequence(
             pool_ids_list, card_ids, pity_flags, pity_names,
             pity_counter_max, pool_card_counts, pool_draw_counts, target_ids,
-            pool_types=pool_types,
+            pool_types=pool_types, pool_target_map=pool_target_map,
         )
     else:
         return _infer_from_aggregate(
             pool_draw_counts, pool_card_counts, pool_pity_counts, target_ids,
             pool_counter_max, pool_types=pool_types,
-            pool_pity_names=pool_pity_names,
+            pool_pity_names=pool_pity_names, pool_target_map=pool_target_map,
         )
+
+
+def _resolve_skip_ignore(pool_id, pool_card_counts, target_ids, pool_target_map):
+    """判定 0 抽池应为 skip（有目标但未抽）还是 ignore（无目标可抽）。
+
+    优先使用 pool_target_map（池→可掉落目标卡映射）精确判定；
+    未提供时回退旧启发式（基于已获得卡 + target_ids 非空）。
+    """
+    if pool_target_map:
+        has_target = bool(pool_target_map.get(pool_id, set()))
+        return 'skip' if has_target else 'ignore'
+    has_target_in_pool = any(cid in target_ids for cid in pool_card_counts.get(pool_id, {}))
+    return 'skip' if (has_target_in_pool or target_ids) else 'ignore'
 
 
 def _infer_from_draw_sequence(pool_ids_list, card_ids, pity_flags, pity_names,
                                pity_counter_max, pool_card_counts,
                                pool_draw_counts, target_ids,
-                               pool_types=None):
+                               pool_types=None, pool_target_map=None):
     if pool_types is None:
         pool_types = {}
+    if pool_target_map is None:
+        pool_target_map = {}
     pool_data = {}
     for pool_id in set(pool_ids_list):
         pool_data[pool_id] = {
@@ -85,6 +103,11 @@ def _infer_from_draw_sequence(pool_ids_list, card_ids, pity_flags, pity_names,
         pool_type = pool_types.get(pool_id, '角色')
 
         if pool_type == '资源':
+            result[pool_id] = PoolEvent(
+                pool_id=pool_id,
+                pool_type='resource',
+                event_type='resource_draw' if pdc > 0 else 'resource_ignore',
+            )
             continue
 
         if pool_type == '兑换':
@@ -96,8 +119,7 @@ def _infer_from_draw_sequence(pool_ids_list, card_ids, pity_flags, pity_names,
             continue
 
         if pdc == 0:
-            has_target_in_pool = any(cid in target_ids for cid in pool_card_counts.get(pool_id, {}))
-            event_type = 'skip' if (has_target_in_pool or target_ids) else 'ignore'
+            event_type = _resolve_skip_ignore(pool_id, pool_card_counts, target_ids, pool_target_map)
         elif pd['target_count'] > 0 and pd['pity_count'] > 0:
             pity_name_str = ','.join(sorted(pd['pity_names'])) if pd['pity_names'] else None
             event_type = 'pity_hit'
@@ -126,6 +148,12 @@ def _infer_from_draw_sequence(pool_ids_list, card_ids, pity_flags, pity_names,
     for pool_id in set(pool_draw_counts.keys()) - set(pool_ids_list):
         pool_type = pool_types.get(pool_id, '角色')
         if pool_type == '资源':
+            pdc = pool_draw_counts.get(pool_id, 0)
+            result[pool_id] = PoolEvent(
+                pool_id=pool_id,
+                pool_type='resource',
+                event_type='resource_draw' if pdc > 0 else 'resource_ignore',
+            )
             continue
         if pool_type == '兑换':
             pdc = pool_draw_counts.get(pool_id, 0)
@@ -135,24 +163,26 @@ def _infer_from_draw_sequence(pool_ids_list, card_ids, pity_flags, pity_names,
                 event_type='exchange' if pdc > 0 else 'no_exchange',
             )
             continue
-        has_target_in_pool = any(cid in target_ids for cid in pool_card_counts.get(pool_id, {}))
         result[pool_id] = PoolEvent(
             pool_id=pool_id,
             pool_type='draw',
-            event_type='skip' if (has_target_in_pool or target_ids) else 'ignore',
+            event_type=_resolve_skip_ignore(pool_id, pool_card_counts, target_ids, pool_target_map),
         )
 
     return result
 
 
 def _infer_from_aggregate(pool_draw_counts, pool_card_counts, pool_pity_counts, target_ids,
-                          pool_counter_max=None, pool_types=None, pool_pity_names=None):
+                          pool_counter_max=None, pool_types=None, pool_pity_names=None,
+                          pool_target_map=None):
     if pool_counter_max is None:
         pool_counter_max = {}
     if pool_types is None:
         pool_types = {}
     if pool_pity_names is None:
         pool_pity_names = {}
+    if pool_target_map is None:
+        pool_target_map = {}
     result = {}
     all_pool_ids = set(pool_draw_counts.keys())
 
@@ -164,6 +194,11 @@ def _infer_from_aggregate(pool_draw_counts, pool_card_counts, pool_pity_counts, 
         pool_type = pool_types.get(pool_id, '角色')
 
         if pool_type == '资源':
+            result[pool_id] = PoolEvent(
+                pool_id=pool_id,
+                pool_type='resource',
+                event_type='resource_draw' if pdc > 0 else 'resource_ignore',
+            )
             continue
 
         if pool_type == '兑换':
@@ -175,8 +210,7 @@ def _infer_from_aggregate(pool_draw_counts, pool_card_counts, pool_pity_counts, 
             continue
 
         if pdc == 0:
-            has_target_in_pool = any(cid in target_ids for cid in pcc)
-            event_type = 'skip' if (has_target_in_pool or target_ids) else 'ignore'
+            event_type = _resolve_skip_ignore(pool_id, pool_card_counts, target_ids, pool_target_map)
             pity_name = None
         else:
             target_in_pool = sum(cnt for cid, cnt in pcc.items() if cid in target_ids)

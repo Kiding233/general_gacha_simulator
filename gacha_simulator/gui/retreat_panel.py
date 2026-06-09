@@ -11,9 +11,11 @@ import traceback
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
-    QSpinBox, QComboBox, QTabWidget, QScrollArea, QSplitter,
+    QSpinBox, QComboBox, QSplitter,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+
+from .chart_webview import ChartWebView
 
 _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
@@ -43,6 +45,8 @@ class RetreatWorker(QThread):
         card_value_weights=None,
         no_draw_resource=None,
         no_draw_pool_resources=None,
+        cost_per_draw=None,
+        use_draw_units=False,
     ):
         super().__init__()
         self.simulation_results = simulation_results
@@ -58,6 +62,8 @@ class RetreatWorker(QThread):
         self.card_value_weights = card_value_weights
         self.no_draw_resource = no_draw_resource
         self.no_draw_pool_resources = no_draw_pool_resources or {}
+        self.cost_per_draw = cost_per_draw
+        self.use_draw_units = use_draw_units
 
     def run(self):
         try:
@@ -75,24 +81,28 @@ class RetreatWorker(QThread):
                 desire_weights=self.desire_weights,
                 miss_cost_weights=self.miss_cost_weights,
                 card_value_weights=self.card_value_weights,
+                cost_per_draw=self.cost_per_draw,
+                use_draw_units=self.use_draw_units,
             )
 
             self.progress.emit("正在生成图表...", 60)
             from gacha_simulator.core.vulnerability import plot_vulnerability, plot_vulnerability_ridge
+            import numpy as np
 
-            ridge_path = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
+            ridge_fig = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
 
-            charts = {}
+            global_edges = np.array(analysis.global_bin_edges) if analysis.global_bin_edges else None
+            pool_specs = {}
             for pr in analysis.pool_results:
                 pname = self.pool_names.get(pr.pool_id, pr.pool_id)
-                fig_path = plot_vulnerability(pr, self.alpha, pool_name=pname)
-                charts[pr.pool_id] = fig_path
+                spec = plot_vulnerability(pr, self.alpha, pool_name=pname, global_bin_edges=global_edges)
+                pool_specs[pr.pool_id] = spec
 
             self.progress.emit("分析完成", 100)
             self.finished.emit({
                 'analysis': analysis,
-                'charts': charts,
-                'ridge_chart': ridge_path,
+                'pool_specs': pool_specs,
+                'ridge_fig': ridge_fig,
                 'pool_names': self.pool_names,
             })
         except Exception as e:
@@ -134,7 +144,7 @@ class RetreatPanel(QWidget):
         config_form.addRow("GDR指标:", self.gdr_combo)
 
         self.gdr_threshold_spin = QDoubleSpinBox()
-        self.gdr_threshold_spin.setRange(0.0, 1.0)
+        self.gdr_threshold_spin.setRange(-9999999.0, 9999999.0)
         self.gdr_threshold_spin.setSingleStep(0.05)
         self.gdr_threshold_spin.setValue(1.0)
         self.gdr_threshold_spin.setDecimals(2)
@@ -180,8 +190,8 @@ class RetreatPanel(QWidget):
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(4, 4, 4, 4)
 
-        self.result_tabs = QTabWidget()
-        right_layout.addWidget(self.result_tabs)
+        self.chart_webview = ChartWebView()
+        right_layout.addWidget(self.chart_webview)
 
         splitter.addWidget(left)
         splitter.addWidget(right)
@@ -223,6 +233,22 @@ class RetreatPanel(QWidget):
                 pool_names[pe.pool_id] = getattr(pe, 'name', pe.pool_id)
         return pool_names
 
+    def _extract_cost_per_draw(self):
+        """从配置中提取单抽成本，默认 160。"""
+        if self._store is None or not self._store.pools:
+            return 160
+        for pe in self._store.pools:
+            cost_str = getattr(pe, 'cost', '')
+            if not cost_str:
+                continue
+            try:
+                parts = cost_str.split(':')
+                if len(parts) == 2:
+                    return int(float(parts[1]))
+            except (ValueError, IndexError):
+                continue
+        return 160
+
     def _run_analysis(self):
         if not self._simulation_results:
             self.status_label.setText("请先运行批量模拟")
@@ -239,6 +265,7 @@ class RetreatPanel(QWidget):
         num_bins = self.num_bins_spin.value()
         num_curve = self.num_curve_spin.value()
         pool_names = self._get_pool_names()
+        cost_per_draw = self._extract_cost_per_draw()
 
         desire_weights = None
         miss_cost_weights = None
@@ -262,6 +289,7 @@ class RetreatPanel(QWidget):
             card_value_weights=card_value_weights,
             no_draw_resource=getattr(self, '_no_draw_resource', None),
             no_draw_pool_resources=getattr(self, '_no_draw_pool_resources', {}),
+            cost_per_draw=cost_per_draw,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
@@ -280,12 +308,10 @@ class RetreatPanel(QWidget):
         self.run_btn.setEnabled(True)
 
         self._results = result
-        analysis = result['analysis']
-        charts = result['charts']
-        ridge_chart = result.get('ridge_chart')
-        pool_names = result['pool_names']
-
-        self.result_tabs.clear()
+        analysis = result["analysis"]
+        pool_specs = result["pool_specs"]
+        ridge_fig = result.get("ridge_fig")
+        pool_names = result["pool_names"]
 
         summary = (
             f"总体失败率: {analysis.overall_failure_rate:.1%}  |  "
@@ -294,72 +320,22 @@ class RetreatPanel(QWidget):
         )
         self.status_label.setText(summary)
 
-        if ridge_chart:
-            from PyQt6.QtGui import QPixmap
-            ridge_scroll = QScrollArea()
-            ridge_scroll.verticalScrollBar().setSingleStep(15)
-            ridge_scroll.setWidgetResizable(True)
-            ridge_content = QWidget()
-            ridge_layout = QVBoxLayout(ridge_content)
-            ridge_label = QLabel()
-            pixmap = QPixmap(ridge_chart)
-            if not pixmap.isNull():
-                scaled = pixmap.scaledToWidth(
-                    900, Qt.TransformationMode.SmoothTransformation
-                )
-                ridge_label.setPixmap(scaled)
-            ridge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            ridge_layout.addWidget(ridge_label)
-            ridge_layout.addStretch()
-            ridge_scroll.setWidget(ridge_content)
-            self.result_tabs.addTab(ridge_scroll, "总览")
+        charts: dict[str, object] = {}
+        if ridge_fig is not None:
+            charts["总览"] = ridge_fig
 
         for pr in analysis.pool_results:
             pname = pool_names.get(pr.pool_id, pr.pool_id)
-            scroll = QScrollArea()
-            scroll.verticalScrollBar().setSingleStep(15)
-            scroll.setWidgetResizable(True)
-            tab_content = QWidget()
-            tab_layout = QVBoxLayout(tab_content)
+            spec_data = pool_specs.get(pr.pool_id, {})
 
-            info_text = (
-                f"到达此池的模拟数: {pr.n_total}  |  "
-                f"失败数: {pr.n_failed}  |  "
-                f"失败率: {pr.failure_rate:.1%}\n"
-                f"总体资源剩余均值: {pr.resource_mean_all:.0f}  |  "
-                f"失败资源剩余均值: {pr.resource_mean_failed:.0f}"
-            )
-            if pr.vulnerability_intervals:
-                vi_texts = []
-                for vi in pr.vulnerability_intervals:
-                    vi_texts.append(
-                        f"  区间 [{vi.lower:.0f}, {vi.upper:.0f}]: "
-                        f"均值={vi.mean:.0f}, 最高比例={vi.max_ratio:.1%}"
-                    )
-                info_text += "\n脆弱区间:\n" + "\n".join(vi_texts)
-            else:
-                info_text += "\n无脆弱区间（条件失败概率均 ≤ α）"
+            combined_fig = spec_data.get("combined_figure") if isinstance(spec_data, dict) else None
+            if combined_fig is not None:
+                charts[pname] = combined_fig
 
-            info_label = QLabel(info_text)
-            info_label.setWordWrap(True)
-            tab_layout.addWidget(info_label)
-
-            if pr.pool_id in charts:
-                from PyQt6.QtGui import QPixmap
-                fig_path = charts[pr.pool_id]
-                label = QLabel()
-                pixmap = QPixmap(fig_path)
-                if not pixmap.isNull():
-                    scaled = pixmap.scaledToWidth(
-                        900, Qt.TransformationMode.SmoothTransformation
-                    )
-                    label.setPixmap(scaled)
-                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                tab_layout.addWidget(label)
-
-            tab_layout.addStretch()
-            scroll.setWidget(tab_content)
-            self.result_tabs.addTab(scroll, pname)
+        if charts:
+            self.chart_webview.set_charts(charts)
+        else:
+            self.chart_webview.show_message("无数据可绘制")
 
         self.vulnerability_finished.emit(analysis)
 

@@ -1,9 +1,34 @@
 import functools
 import itertools
+import math
+import statistics
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
 from .process_trace import SampleTrace, PoolEvent
+
+
+def _z_from_conf_level(conf_level: float) -> float:
+    """从置信水平计算 z 值（标准正态分位数）。"""
+    alpha = 1.0 - conf_level
+    return statistics.NormalDist().inv_cdf(1.0 - alpha / 2.0)
+
+
+def wilson_ci(successes: int, total: int, conf_level: float = 0.95) -> Tuple[float, float]:
+    """Wilson 得分区间 (Brown, Cai & DasGupta 2001)。
+
+    在极端概率和小样本下覆盖率远优于 Wald 区间。N=0 时返回 [0, 1]。
+    """
+    if total == 0:
+        return 0.0, 1.0
+    z = _z_from_conf_level(conf_level)
+    p = successes / total
+    n = total
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    margin = z * math.sqrt((p * (1.0 - p) + z2 / (4.0 * n)) / n) / denom
+    return max(0.0, center - margin), min(1.0, center + margin)
 
 
 def _resolve_event_type(ev: PoolEvent) -> str:
@@ -29,6 +54,8 @@ EVENT_TYPE_LABELS = {
     'ignore': '忽略',
     'exchange': '兑换',
     'no_exchange': '未兑换',
+    'resource_draw': '资源抽取',
+    'resource_ignore': '资源跳过',
 }
 
 
@@ -355,7 +382,8 @@ def compute_ab(traces: List[SampleTrace],
                success_mode: str = 'count',
                constraints: Optional[Dict] = None,
                success_n: Optional[int] = None,
-               success_op: Optional[str] = None) -> List[Dict]:
+               success_op: Optional[str] = None,
+               conf_level: float = 0.95) -> List[Dict]:
     base_event_func = EVENT_MODE_MAP.get(event_mode, to_event_type_sequence)
     if event_mode == 'custom' and constraints:
         event_func = functools.partial(base_event_func, constraints=constraints)
@@ -390,13 +418,17 @@ def compute_ab(traces: List[SampleTrace],
             if _hashable(event_func(t.events)) == event_key and t.is_success
         )
 
+        wi_lo, wi_hi = wilson_ci(overall_success, total_in_pattern, conf_level)
         results.append({
             'event_pattern': _unhashable(event_key),
             'success_distribution': {str(_unhashable(k)): v / total_in_pattern for k, v in success_dist.items()},
             'overall_success_prob': overall_success / total_in_pattern,
+            'wilson_ci_lower': wi_lo,
+            'wilson_ci_upper': wi_hi,
             'count': total_in_pattern,
             'success_count': overall_success,
             'failure_count': total_in_pattern - overall_success,
+            'low_sample': total_in_pattern < 5,
         })
 
     return results
@@ -406,7 +438,8 @@ def compute_ba(traces: List[SampleTrace],
                event_mode: str = 'sequence',
                success_mode: str = 'count',
                constraints: Optional[Dict] = None,
-               success_op: Optional[str] = None) -> List[Dict]:
+               success_op: Optional[str] = None,
+               conf_level: float = 0.95) -> List[Dict]:
     base_event_func = EVENT_MODE_MAP.get(event_mode, to_event_type_sequence)
     if event_mode == 'custom' and constraints:
         event_func = functools.partial(base_event_func, constraints=constraints)
@@ -431,17 +464,26 @@ def compute_ba(traces: List[SampleTrace],
     for pattern_key in sorted(all_patterns, key=lambda k: -(success_counts.get(k, 0) + failure_counts.get(k, 0))):
         sc = success_counts.get(pattern_key, 0)
         fc = failure_counts.get(pattern_key, 0)
+        total_pattern = sc + fc
 
         p_given_success = sc / total_success if total_success > 0 else 0
         p_given_failure = fc / total_failure if total_failure > 0 else 0
-        ratio = p_given_success / p_given_failure if p_given_failure > 0 else float('inf')
+        ratio = p_given_success / p_given_failure if p_given_failure > 0 else None
+
+        p_s_lo, p_s_hi = wilson_ci(sc, total_success, conf_level) if total_success > 0 else (0.0, 1.0)
+        p_f_lo, p_f_hi = wilson_ci(fc, total_failure, conf_level) if total_failure > 0 else (0.0, 1.0)
 
         results.append({
             'event_pattern': _unhashable(pattern_key),
             'p_given_success': p_given_success,
             'p_given_failure': p_given_failure,
             'ratio': ratio,
-            'count': sc + fc,
+            'p_given_success_wilson_lower': p_s_lo,
+            'p_given_success_wilson_upper': p_s_hi,
+            'p_given_failure_wilson_lower': p_f_lo,
+            'p_given_failure_wilson_upper': p_f_hi,
+            'count': total_pattern,
+            'low_sample': total_pattern < 5,
         })
 
     return results

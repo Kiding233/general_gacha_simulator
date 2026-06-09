@@ -1,0 +1,219 @@
+<h2>方案搜索面板 v5 — 精简注解 + 全局自审</h2>
+<p class="subtitle">修正：二分参数标签去冗余注解。自审：权重/参数边界清晰，字段标签统一。</p>
+
+<div class="mockup">
+  <div class="mockup-header">PlanSearchPanel — 模式: 最多目标卡 · 前进法 · 起始: 从头开始</div>
+  <div class="mockup-body" style="display: flex; gap: 14px; font-size: 13px; background: #f0f0f0; padding: 12px; border-radius: 4px;">
+
+    <!-- ========== 左栏 ========== -->
+    <div style="width: 360px; min-width: 360px; border: 1px solid #ccc; border-radius: 6px; padding: 12px; background: #fff;">
+
+      <!-- 搜索模式 -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">搜索模式</legend>
+        <div style="display: flex; gap: 6px;">
+          <span style="padding: 5px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 最少资源</span>
+          <span style="padding: 5px 14px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 最多目标卡</span>
+          <span style="padding: 5px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ Pareto前沿</span>
+        </div>
+      </fieldset>
+
+      <!-- 起始状态 -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">起始状态</legend>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 12px; color: #555;">起始池:</span>
+          <span style="border: 1px solid #ccc; background: #fff; padding: 4px 16px; border-radius: 3px; font-size: 12px;">(从头开始) ▼</span>
+          <span style="color: #aaa; font-size: 11px;">选择池子后可编辑初始资源与保底计数</span>
+        </div>
+        <div style="border: 1px dashed #ddd; border-radius: 4px; padding: 8px; background: #fafafa; margin-top: 6px;">
+          <div style="color: #aaa; font-size: 11px; text-align: center;">使用配置页默认初始资源与保底初值</div>
+        </div>
+      </fieldset>
+
+      <!-- 权重表 -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 10px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">目标卡权重配置</legend>
+        <div style="color: #888; font-size: 10px; margin-bottom: 8px;">前进法按「抽取意愿」降序添加 · 后退法按「错失代价」升序移除</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+            <th style="text-align: left; padding: 4px 8px; color: #555;">卡ID</th>
+            <th style="text-align: center; padding: 4px 8px; width: 80px;">抽取意愿</th>
+            <th style="text-align: center; padding: 4px 8px; width: 80px;">错失代价</th>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_a</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">2.5</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.2</span></td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f0f0f0;">
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_b</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.0</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">0.3</span></td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 8px; background: #f0f0f0;">card_c</td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">0.8</span></td>
+            <td style="text-align: center;"><span style="border: 1px solid #ccc; padding: 2px 12px; border-radius: 3px; background: #fff;">1.8</span></td>
+          </tr>
+        </table>
+        <div style="margin-top: 10px; display: flex; gap: 8px; align-items: center;">
+          <span style="color: #555; font-size: 12px;">搜索方向:</span>
+          <span style="padding: 4px 14px; border: 2px solid #1976d2; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-size: 12px; font-weight: bold;">● 前进法</span>
+          <span style="padding: 4px 14px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #555; font-size: 12px;">○ 后退法</span>
+        </div>
+      </fieldset>
+
+      <!-- 搜索参数 -->
+      <fieldset style="border: 1px solid #c0c0c0; border-radius: 4px; padding: 10px 14px; margin-bottom: 12px;">
+        <legend style="font-weight: bold; font-size: 13px; color: #333; padding: 0 4px;">搜索参数</legend>
+
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12px; color: #555;">
+          <span>当前策略:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #f5f5f5; color: #555;">Smart</span>
+
+          <span>GDR指标:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">all_targets ▼</span>
+
+          <span>GDR阈值:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">1.0</span>
+
+          <span>成功率阈值:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">0.95</span>
+
+          <span>模拟次数:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">1000</span>
+
+          <span>并行进程:</span>
+          <span style="border: 1px solid #ccc; padding: 3px 8px; border-radius: 3px; background: #fff;">4</span>
+        </div>
+
+        <!-- 二分参数：最少资源 & Pareto 时展开 -->
+        <div style="border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">
+          <div style="font-size: 11px; color: #888; margin-bottom: 6px;">二分搜索参数</div>
+          <div style="display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 11px;">
+            <span>起始上界:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">55000</span>
+            <span>起始下界:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">0</span>
+            <span>精度(抽):</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">1</span>
+            <span>最大迭代:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">30</span>
+            <span>单抽成本:</span><span style="border: 1px solid #ccc; padding: 1px 6px; border-radius: 2px; background: #fff;">160</span>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 按钮 -->
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="background: #4CAF50; color: white; font-weight: bold; padding: 8px 28px; border-radius: 4px; font-size: 13px;">▶ 开始搜索</span>
+        <span style="background: #f44336; color: white; padding: 8px 16px; border-radius: 4px; font-size: 13px;">⏹ 取消</span>
+        <span style="margin-left: auto; font-size: 11px; color: #888;">状态: 空闲</span>
+      </div>
+    </div>
+
+    <!-- ========== 右栏：结果 ========== -->
+    <div style="flex: 1; border: 1px solid #ccc; border-radius: 6px; background: #fff; display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid #e0e0e0; background: #fafafa; border-radius: 6px 6px 0 0;">
+        <span style="font-size: 11px; color: #888;">📋 结果快照:</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px;">&lt;</span>
+        <span style="border: 1px solid #1976d2; background: #fff; padding: 4px 16px; border-radius: 3px; font-size: 12px;">最多目标卡·前进 @17:48 ▼</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px;">&gt;</span>
+        <span style="border: 1px solid #ccc; padding: 2px 8px; border-radius: 3px; font-size: 11px; color: #f44336;">×</span>
+        <span style="font-size: 10px; color: #999; margin-left: auto;">3个快照</span>
+      </div>
+      <div style="padding: 10px 16px; border-bottom: 1px solid #eee; background: #f9fbfd; font-size: 13px;">
+        <span style="color: #555;">方法: <b>前进法</b></span>
+        <span style="margin: 0 12px; color: #ddd;">|</span>
+        <span style="color: #555;">最终目标集: <b style="color: #1976d2;">card_a, card_b, card_c</b></span>
+        <span style="margin: 0 12px; color: #ddd;">|</span>
+        <span style="color: #555;">成功率: <b style="color: #4CAF50;">96.1%</b></span>
+      </div>
+      <div style="flex: 1; padding: 14px 16px; border-bottom: 1px solid #eee; min-height: 160px;">
+        <fieldset style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px; height: 100%;">
+          <legend style="font-size: 12px; color: #555; font-weight: bold; padding: 0 4px;">成功率阶梯图（前进法）</legend>
+          <pre style="font-size: 11px; color: #1976d2; line-height: 1.8; margin: 0;">
+    P ↑
+1.00 ┤     ●──●
+0.96 ┤   ●╱
+0.92 ┤  ●╱
+0.88 ┤ ╱
+     └─────────→ 目标卡数
+     0  1  2  3  4
+   ─ ─ 阈值 95%</pre>
+        </fieldset>
+      </div>
+      <div style="padding: 12px 16px;">
+        <fieldset style="border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px;">
+          <legend style="font-size: 12px; color: #555; font-weight: bold; padding: 0 4px;">步骤详情</legend>
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+              <th style="text-align: left; padding: 5px 10px;">步骤</th><th style="text-align: left; padding: 5px 10px;">操作</th>
+              <th style="text-align: left; padding: 5px 10px;">卡ID</th><th style="text-align: center; padding: 5px 10px;">目标集</th>
+              <th style="text-align: right; padding: 5px 10px;">成功率</th>
+            </tr>
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td>1</td><td style="color: #4CAF50;">+ 添加</td><td>card_a</td><td style="text-align: center;">1</td><td style="text-align: right;">99.8%</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td>2</td><td style="color: #4CAF50;">+ 添加</td><td>card_b</td><td style="text-align: center;">2</td><td style="text-align: right;">98.5%</td>
+            </tr>
+            <tr style="background: #e8f5e9;">
+              <td>3</td><td style="color: #4CAF50;">+ 添加</td><td>card_c</td><td style="text-align: center;">3</td><td style="text-align: right; font-weight: bold;">96.1% ← 最后有效</td>
+            </tr>
+            <tr>
+              <td>4</td><td style="color: #f44336;">+ 添加</td><td>card_d</td><td style="text-align: center;">4</td><td style="text-align: right; color: #f44336;">89.2% ✗ 回退</td>
+            </tr>
+          </table>
+        </fieldset>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 自审清单 ===== -->
+<h3 style="margin-top: 24px;">设计自审 — 剩余问题确认</h3>
+
+<div class="section">
+  <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+    <tr style="background: #f0f0f0; border-bottom: 2px solid #d0d0d0;">
+      <th style="text-align: left; padding: 6px 12px; width: 30px;">#</th>
+      <th style="text-align: left; padding: 6px 12px;">问题</th>
+      <th style="text-align: left; padding: 6px 12px;">当前设计</th>
+      <th style="text-align: center; padding: 6px 12px; width: 60px;">状态</th>
+    </tr>
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 6px 12px;">1</td>
+      <td style="padding: 6px 12px;">二分参数注解冗余</td>
+      <td style="padding: 6px 12px;">已去掉「最少资源 &amp; Pareto 共用」，仅保留「二分搜索参数」</td>
+      <td style="text-align: center; color: #4CAF50;">✓</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 6px 12px;">2</td>
+      <td style="padding: 6px 12px;">搜索方向放在权重表 GroupBox 内是否合理</td>
+      <td style="padding: 6px 12px;">搜索方向决定用哪个权重列排序，与权重表逻辑紧密关联，保持放在权重配置 GroupBox 内</td>
+      <td style="text-align: center; color: #1976d2;">合理</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 6px 12px;">3</td>
+      <td style="padding: 6px 12px;">最少资源模式隐藏权重表，切回时权重值是否保留</td>
+      <td style="padding: 6px 12px;">仅控制可见性（setVisible），数据保留在内存中。切回时自动恢复</td>
+      <td style="text-align: center; color: #4CAF50;">✓</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 6px 12px;">4</td>
+      <td style="padding: 6px 12px;">快照命名规则</td>
+      <td style="padding: 6px 12px;">自动命名：「{模式}·{方向} @{时间}」，可从下拉重命名（暂不实现）</td>
+      <td style="text-align: center; color: #1976d2;">暂定</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #eee;">
+      <td style="padding: 6px 12px;">5</td>
+      <td style="padding: 6px 12px;">二分参数在"最多目标卡"模式下展开但无用</td>
+      <td style="padding: 6px 12px;">不会出现——条件可见逻辑确保二分参数仅在「最少资源」和「Pareto」模式时渲染到布局中</td>
+      <td style="text-align: center; color: #4CAF50;">✓</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 12px;">6</td>
+      <td style="padding: 6px 12px;">Pareto 切换前进/后退后，权重表提示文字是否需要更新</td>
+      <td style="padding: 6px 12px;">需要——切换时提示文字同步变更（前进→「降序添加」高亮；后退→「升序移除」高亮）</td>
+      <td style="text-align: center; color: #1976d2;">待确认</td>
+    </tr>
+  </table>
+</div>

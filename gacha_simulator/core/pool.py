@@ -129,6 +129,40 @@ class Reward:
     name: str
     resources_gained: Dict[str, float] = field(default_factory=dict)
     extra_info: Dict[str, Any] = field(default_factory=dict)
+    first_time_bonus: Dict[str, float] = field(default_factory=dict)
+    nth_time_bonus: Dict[int, Dict[str, float]] = field(default_factory=dict)
+    excess_bonus: Dict[str, Any] = field(default_factory=dict)
+
+
+def compute_bonus_resources(reward: 'Reward', acquired_before: int, acquired_after: int) -> Dict[str, float]:
+    """计算本次抽到卡时应获得的额外资源。
+
+    Args:
+        reward: 奖励定义（含 first_time_bonus / nth_time_bonus / excess_bonus）
+        acquired_before: 本次抽卡前的持有数量（含初始持有）
+        acquired_after: 本次抽卡后的持有数量
+
+    Returns:
+        应额外增加的资源 dict（不包含 reward.resources_gained）
+    """
+    bonus: Dict[str, float] = {}
+
+    if acquired_before == 0 and reward.first_time_bonus:
+        for k, v in reward.first_time_bonus.items():
+            bonus[k] = bonus.get(k, 0) + v
+
+    for nth, resources in (reward.nth_time_bonus or {}).items():
+        if acquired_after == nth:
+            for k, v in resources.items():
+                bonus[k] = bonus.get(k, 0) + v
+
+    if reward.excess_bonus:
+        threshold = reward.excess_bonus.get('threshold', 999999)
+        if acquired_before >= threshold:
+            for k, v in reward.excess_bonus.get('resources', {}).items():
+                bonus[k] = bonus.get(k, 0) + v
+
+    return bonus
 
 
 @dataclass
@@ -143,6 +177,7 @@ class Pool:
     is_rerun: bool = False
     original_pool_id: Optional[str] = None
     exchange_card_id: Optional[str] = None
+    pool_type: str = ''
 
     def __post_init__(self):
         if not self.is_exchange and self.rewards:
