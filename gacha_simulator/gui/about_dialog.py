@@ -65,17 +65,16 @@ class AboutDialog(QDialog):
         <ul>
             <li><b>灵活的模拟引擎</b>：支持多池、多保底、多策略的抽卡模拟</li>
             <li><b>保底机制</b>：软保底（线性/指数/阶梯提升）、硬保底、多保底并行</li>
-            <li><b>策略系统</b>：6 种策略（按需追卡、指定池配额、保底预留、目标即停、指定池追卡、固定次数）+ 策略比较面板</li>
+            <li><b>策略系统</b>：6 种策略（按需追卡、指定池配额、保底预留、目标即停、指定池追卡、固定次数）</li>
             <li><b>停止条件系统</b>：6 种停止条件（所有池结束、固定次数、资源阈值、目标达成、抽到指定卡、时间限制）</li>
             <li><b>广义出率（GDR）</b>：17 种可配置的广义出率指标</li>
             <li><b>过程分析</b>：逐池事件推断（7种事件类型）+ AA/BB/AB/BA 四种交叉统计</li>
             <li><b>Bootstrap 稳定性分析</b>：置信区间计算（BCa/GPD/Hill），零额外模拟成本</li>
-            <li><b>脆弱性分析</b>：局部逻辑回归估计条件失败概率</li>
-            <li><b>退路搜索</b>：最小资源/最大目标/Pareto 前沿</li>
+            <li><b>脆弱性分析</b>：局部逻辑回归估计条件失败概率，识别资源脆弱区间</li>
+            <li><b>方案搜索</b>：三合一搜索面板——最少资源（二分搜索）、最多目标卡（前进法/后退法）、资源-目标权衡曲线</li>
+            <li><b>比较分析</b>：L1 描述统计 → L2 随机占优 → L3 假设检验（KS/MWU/ttest + Holm/BH校正）→ L4 帕累托前沿，四层递进策略比较</li>
+            <li><b>数据管理</b>：模拟结果持久化存储（JSON）、可比性指纹检查、多数据集管理</li>
             <li><b>最差影响分析</b>：条件分布下尾分位数评估</li>
-            <li><b>前进法/后退法</b>：目标卡集合优化</li>
-            <li><b>资源搜索</b>：二分搜索最小资源量</li>
-            <li><b>策略比较</b>：7 种策略并排对比</li>
             <li><b>风险分析</b>：VaR/CVaR、经验分布、条件分布</li>
             <li><b>权重配置</b>：抽取意愿/错失代价/出卡价值三维权重</li>
         </ul>
@@ -84,9 +83,9 @@ class AboutDialog(QDialog):
         <ul>
             <li>Python 3.10+</li>
             <li>PyQt6（GUI）</li>
-            <li>NumPy（数值计算）</li>
-            <li>Matplotlib（可视化）</li>
-            <li>NumPy 局部线性回归（纯向量化实现）</li>
+            <li>NumPy / SciPy（数值计算）</li>
+            <li>Plotly（交互式可视化）</li>
+            <li>PyInstaller（应用打包，onedir 分发）</li>
         </ul>
 
         <h4>许可证</h4>
@@ -146,6 +145,9 @@ class AboutDialog(QDialog):
         <h4>schedule.txt — 池子排期</h4>
         <pre>pool_id | 名称 | 开始天 | 结束天 | 费用 | 分布文件 | 绑定(k=v;k=v) | 目标卡(逗号分隔,可选:数量)</pre>
         <p>示例：<code>pool_c1 | 角色池1 | 0 | 21 | draw_resource:160 | pools/character_pool.txt | ssr=ssr_char1;sr=sr1;r=r1 | ssr_char1:1</code></p>
+        <p><b>费用语法</b>：<code>资源ID:数量</code>。多资源可用 <code>&gt;</code>（大于号）或 <code>,</code>（逗号）分隔，表示按书写顺序的<b>强制优先级</b>——先尝试排在前面的资源，不够再回退到后续资源。</p>
+        <p>示例：<code>exchange_currency:5 &gt; draw_resource:160</code> 表示优先消耗兑换货币，不足时再用抽卡资源。</p>
+        <p><code>&amp;</code> 表示同时需要多种资源（AND），<code>()</code> 用于分组。完整示例：<code>(draw_resource:160 &gt; exchange_currency:5) &amp; stardust:10</code></p>
         <p><b>绑定键</b>：ssr, ssr_alt, ssr_alt1, ssr_alt2, featured, offrate, sr, r, rerun_of, exchange_card</p>
 
         <h4>pity.txt — 保底机制</h4>
@@ -258,18 +260,13 @@ day: 天数 | resource_id: 数量, resource_id: 数量</pre>
         </ul>
         <p>自动厚尾检测（Hill 估计量）+ 总变差（TVD）衡量分布估计稳定性。</p>
 
-        <h4>退路搜索</h4>
-        <p>三种搜索模式：</p>
+        <h4>方案搜索</h4>
+        <p>统一搜索引擎，两种起点 × 四种模式：</p>
         <ul>
-            <li><b>最小资源</b>：两阶段二分搜索——先倍增找上界，再二分精确定位最小资源量</li>
-            <li><b>最大目标</b>：逐步移除目标卡（按 miss_cost_weight 升序），每步计算最小资源</li>
-            <li><b>Pareto 前沿</b>：遍历目标卡子集，计算资源-目标卡数的 Pareto 最优边界</li>
-        </ul>
-
-        <h4>前进法 / 后退法</h4>
-        <ul>
-            <li><b>前进法</b>：从空集开始，按 desire_weight 降序逐个添加目标卡，直到成功率低于阈值</li>
-            <li><b>后退法</b>：从全集开始，按 miss_cost_weight 升序逐个移除目标卡，直到成功率高于阈值</li>
+            <li><b>起点选择</b>：完整时间线（从第一个池开始）或 退路点（从指定池开始，模拟已消耗部分资源）</li>
+            <li><b>最少资源</b>：在成功率 ≥ 阈值约束下，二分搜索最小额外资源投入——先翻倍找上界（15次），再二分精确定位</li>
+            <li><b>最多目标卡</b>：在固定资源预算下最大化目标卡数量——前进法（按 desire_weight 降序逐个添加，直到成功率低于阈值）或后退法（按 miss_cost_weight 升序逐个移除，直到成功率高于阈值）</li>
+            <li><b>Pareto 权衡曲线</b>：枚举目标集大小，每步搜索满足阈值的最少资源，描绘资源投入与目标数量的权衡边界（贪心近似）</li>
         </ul>
 
         <h4>最差影响分析</h4>
