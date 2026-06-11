@@ -540,10 +540,11 @@ class PlanSearchEngine:
             self.progress_callback("没有后续池子，已成功", 100)
             return result
 
-        # 按加入顺序升序排列——从小到大依次添加
+        # 按 desire 降序排列——高权重优先添加
         sorted_ids = sorted(
             candidate_specs.keys(),
             key=lambda cid: self.add_order.get(cid, 1.0),
+            reverse=True,
         )
 
         current_specs: Dict[str, int] = {}
@@ -636,10 +637,11 @@ class PlanSearchEngine:
             return result
 
         if direction == 'forward':
-            # 前进法：按加入顺序升序排列——从小到大依次添加
+            # 前进法：按 desire 降序排列——高权重优先添加
             card_ids = sorted(
                 target_specs.keys(),
                 key=lambda cid: self.add_order.get(cid, 1.0),
+                reverse=True,
             )
 
             first_id = card_ids[0]
