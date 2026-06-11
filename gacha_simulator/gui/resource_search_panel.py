@@ -7,12 +7,11 @@
 
 import sys
 import os
-import traceback
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QComboBox, QTextEdit, QScrollArea
+    QSplitter, QComboBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
@@ -23,9 +22,9 @@ _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from gacha_simulator.core.config_store import ConfigStore
-from gacha_simulator.core.forward_backward import ResourceSearchStep, ResourceSearchResult
-from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
+from gacha_simulator.core.config_store import ConfigStore  # noqa: E402
+from gacha_simulator.core.forward_backward import ResourceSearchStep, ResourceSearchResult  # noqa: E402
+from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold  # noqa: E402
 
 
 class ResourceSearchWorker(QThread):
@@ -37,8 +36,6 @@ class ResourceSearchWorker(QThread):
                  initial_resource_hint, resource_lo, max_iterations, precision_draws,
                  gdr_key, gdr_threshold,
                  config_store, max_workers=4,
-                 desire_weights=None, miss_cost_weights=None,
-                 card_value_weights=None,
                  cost_per_draw_override=None):
         super().__init__()
         self.target_specs = target_specs
@@ -52,9 +49,6 @@ class ResourceSearchWorker(QThread):
         self.gdr_threshold = gdr_threshold
         self.config_store = config_store
         self.max_workers = max_workers
-        self.desire_weights = desire_weights
-        self.miss_cost_weights = miss_cost_weights
-        self.card_value_weights = card_value_weights
         self.cost_per_draw_override = cost_per_draw_override
         self._should_stop = False
 
@@ -113,9 +107,13 @@ class ResourceSearchWorker(QThread):
             strategy_name=self.config_store.strategy_name,
             strategy_params=self.config_store.strategy_params,
         )
-        from gacha_simulator.core.gdr import compute_success_probability
-        return compute_success_probability(histories, self.target_specs, self.gdr_key, self.gdr_threshold,
-                                           self.desire_weights, self.miss_cost_weights, self.card_value_weights)
+        from gacha_simulator.core.gdr import make_gdr_calculator
+        checker = make_gdr_calculator(
+            self.config_store, self.target_specs, self.gdr_key,
+            gdr_threshold=self.gdr_threshold,
+        )
+        _, _, prob = checker.check_batch(histories)
+        return prob
 
     def run(self):
         try:
@@ -290,6 +288,8 @@ class ResourceSearchPanel(QWidget):
 
     def _on_gdr_changed(self, index):
         key = self.gdr_combo.currentData()
+        if key is None:
+            return
         default = get_default_threshold(key)
         self.gdr_threshold_spin.setValue(default)
 
@@ -487,14 +487,6 @@ class ResourceSearchPanel(QWidget):
 
         gdr_key = self.gdr_combo.currentData() or 'target_achievement'
 
-        desire_weights = None
-        miss_cost_weights = None
-        card_value_weights = None
-        if self._config_panel:
-            desire_weights = self._config_panel.get_desire_weights()
-            miss_cost_weights = self._config_panel.get_miss_cost_weights()
-            card_value_weights = self._config_panel.get_card_value_weights()
-
         self._worker = ResourceSearchWorker(
             target_specs=target_specs,
             success_threshold=self.success_threshold_spin.value(),
@@ -507,9 +499,6 @@ class ResourceSearchPanel(QWidget):
             gdr_threshold=self.gdr_threshold_spin.value(),
             config_store=self._store,
             max_workers=self.max_workers_spin.value(),
-            desire_weights=desire_weights,
-            miss_cost_weights=miss_cost_weights,
-            card_value_weights=card_value_weights,
             cost_per_draw_override=self.cost_per_draw_spin.value(),
         )
         self._worker.progress.connect(self._on_progress)

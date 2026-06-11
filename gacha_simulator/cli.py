@@ -16,11 +16,10 @@ from gacha_simulator.core import (
 from gacha_simulator.core.pool import parse_cost_string
 from gacha_simulator.core.stop_condition import StopCondition
 from gacha_simulator.core.pity import (
-    PityEngine, PityState, PoolPitySpec,
+    PityEngine, PoolPitySpec,
     PityDefParsed, SoftPityBehavior, HardPityBehavior,
 )
 from gacha_simulator.service import GachaService
-from gacha_simulator.core.generalized_drop_rate import TargetCardCountAtT, TargetCardPercentageAtT
 from multiprocessing import Pool as MPPool
 
 
@@ -128,7 +127,7 @@ def create_pity_engine_from_config(config, pools):
     return PityEngine(pool_specs, pity_defs, behaviors)
 
 
-from gacha_simulator.core.strategy import Strategy, StrategyContext
+from gacha_simulator.core.strategy import Strategy, StrategyContext  # noqa: E402
 
 
 class SmartStrategy(Strategy):
@@ -273,16 +272,16 @@ def main():
     print("Results Summary")
     print("=" * 50)
     print(f"Total Simulations: {len(results)}")
-    print(f"\nTotal Draws:")
+    print("\nTotal Draws:")
     print(f"  Mean: {np.mean(total_draws):.1f}")
     print(f"  Median: {np.median(total_draws):.1f}")
     print(f"  Std: {np.std(total_draws):.1f}")
     
-    print(f"\nSSR Count:")
+    print("\nSSR Count:")
     print(f"  Mean: {np.mean(ssr_counts):.2f}")
     print(f"  Median: {np.median(ssr_counts):.1f}")
     
-    print(f"\nGDR (Target Card %):")
+    print("\nGDR (Target Card %):")
     print(f"  Mean: {np.mean(gdr_percents):.2f}%")
     print(f"  Median: {np.median(gdr_percents):.2f}%")
     print(f"  25th percentile: {np.percentile(gdr_percents, 25):.2f}%")

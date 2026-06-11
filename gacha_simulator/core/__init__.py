@@ -23,7 +23,7 @@ from .stop_condition import (
     STOP_CONDITION_REGISTRY, create_stop_condition,
     stop_condition_type_to_key, stop_condition_key_to_type,
 )
-from .resource_gain import ResourceGainFunction, LinearResourceGain, PeriodicResourceGain, StepResourceGain, CompositeResourceGain, ScheduleResourceGain
+from .resource_gain import ResourceGainFunction, LinearResourceGain, PeriodicResourceGain, StepResourceGain, CompositeResourceGain, ScheduleResourceGain, expand_gain_rules_to_schedule
 from .generalized_drop_rate import (
     GeneralizedDropRate, RarityValueAtT, CumulativeResourceEfficiency, PityProgressAtT,
     DropRateBetweenT1T2, TotalValueAtT, TargetCardCountAtT, TargetCardPercentageAtT, TargetCardEfficiencyAtT
@@ -31,13 +31,13 @@ from .generalized_drop_rate import (
 from .schedule import PoolSchedule, PoolScheduleManager
 from .target_card import TargetCard, TargetCardSet
 from .gdr_analysis import (
-    SuccessProbabilityAnalyzer, GDRCalculator,
+    SuccessProbabilityAnalyzer, LegacyGDRCalculator,
     compute_gdr_count, compute_gdr_percentage, compute_gdr_efficiency
 )
 from .pool_config import PoolConfig, CardDef, CardCatalog, parse_schedule_file, parse_distribution_file, parse_cards_file, load_config_from_directory
 from .distribution import EmpiricalDistribution, DistributionSummary, JointSamples, WorstCaseAnalysis, BestCaseAnalysis
 from .risk_analysis import RiskAnalyzer
-from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, register_gdr, SuccessChecker, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability
+from .gdr import GDRContext, GDR_REGISTRY, COMPACT_GDR_REGISTRY, UNIFIED_GDR_REGISTRY, register_gdr, GDRCalculator, make_gdr_calculator, GDRDefinition, populate_gdr_combo, get_default_threshold, compute_gdr_from_compact, compute_gdr_from_cumulative, compute_success_probability, parse_gdr_key, get_expanded_gdr_entries, resolve_gdr_definition, is_resource_gdr
 from .per_pool_analysis import (
     PoolSnapshot, CumulativeSnapshot,
     compute_per_pool_snapshots, compute_cumulative_snapshots,
@@ -68,7 +68,10 @@ from .comparison_analyzer import (
     dd_bootstrap_test, compute_dominance_matrix, compute_pvalue_matrix,
     compute_gdr_values_for_datasets, holm_bonferroni, benjamini_hochberg,
 )
-from .bootstrap import BootstrapEngine, BootstrapResult
+# BootstrapEngine / BootstrapResult 改为惰性导入（__getattr__），
+# 避免顶层 import 时级联加载 scipy.stats。Windows spawn 下 worker
+# 进程 import gacha_simulator.core 若同时加载 scipy 大 DLL 可触发
+# 页面文件耗尽 (ImportError: DLL load failed)。
 from .streaming import StreamingAnalyzer, StreamingSuccessCounter, SharedResultCollector, DrawSequenceExtractor, extract_aggregate, extract_process, WorkerLocalExtractor, merge_extraction_packets
 from .process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
 from .process_analysis import (
@@ -92,24 +95,23 @@ __all__ = [
     'Strategy', 'StrategyContext',
     'SmartStrategy', 'PoolQuotaStrategy', 'PityReserveStrategy', 'StopOnTargetStrategy',
     'FixedCountStrategy', 'TargetHuntingStrategy', 'CompositeStrategy',
-    'STRATEGY_REGISTRY', 'create_strategy',
+    'STRATEGY_REGISTRY', 'create_strategy', 'strategy_type_to_key', 'strategy_key_to_type',
     'StopCondition', 'FixedActionCountCondition', 'ResourceThresholdCondition',
     'TargetAcquiredCondition', 'TimeLimitCondition', 'CompositeStopCondition',
     'AllPoolsEndCondition', 'LastDrawCardCondition',
     'STOP_CONDITION_REGISTRY', 'create_stop_condition',
     'stop_condition_type_to_key', 'stop_condition_key_to_type',
-    'ResourceGainFunction', 'LinearResourceGain', 'PeriodicResourceGain', 'StepResourceGain', 'CompositeResourceGain', 'ScheduleResourceGain',
+    'ResourceGainFunction', 'LinearResourceGain', 'PeriodicResourceGain', 'StepResourceGain', 'CompositeResourceGain', 'ScheduleResourceGain', 'expand_gain_rules_to_schedule',
     'GeneralizedDropRate', 'RarityValueAtT', 'CumulativeResourceEfficiency', 'PityProgressAtT',
     'DropRateBetweenT1T2', 'TotalValueAtT', 'TargetCardCountAtT', 'TargetCardPercentageAtT', 'TargetCardEfficiencyAtT',
     'PoolSchedule', 'PoolScheduleManager',
     'TargetCard', 'TargetCardSet',
-    'SuccessProbabilityAnalyzer', 'GDRCalculator',
+    'SuccessProbabilityAnalyzer', 'LegacyGDRCalculator',
     'compute_gdr_count', 'compute_gdr_percentage', 'compute_gdr_efficiency',
     'PoolConfig', 'CardDef', 'CardCatalog', 'parse_schedule_file', 'parse_distribution_file', 'parse_cards_file', 'load_config_from_directory',
     'EmpiricalDistribution', 'DistributionSummary', 'JointSamples', 'WorstCaseAnalysis', 'BestCaseAnalysis',
-    'BootstrapEngine', 'BootstrapResult',
     'RiskAnalyzer',
-    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'register_gdr', 'SuccessChecker', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability',
+    'GDRContext', 'GDR_REGISTRY', 'COMPACT_GDR_REGISTRY', 'UNIFIED_GDR_REGISTRY', 'register_gdr', 'GDRCalculator', 'make_gdr_calculator', 'GDRDefinition', 'populate_gdr_combo', 'get_default_threshold', 'compute_gdr_from_compact', 'compute_gdr_from_cumulative', 'compute_success_probability', 'parse_gdr_key', 'get_expanded_gdr_entries', 'resolve_gdr_definition', 'is_resource_gdr',
     'PoolSnapshot', 'CumulativeSnapshot',
     'compute_per_pool_snapshots', 'compute_cumulative_snapshots',
     'compute_per_pool_snapshots_batch', 'compute_cumulative_snapshots_batch',
@@ -133,3 +135,20 @@ __all__ = [
     'dd_bootstrap_test', 'compute_dominance_matrix', 'compute_pvalue_matrix',
     'compute_gdr_values_for_datasets', 'holm_bonferroni', 'benjamini_hochberg',
 ]
+
+
+def __getattr__(name):
+    """惰性导入重依赖符号，避免 import gacha_simulator.core 时级联加载 scipy。
+
+    Windows spawn 下每个 worker 进程 import gacha_simulator.service
+    → core/__init__.py → bootstrap.py → scipy.stats，若 4 个 worker
+    同时加载 scipy 大 DLL 可触发页面文件耗尽 (ImportError: DLL load
+    failed: 页面文件太小)。BootstrapEngine 仅被 GUI analysis_panel 使用，
+    在 worker 进程中永不调用，没必要在 spawn 关键路径上加载。
+    """
+    if name in ('BootstrapEngine', 'BootstrapResult'):
+        from .bootstrap import BootstrapEngine, BootstrapResult  # noqa: F401
+        val = locals()[name]
+        globals()[name] = val  # 缓存，后续访问不再经过 __getattr__
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

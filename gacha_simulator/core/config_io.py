@@ -9,7 +9,7 @@ from .config_store import (
 )
 from .pool_config import parse_schedule_file, parse_cards_file, parse_distribution_file
 from .pity import parse_pity_file
-from .resource_gain import parse_gains_file, parse_resources_file
+from .resource_gain import parse_resources_file
 
 
 def load_store_from_directory(dir_path: str, store: Optional[ConfigStore] = None) -> ConfigStore:
@@ -208,6 +208,23 @@ def _load_pity(dir_path: str, store: ConfigStore):
     store.pity = PityConfig(enabled=True, pities=pities)
 
 
+def _normalize_rule_type(raw: str) -> tuple:
+    """将原始 rule_type 字符串归一化为 (类型名, 参数) 二元组。
+
+    从 gains.txt 加载的 rule_type 可能包含嵌入参数（如 'every_n_days: 3'），
+    归一化后 rule_type 仅保留类型名，参数独立存入 GainRule.param。
+
+    >>> _normalize_rule_type('every_n_days: 3')
+    ('every_n_days', '3')
+    >>> _normalize_rule_type('monthly_day')
+    ('monthly_day', '')
+    """
+    if ':' in raw:
+        type_name, param = raw.split(':', 1)
+        return type_name.strip(), param.strip()
+    return raw.strip(), ''
+
+
 def _load_gains(dir_path: str, store: ConfigStore):
     filepath = os.path.join(dir_path, 'gains.txt')
     if not os.path.exists(filepath):
@@ -219,24 +236,48 @@ def _load_gains(dir_path: str, store: ConfigStore):
     current_rule = None
     current_gains: Dict[str, float] = {}
 
+    def _flush_rule():
+        """将当前累积的规则刷入 rules 列表（归一化 rule_type）。"""
+        nonlocal current_rule, current_gains
+        if current_rule is not None and current_gains:
+            normalized_type, normalized_param = _normalize_rule_type(current_rule)
+            rules.append(GainRule(
+                rule_type=normalized_type,
+                param=normalized_param,
+                gains=current_gains.copy(),
+            ))
+        current_rule = None
+        current_gains = {}
+
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('#'):
+                # 检查可选的 # start_date: YYYY-MM-DD 注释行
+                if line.startswith('# start_date:') or line.startswith('# start_date：'):
+                    date_part = line.split(':', 1)[-1].strip().replace('：', ':')
+                    # 二次 split 处理中文冒号：'# start_date： 2013-06-02' → '2013-06-02'
+                    if ':' in date_part:
+                        date_part = date_part.split(':', 1)[-1].strip()
+                    try:
+                        import datetime as _dt
+                        _dt.date.fromisoformat(date_part)
+                        store.sim_start_date = date_part
+                    except (ValueError, TypeError):
+                        import logging as _log
+                        _log.warning(
+                            "_load_gains: start_date '%s' 无效，回退默认值 '2013-06-02'", date_part)
+                        store.sim_start_date = '2013-06-02'
                 continue
 
             if line.startswith('[') and line.endswith(']'):
-                if current_rule is not None and current_gains:
-                    rules.append(GainRule(rule_type=current_rule, gains=current_gains.copy()))
+                _flush_rule()
                 current_rule = line[1:-1].strip()
                 current_gains = {}
                 continue
 
             if line.startswith('day:'):
-                if current_rule is not None and current_gains:
-                    rules.append(GainRule(rule_type=current_rule, gains=current_gains.copy()))
-                    current_rule = None
-                    current_gains = {}
+                _flush_rule()
 
                 rest = line[4:].strip()
                 parts = rest.split('|', 1)
@@ -251,8 +292,7 @@ def _load_gains(dir_path: str, store: ConfigStore):
                 for r, a in gains.items():
                     current_gains[r] = current_gains.get(r, 0) + a
 
-    if current_rule is not None and current_gains:
-        rules.append(GainRule(rule_type=current_rule, gains=current_gains.copy()))
+    _flush_rule()
 
     store.gain_rules = rules
     store.day_overrides = day_overrides
@@ -346,7 +386,6 @@ def _save_cards(dir_path: str, store: ConfigStore):
         f.write("# Card Definitions\n")
         f.write("# Format: card_id | name | rarity | [initial_count]\n\n")
         for cd in store.card_defs:
-            pools_str = ','.join(cd.pools) if cd.pools else ''
             if getattr(cd, 'initial_count', 0) > 0:
                 f.write(f"{cd.card_id} | {cd.name} | {cd.rarity} | {cd.initial_count}\n")
             else:
@@ -357,7 +396,8 @@ def _save_schedule(dir_path: str, store: ConfigStore):
     filepath = os.path.join(dir_path, 'schedule.txt')
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write("# Pool Schedule Configuration\n")
-        f.write("# Format: pool_id | name | start_day | end_day | cost | template | bindings | target_card_ids\n\n")
+        f.write("# Format: pool_id | name | start_day | end_day | cost | template | bindings(key=val) | target_card_ids\n")
+        f.write("#   cost: resource_id:amount, multi-resource separated by > or , (left-to-right priority)\n\n")
         for pool in store.pools:
             if not pool.enabled:
                 continue
@@ -407,10 +447,34 @@ def _save_gains(dir_path: str, store: ConfigStore):
     filepath = os.path.join(dir_path, 'gains.txt')
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write("# Resource Gain Schedule\n")
-        f.write("# Format: [rule_type] followed by resource_id: amount lines\n")
-        f.write("# day: day_number | resource_id: amount\n\n")
+        f.write("# 资源获取规则\n")
+        f.write("#\n")
+        f.write("# 时间单位统一使用\"天\"（day），day=0 表示第1天开始\n")
+        f.write("#\n")
+        f.write("# === 规则格式 ===\n")
+        f.write("# [every_n_days: n]       每 n 天循环一次（n=1 可省略参数写作 [every_n_days]，即每天）\n")
+        f.write("# [weekly: day_of_week]   每周几（1=周一, 2=周二, ..., 7=周日）\n")
+        f.write("# [monthly_day: day]      每月第几天（1-31）\n")
+        f.write("# [monthly_day: month,day]  每年指定月日触发（1-12, 1-31），如 3,15 = 每年3月15日\n")
+        f.write("# [monthly_week: week,day_of_week]  每月第几周的周几（week:1-5, day:1-7），分隔符为逗号\n")
+        f.write("#\n")
+        f.write("# 规则体: resource_id: amount\n")
+        f.write("#\n")
+        f.write("# === 按天指定（优先级高于规则）===\n")
+        f.write("# day: day_number | resource_id: amount, resource_id: amount\n")
+        f.write("#\n")
+        f.write("# 最终所有规则都会转换为按天指定\n")
+        f.write(f"# start_date: {getattr(store, 'sim_start_date', '2013-06-02') or '2013-06-02'}\n\n")
         for rule in store.gain_rules:
-            f.write(f"[{rule.rule_type}]\n")
+            rule_type = rule.rule_type
+            param = getattr(rule, 'param', '')
+            # 仅 every_n_days 且 param 为 '1' 或 '' 时省略参数输出
+            if rule_type == 'every_n_days' and param in ('1', ''):
+                f.write(f"[{rule_type}]\n")
+            elif param:
+                f.write(f"[{rule_type}: {param}]\n")
+            else:
+                f.write(f"[{rule_type}]\n")
             for rid, amt in rule.gains.items():
                 f.write(f"{rid}: {amt}\n")
             f.write("\n")

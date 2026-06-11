@@ -6,7 +6,7 @@ import sys
 import os
 import traceback
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QComboBox, QRadioButton, QButtonGroup,
@@ -21,8 +21,7 @@ _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from gacha_simulator.core.config_store import ConfigStore
-from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
+from gacha_simulator.core.gdr import populate_gdr_combo  # noqa: E402
 
 
 class RetreatSearchWorker(QThread):
@@ -418,80 +417,75 @@ class RetreatSearchPanel(QWidget):
         splitter.setSizes([400, 600])
 
     def _on_run(self):
-        if not self._store:
-            self.status_update.emit("请先加载配置")
-            return
-        if not self._vulnerability_result:
-            self.status_label.setText("请先运行脆弱性分析")
-            return
+        try:
+            if not self._store:
+                self.status_update.emit("请先加载配置")
+                return
+            if not self._vulnerability_result:
+                self.status_label.setText("请先运行脆弱性分析")
+                return
 
-        pool_id = self.pool_combo.currentData()
-        if not pool_id:
-            self.status_label.setText("请选择起始池")
-            return
+            pool_id = self.pool_combo.currentData()
+            if not pool_id:
+                self.status_label.setText("请选择起始池")
+                return
 
-        target_specs = {}
-        for tc in self._store.target_cards:
-            target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
-        if not target_specs:
-            self.status_label.setText("请先在配置中添加目标卡")
-            return
+            target_specs = {}
+            for tc in self._store.target_cards:
+                target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
+            if not target_specs:
+                self.status_label.setText("请先在配置中添加目标卡")
+                return
 
-        base_resource = self._get_selected_resource()
-        pity_init = self._get_pity_init()
-        miss_cost_weights = self._get_miss_cost_weights()
+            base_resource = self._get_selected_resource()
+            pity_init = self._get_pity_init()
 
-        desire_weights = None
-        card_value_weights = None
-        if self._config_panel:
-            desire_weights = self._config_panel.get_desire_weights()
-            card_value_weights = self._config_panel.get_card_value_weights()
+            if self.mode_resource.isChecked():
+                mode = 'resource'
+            elif self.mode_target.isChecked():
+                mode = 'target'
+            else:
+                mode = 'pareto'
 
-        if self.mode_resource.isChecked():
-            mode = 'resource'
-        elif self.mode_target.isChecked():
-            mode = 'target'
-        else:
-            mode = 'pareto'
+            gdr_key = self.gdr_combo.currentData() or 'all_targets'
 
-        gdr_key = self.gdr_combo.currentData() or 'all_targets'
+            from gacha_simulator.core.retreat_search import RetreatSearchEngine
 
-        from gacha_simulator.core.retreat_search import RetreatSearchEngine
+            strategy_key = self._store.strategy_name if self._store else 'smart'
+            strategy_params = dict(self._store.strategy_params) if self._store else {}
 
-        strategy_key = self._store.strategy_name if self._store else 'smart'
-        strategy_params = dict(self._store.strategy_params) if self._store else {}
+            def _progress_callback(msg, pct):
+                self._worker.progress.emit(msg, pct)
 
-        def _progress_callback(msg, pct):
-            self._worker.progress.emit(msg, pct)
+            engine = RetreatSearchEngine(
+                config_store=self._store,
+                from_pool_id=pool_id,
+                base_resource=base_resource,
+                pity_counter_init=pity_init,
+                success_threshold=self.threshold_spin.value(),
+                gdr_key=gdr_key,
+                gdr_threshold=self.gdr_threshold_spin.value(),
+                num_simulations=self.sim_spin.value(),
+                max_workers=self.worker_spin.value(),
+                strategy_name=strategy_key,
+                strategy_params=strategy_params,
+                progress_callback=_progress_callback,
+            )
 
-        engine = RetreatSearchEngine(
-            config_store=self._store,
-            from_pool_id=pool_id,
-            base_resource=base_resource,
-            pity_counter_init=pity_init,
-            miss_cost_weights=miss_cost_weights,
-            desire_weights=desire_weights,
-            card_value_weights=card_value_weights,
-            success_threshold=self.threshold_spin.value(),
-            gdr_key=gdr_key,
-            gdr_threshold=self.gdr_threshold_spin.value(),
-            num_simulations=self.sim_spin.value(),
-            max_workers=self.worker_spin.value(),
-            strategy_name=strategy_key,
-            strategy_params=strategy_params,
-            progress_callback=_progress_callback,
-        )
+            self._worker = RetreatSearchWorker(engine, target_specs, mode)
+            self._worker.progress.connect(self._on_progress)
+            self._worker.finished.connect(self._on_finished)
+            self._worker.error.connect(self._on_error)
 
-        self._worker = RetreatSearchWorker(engine, target_specs, mode)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.error.connect(self._on_error)
+            self.run_btn.setEnabled(False)
+            self.stop_btn.setEnabled(True)
+            self.progress_bar.setValue(0)
+            self._worker.start()
 
-        self.run_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
-        self.progress_bar.setValue(0)
-        self._worker.start()
-
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText(f"启动搜索失败: {e}")
     def _on_stop(self):
         if self._worker:
             self._worker.stop()
@@ -512,36 +506,42 @@ class RetreatSearchPanel(QWidget):
             self.status_label.setText("搜索已停止")
             return
 
-        from gacha_simulator.core.retreat_search import RetreatSearchResult
-        assert isinstance(result, RetreatSearchResult)
+        try:
 
-        mode_labels = {"resource": "最少额外资源", "target": "最多目标卡", "pareto": "Pareto前沿"}
-        mode_display = mode_labels.get(result.search_mode, result.search_mode)
-        lines = [
-            f"<b>模式:</b> {mode_display} &nbsp;|&nbsp; "
-            f"<b>起始池:</b> {result.from_pool_id} &nbsp;|&nbsp; "
-            f"<b>基准资源:</b> {result.base_resource:.0f} &nbsp;|&nbsp; "
-            f"<b>保底初始:</b> {result.pity_init}"
-        ]
+            from gacha_simulator.core.retreat_search import RetreatSearchResult
+            assert isinstance(result, RetreatSearchResult)
 
-        if result.points:
-            best = result.points[-1]
-            lines.append(f"<b>最优:</b> 额外+{best.extra_resource:.0f}资源, "
-                         f"目标{best.target_specs}, P={best.success_probability:.2%}")
+            mode_labels = {"resource": "最少额外资源", "target": "最多目标卡", "pareto": "Pareto前沿"}
+            mode_display = mode_labels.get(result.search_mode, result.search_mode)
+            lines = [
+                f"<b>模式:</b> {mode_display} &nbsp;|&nbsp; "
+                f"<b>起始池:</b> {result.from_pool_id} &nbsp;|&nbsp; "
+                f"<b>基准资源:</b> {result.base_resource:.0f} &nbsp;|&nbsp; "
+                f"<b>保底初始:</b> {result.pity_init}"
+            ]
 
-        self.result_label.setText('<br>'.join(lines))
+            if result.points:
+                best = result.points[-1]
+                lines.append(f"<b>最优:</b> 额外+{best.extra_resource:.0f}资源, "
+                             f"目标{best.target_specs}, P={best.success_probability:.2%}")
 
-        self._plot_pareto_chart(result)
+            self.result_label.setText('<br>'.join(lines))
 
-        self.detail_table.setRowCount(len(result.points))
-        for i, pt in enumerate(result.points):
-            self.detail_table.setItem(i, 0, QTableWidgetItem(f"{pt.extra_resource:.0f}"))
-            specs_str = ', '.join(f"{k}\u00d7{v}" for k, v in pt.target_specs.items())
-            self.detail_table.setItem(i, 1, QTableWidgetItem(specs_str or "(无)"))
-            self.detail_table.setItem(i, 2, QTableWidgetItem(f"{pt.success_probability:.2%}"))
-            total = result.base_resource + pt.extra_resource
-            self.detail_table.setItem(i, 3, QTableWidgetItem(f"{total:.0f}"))
+            self._plot_pareto_chart(result)
 
+            self.detail_table.setRowCount(len(result.points))
+            for i, pt in enumerate(result.points):
+                self.detail_table.setItem(i, 0, QTableWidgetItem(f"{pt.extra_resource:.0f}"))
+                specs_str = ', '.join(f"{k}\u00d7{v}" for k, v in pt.target_specs.items())
+                self.detail_table.setItem(i, 1, QTableWidgetItem(specs_str or "(无)"))
+                self.detail_table.setItem(i, 2, QTableWidgetItem(f"{pt.success_probability:.2%}"))
+                total = result.base_resource + pt.extra_resource
+                self.detail_table.setItem(i, 3, QTableWidgetItem(f"{total:.0f}"))
+
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText("结果展示失败，请查看控制台")
     def _on_error(self, err):
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)

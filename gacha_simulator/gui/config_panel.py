@@ -5,15 +5,15 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget,
-    QLabel, QCheckBox, QScrollArea, QFrame, QSplitter,
-    QListWidget, QListWidgetItem, QStyledItemDelegate, QStyleOptionViewItem,
-    QDialog, QDialogButtonBox, QMessageBox, QAbstractItemView,
+    QLabel, QCheckBox, QScrollArea, QSplitter,
+    QListWidget, QDialog, QDialogButtonBox, QMessageBox, QAbstractItemView,
+    QDateEdit, QCalendarWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from PyQt6.QtGui import QFont, QColor
 
 from ..core.config_store import (
-    ConfigStore, CardDefEntry, PoolEntry, PoolDistEntry,
+    CardDefEntry, PoolEntry, PoolDistEntry,
     PityDef, PityConfig,
     GainRule, DayOverride, TargetCardEntry, CardWeightEntry,
 )
@@ -114,7 +114,9 @@ class PoolDistributionDialog(QDialog):
         self.dist_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.dist_table.verticalHeader().setVisible(False)
         self.dist_table.setAlternatingRowColors(True)
-        self.dist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.dist_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
         self.dist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.dist_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         layout.addWidget(self.dist_table)
@@ -470,7 +472,7 @@ class ConfigPanel(QWidget):
         t_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.pool_template_table.setColumnWidth(1, 70)
         self.pool_template_table.setColumnWidth(2, 70)
-        self.pool_template_table.setColumnWidth(3, 120)
+        self.pool_template_table.setColumnWidth(3, 160)
         self.pool_template_table.setColumnWidth(5, 80)
         self.pool_template_table.verticalHeader().setVisible(False)
         self.pool_template_table.setAlternatingRowColors(True)
@@ -558,7 +560,7 @@ class ConfigPanel(QWidget):
         self.pool_table.setColumnWidth(3, 70)
         self.pool_table.setColumnWidth(4, 70)
         self.pool_table.setColumnWidth(5, 70)
-        self.pool_table.setColumnWidth(6, 120)
+        self.pool_table.setColumnWidth(6, 160)
         self.pool_table.setColumnWidth(8, 80)
         self.pool_table.verticalHeader().setVisible(False)
         self.pool_table.setAlternatingRowColors(True)
@@ -585,7 +587,7 @@ class ConfigPanel(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        hint_label = QLabel("提示：类型列只有「角色」「武器」「兑换」「资源」四种类型会被后续分析识别")
+        hint_label = QLabel("提示：类型列只有「角色」「武器」「兑换」「资源」四种类型会被后续分析识别。单抽消耗用 > 或 , 分隔表示强制优先级（靠左优先）。")
         hint_label.setStyleSheet("color: #888; font-size: 11px; padding: 2px;")
         layout.addWidget(hint_label)
 
@@ -1487,18 +1489,6 @@ class ConfigPanel(QWidget):
             self.weight_table.setCellWidget(i, 4, value_spin)
         self.weight_table.blockSignals(False)
 
-    def get_desire_weights(self):
-        data = self._get_weight_data()
-        return {cid: w['desire_weight'] for cid, w in data.items()}
-
-    def get_miss_cost_weights(self):
-        data = self._get_weight_data()
-        return {cid: w['miss_cost_weight'] for cid, w in data.items()}
-
-    def get_card_value_weights(self):
-        data = self._get_weight_data()
-        return {cid: w['card_value'] for cid, w in data.items()}
-
     def _setup_resource_tab(self, parent):
         defs_group = QGroupBox("资源定义")
         defs_layout = QVBoxLayout(defs_group)
@@ -1557,6 +1547,18 @@ class ConfigPanel(QWidget):
         gain_btn_layout.addStretch()
         gain_layout.addLayout(gain_btn_layout)
 
+        # Phase 2: 模拟起始日期选择器
+        date_layout = QHBoxLayout()
+        date_layout.addWidget(QLabel("模拟起始日期（day=0 对应）:"))
+        self.sim_start_date_edit = QDateEdit()
+        self.sim_start_date_edit.setCalendarPopup(True)
+        self.sim_start_date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.sim_start_date_edit.setDate(QDate(2013, 6, 2))
+        self.sim_start_date_edit.dateChanged.connect(self._on_sim_start_date_changed)
+        date_layout.addWidget(self.sim_start_date_edit)
+        date_layout.addStretch()
+        gain_layout.addLayout(date_layout)
+
         parent.addWidget(gain_group)
 
         override_group = QGroupBox("指定日期资源获取")
@@ -1585,11 +1587,33 @@ class ConfigPanel(QWidget):
 
         parent.addWidget(override_group)
 
+        # Phase 3: 日历预览（可折叠）
+        self.calendar_group = QGroupBox("📅 日历预览")
+        self.calendar_group.setCheckable(True)
+        self.calendar_group.setChecked(False)
+        calendar_layout = QVBoxLayout(self.calendar_group)
+        self.calendar_widget = QCalendarWidget()
+        self.calendar_widget.setMinimumHeight(200)
+        self.calendar_widget.setMaximumHeight(280)
+        self.calendar_widget.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar_widget.clicked.connect(self._on_calendar_date_clicked)
+        calendar_layout.addWidget(self.calendar_widget)
+        self.calendar_detail_label = QLabel("（勾选标题复选框展开日历预览）")
+        self.calendar_detail_label.setWordWrap(True)
+        self.calendar_detail_label.setStyleSheet("color: #666; padding: 4px;")
+        calendar_layout.addWidget(self.calendar_detail_label)
+        self.calendar_group.toggled.connect(self._on_calendar_toggled)
+        parent.addWidget(self.calendar_group)
+
         parent.addStretch()
 
         self.resource_defs = []
         self.resource_gain_rules = []
         self.resource_day_overrides = []
+
+        # Phase 3: 日历预览缓存
+        self._cached_schedule = None
+        self._cached_schedule_key = None
 
         self.resource_defs_table.cellChanged.connect(self._on_resource_def_changed)
         self.gain_rules_table.cellChanged.connect(self._update_preview)
@@ -1907,6 +1931,93 @@ class ConfigPanel(QWidget):
                 pools_item.setBackground(QColor(240, 240, 240))
                 self.target_table.setItem(i, 2, pools_item)
 
+    def _update_calendar_highlights(self, start_date, total_days):
+        """根据缓存的 schedule 设置日历高亮。线程安全：必须在 GUI 主线程调用。"""
+        from PyQt6.QtGui import QTextCharFormat, QColor
+        import datetime as _dt
+
+        # 重置所有日期格式
+        default_fmt = QTextCharFormat()
+        self.calendar_widget.setDateTextFormat(_dt.date(2000, 1, 1), default_fmt)
+
+        if not self._cached_schedule:
+            return
+
+        has_fmt = QTextCharFormat()
+        has_fmt.setBackground(QColor(180, 230, 180))  # 浅绿色高亮
+
+        try:
+            for day_offset, day_gains in self._cached_schedule.items():
+                d = start_date + _dt.timedelta(days=day_offset)
+                self.calendar_widget.setDateTextFormat(d, has_fmt)
+                # Qt 6.8+ setDateToolTip；低版本降级为点击查看
+                if hasattr(self.calendar_widget, 'setDateToolTip'):
+                    lines = [f"day={day_offset}"]
+                    for rid, amt in sorted(day_gains.items()):
+                        lines.append(f"{rid}: +{amt}")
+                    self.calendar_widget.setDateToolTip(d, '\n'.join(lines))
+        except Exception:
+            pass
+
+    def _on_calendar_date_clicked(self, qdate):
+        """点击日历日期时显示当日资源明细。"""
+        if self._cached_schedule is None:
+            self.calendar_detail_label.setText("日历预览未展开，请勾选标题复选框启用")
+            return
+
+        import datetime as _dt
+        start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+        try:
+            start_date = _dt.date.fromisoformat(start_date_str)
+        except (ValueError, TypeError):
+            start_date = _dt.date(2013, 6, 2)
+
+        py_date = _dt.date(qdate.year(), qdate.month(), qdate.day())
+        day_offset = (py_date - start_date).days
+
+        # 检查是否在模拟时间线内
+        pools_list = getattr(self._store, 'pools', [])
+        if pools_list:
+            max_day = max((p.start_day + (p.end_day - p.start_day)) for p in pools_list)
+        else:
+            max_day = 365
+
+        if day_offset < 0 or day_offset >= max_day:
+            self.calendar_detail_label.setText(
+                f"📅 {py_date.isoformat()} (day={day_offset}) — 该日期不在模拟时间线内")
+            return
+
+        day_gains = self._cached_schedule.get(day_offset, {})
+        if day_gains:
+            lines = [f"📅 {py_date.isoformat()} (day={day_offset})"]
+            for rid, amt in sorted(day_gains.items()):
+                lines.append(f"  {rid}: +{amt}")
+            self.calendar_detail_label.setText('\n'.join(lines))
+        else:
+            self.calendar_detail_label.setText(
+                f"📅 {py_date.isoformat()} (day={day_offset}) — 当日无资源获取")
+
+    def _on_calendar_toggled(self, checked):
+        """日历预览展开/折叠时触发。"""
+        if checked:
+            # 展开时跳转到模拟起始日期所在月份
+            start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+            try:
+                import datetime as _dt
+                sd = _dt.date.fromisoformat(start_date_str)
+                self.calendar_widget.setCurrentPage(sd.year, sd.month)
+            except (ValueError, TypeError):
+                pass
+            self._cached_schedule_key = None  # 强制重新计算
+            self._update_preview()
+
+    def _on_sim_start_date_changed(self, qdate):
+        """模拟起始日期变更时触发预览更新。"""
+        if self._refreshing or self._store is None:
+            return
+        self._store.sim_start_date = qdate.toString("yyyy-MM-dd")
+        self._update_preview()
+
     def _update_preview(self):
         if self._store is None:
             self.preview_text.setText("配置预览:\n\n（等待配置加载...）")
@@ -1973,6 +2084,57 @@ class ConfigPanel(QWidget):
         self.preview_text.setText(preview)
         self._update_card_id_list()
         self._update_target_pools()
+
+        # Phase 3: 日历预览（带缓存，仅当展开时计算）
+        # 线程安全：此函数必须在 GUI 主线程执行，若迁移至 QThread 需通过
+        # 信号槽或 QMetaObject.invokeMethod 回主线程调用 setDateTextFormat/setDateToolTip。
+        if self.calendar_group.isChecked() and self._store is not None:
+            from gacha_simulator.core.resource_gain import expand_gain_rules_to_schedule
+            import datetime as _dt
+
+            gain_rules = list(getattr(self._store, 'gain_rules', []))
+            day_overrides = list(getattr(self._store, 'day_overrides', []))
+            start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+            try:
+                start_date = _dt.date.fromisoformat(start_date_str)
+            except (ValueError, TypeError):
+                start_date = _dt.date(2013, 6, 2)
+
+            # total_days 从池配置推导
+            pools_list = getattr(self._store, 'pools', [])
+            if pools_list:
+                total_days = max(
+                    (p.start_day + (p.end_day - p.start_day)) for p in pools_list
+                )
+            else:
+                total_days = 365
+
+            # 缓存 key（避免每次按键都重算日历）
+            key_parts = []
+            for r in gain_rules:
+                rt = getattr(r, 'rule_type', '')
+                rp = getattr(r, 'param', '')
+                rg = tuple(sorted(
+                    (k, round(float(v), 6)) for k, v in (getattr(r, 'gains', {}) or {}).items()
+                ))
+                key_parts.append((rt, rp, rg))
+            for do in day_overrides:
+                dg = tuple(sorted(
+                    (k, round(float(v), 6)) for k, v in (getattr(do, 'gains', {}) or {}).items()
+                ))
+                key_parts.append((getattr(do, 'day', 0), dg))
+            cache_key = (start_date_str, total_days, tuple(key_parts))
+
+            if self._cached_schedule_key != cache_key:
+                self._cached_schedule = expand_gain_rules_to_schedule(
+                    gain_rules=gain_rules,
+                    day_overrides=day_overrides,
+                    total_days=total_days,
+                    start_date=start_date,
+                )
+                self._cached_schedule_key = cache_key
+                self._update_calendar_highlights(start_date, total_days)
+
         self.config_changed.emit(config)
 
     def _set_defaults(self):
@@ -2054,15 +2216,15 @@ class ConfigPanel(QWidget):
 
         counter_init = dict(store.pity.counter_init)
 
-        initial_resources = [{'resource_id': rid, 'amount': amt}
+        [{'resource_id': rid, 'amount': amt}
                              for rid, amt in store.initial_resources.items() if amt > 0]
 
         gain_rules = []
         for rule in store.gain_rules:
             for rid, amt in rule.gains.items():
                 gain_rules.append({
-                    'type': _gain_rule_type_to_gui(rule.rule_type),
-                    'param': _gain_rule_param_to_gui(rule.rule_type),
+                    'type': _gain_rule_type_to_gui(rule.rule_type, rule.param),
+                    'param': _gain_rule_param_to_gui(rule.rule_type, rule.param),
                     'resource_id': rid,
                     'amount': amt,
                 })
@@ -2121,6 +2283,7 @@ class ConfigPanel(QWidget):
             'resource_gain_rules': gain_rules,
             'resource_day_overrides': day_overrides,
             'daily_income': _daily_income(store),
+            'sim_start_date': store.sim_start_date,
             'card_weights': {cid: {'desire_weight': cw.desire_weight, 'miss_cost_weight': cw.miss_cost_weight, 'card_value': cw.card_value}
                              for cid, cw in store.card_weights.items()},
         }
@@ -2277,6 +2440,9 @@ class ConfigPanel(QWidget):
                 card_value=cw.get('card_value', 1.0),
             )
 
+        # Phase 2: 恢复模拟起始日期
+        store.sim_start_date = config.get('sim_start_date', '2013-06-02')
+
         self.refresh_from_store()
 
     def _sync_card_defs_from_pools(self):
@@ -2386,21 +2552,38 @@ class ConfigPanel(QWidget):
                 ids.append(id_item.text().strip())
         return ids
 
+    def _update_param_placeholder(self, row: int, gui_type: str):
+        """更新指定行参数列的 placeholder 提示文本。"""
+        widget = self.gain_rules_table.cellWidget(row, 1)
+        if isinstance(widget, QLineEdit):
+            widget.setPlaceholderText(_gain_rule_param_placeholder(gui_type))
+
     def _refresh_resource_combos(self):
         resource_ids = self._get_resource_ids()
-        for table in [self.gain_rules_table, self.day_overrides_table]:
-            for i in range(table.rowCount()):
-                for col in range(table.columnCount()):
-                    widget = table.cellWidget(i, col)
-                    if isinstance(widget, QComboBox):
-                        current = widget.currentText()
-                        widget.blockSignals(True)
-                        widget.clear()
-                        widget.addItems(resource_ids)
-                        idx = widget.findText(current)
-                        if idx >= 0:
-                            widget.setCurrentIndex(idx)
-                        widget.blockSignals(False)
+        # gain_rules_table: 仅第 2 列（资源ID）是资源下拉框，跳过第 0 列（规则类型）
+        for i in range(self.gain_rules_table.rowCount()):
+            widget = self.gain_rules_table.cellWidget(i, 2)
+            if isinstance(widget, QComboBox):
+                current = widget.currentText()
+                widget.blockSignals(True)
+                widget.clear()
+                widget.addItems(resource_ids)
+                idx = widget.findText(current)
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+                widget.blockSignals(False)
+        # day_overrides_table: 仅第 1 列（资源ID）是资源下拉框
+        for i in range(self.day_overrides_table.rowCount()):
+            widget = self.day_overrides_table.cellWidget(i, 1)
+            if isinstance(widget, QComboBox):
+                current = widget.currentText()
+                widget.blockSignals(True)
+                widget.clear()
+                widget.addItems(resource_ids)
+                idx = widget.findText(current)
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+                widget.blockSignals(False)
 
     def get_resource_defs(self):
         defs = []
@@ -2434,11 +2617,11 @@ class ConfigPanel(QWidget):
         rules = []
         for i in range(self.gain_rules_table.rowCount()):
             type_widget = self.gain_rules_table.cellWidget(i, 0)
-            param_item = self.gain_rules_table.item(i, 1)
+            param_widget = self.gain_rules_table.cellWidget(i, 1)
             rid_widget = self.gain_rules_table.cellWidget(i, 2)
             amt_widget = self.gain_rules_table.cellWidget(i, 3)
             rtype = type_widget.currentText() if type_widget else '每天'
-            param = param_item.text().strip() if param_item else ''
+            param = param_widget.text().strip() if param_widget else ''
             rid = rid_widget.currentText() if rid_widget else ''
             amt = amt_widget.value() if amt_widget else 0
             if rid:
@@ -2460,7 +2643,10 @@ class ConfigPanel(QWidget):
                 type_combo.setCurrentIndex(idx)
             self.gain_rules_table.setCellWidget(i, 0, type_combo)
 
-            self.gain_rules_table.setItem(i, 1, QTableWidgetItem(str(r.get('param', ''))))
+            param_edit = QLineEdit(str(r.get('param', '')))
+            param_edit.setPlaceholderText(_gain_rule_param_placeholder(rtype))
+            self.gain_rules_table.setCellWidget(i, 1, param_edit)
+            type_combo.currentTextChanged.connect(lambda text, r=i: self._update_param_placeholder(r, text))
 
             rid_combo = QComboBox()
             rid_combo.addItems(resource_ids)
@@ -2552,7 +2738,10 @@ class ConfigPanel(QWidget):
         type_combo = QComboBox()
         type_combo.addItems(rule_types)
         self.gain_rules_table.setCellWidget(row, 0, type_combo)
-        self.gain_rules_table.setItem(row, 1, QTableWidgetItem(""))
+        param_edit = QLineEdit()
+        param_edit.setPlaceholderText(_gain_rule_param_placeholder("每天"))
+        self.gain_rules_table.setCellWidget(row, 1, param_edit)
+        type_combo.currentTextChanged.connect(lambda text, r=row: self._update_param_placeholder(r, text))
         rid_combo = QComboBox()
         rid_combo.addItems(resource_ids)
         self.gain_rules_table.setCellWidget(row, 2, rid_combo)
@@ -2832,52 +3021,97 @@ class ConfigPanel(QWidget):
         if weight_data:
             self._set_weight_data(weight_data)
 
+        # Phase 2: 同步模拟起始日期
+        start_date_str = getattr(store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+        try:
+            qd = QDate.fromString(start_date_str, "yyyy-MM-dd")
+            if qd.isValid():
+                self.sim_start_date_edit.blockSignals(True)
+                self.sim_start_date_edit.setDate(qd)
+                self.sim_start_date_edit.blockSignals(False)
+        except Exception:
+            pass
+
         self._update_preview()
 
 
-def _gain_rule_type_to_gui(rule_type: str) -> str:
-    mapping = {
-        'every_n_days:1': '每天',
-        'every_n_days': '每N天',
-        'weekly': '每周几',
-        'monthly_day': '每月第几天',
-        'monthly_week': '每月第几周几',
-    }
-    if rule_type.startswith('every_n_days:'):
-        n = rule_type.split(':')[1].strip()
-        if n == '1':
+def _gain_rule_type_to_gui(rule_type: str, param: str = '') -> str:
+    """将归一化后的 rule_type + param 转为 GUI 显示的类型标签。
+
+    归一化后 rule_type 不再含冒号/参数后缀，类型判定完全依赖 rule_type + param。
+    """
+    if rule_type == 'every_n_days':
+        if param in ('1', ''):
             return '每天'
         return '每N天'
-    for key, val in mapping.items():
-        if rule_type.startswith(key):
-            return val
+    if rule_type == 'weekly':
+        return '每周几'
+    if rule_type == 'monthly_day':
+        # 参数含逗号（月,日格式）→ "指定日期"；纯数字或空 → "每月第几天"
+        if ',' in param:
+            return '指定日期'
+        return '每月第几天'
+    if rule_type == 'monthly_week':
+        return '每月第几周几'
+
+    # 兼容旧格式（rule_type 中仍含冒号+参数，未归一化数据）
+    if rule_type.startswith('every_n_days:'):
+        n = rule_type.split(':')[1].strip()
+        return '每天' if n == '1' else '每N天'
+    if rule_type.startswith('monthly_day:'):
+        param_str = rule_type.split(':', 1)[1].strip()
+        return '指定日期' if ',' in param_str else '每月第几天'
+    if rule_type.startswith('weekly:'):
+        return '每周几'
+    if rule_type.startswith('monthly_week:'):
+        return '每月第几周几'
+
     return '每天'
 
 
-def _gain_rule_param_to_gui(rule_type: str) -> str:
-    if rule_type.startswith('every_n_days:'):
-        n = rule_type.split(':')[1].strip()
-        return n if n != '1' else ''
-    if rule_type.startswith('weekly:'):
-        return rule_type.split(':')[1].strip()
-    if rule_type.startswith('monthly_day:'):
-        return rule_type.split(':')[1].strip()
-    if rule_type.startswith('monthly_week:'):
-        params = rule_type.split(':')[1].strip()
-        return params
-    return ''
+def _gain_rule_param_to_gui(rule_type: str, param: str = '') -> str:
+    """将归一化后的 rule_type + param 转为 GUI 显示的参数字符串。
+
+    归一化后 param 独立承载参数值，不再从 rule_type 字符串中提取。
+    """
+    if rule_type == 'every_n_days':
+        return param if param not in ('1', '') else ''
+    if rule_type in ('weekly', 'monthly_day', 'monthly_week'):
+        return param
+
+    # 兼容旧格式（rule_type 中仍含冒号+参数）
+    if ':' in rule_type:
+        if rule_type.startswith('every_n_days:'):
+            n = rule_type.split(':')[1].strip()
+            return n if n != '1' else ''
+        return rule_type.split(':', 1)[1].strip()
+
+    return param if param else ''
 
 
 def _gui_gain_type_to_store(gui_type: str) -> str:
     mapping = {
-        '每天': 'every_n_days:1',
+        '每天': 'every_n_days',
         '每N天': 'every_n_days',
         '每周几': 'weekly',
         '每月第几天': 'monthly_day',
         '每月第几周几': 'monthly_week',
         '指定日期': 'monthly_day',
     }
-    return mapping.get(gui_type, 'every_n_days:1')
+    return mapping.get(gui_type, 'every_n_days')
+
+
+def _gain_rule_param_placeholder(gui_type: str) -> str:
+    """返回规则类型对应的参数列 placeholder 提示文本。"""
+    hints = {
+        '每天': '无需参数',
+        '每N天': '间隔天数，例：3',
+        '每周几': '1–7（周一至周日），例：1',
+        '每月第几天': '1–31，例：1',
+        '每月第几周几': '周,日（1–5, 1–7），例：1,1',
+        '指定日期': '月,日（1–12, 1–31），例：6,15',
+    }
+    return hints.get(gui_type, '请输入参数')
 
 
 def _pity_start(pity):
@@ -2920,7 +3154,7 @@ def _pity_counter_group(pity):
 
 def _daily_income(store):
     for rule in store.gain_rules:
-        if rule.rule_type.startswith('every_n_days:1') or rule.rule_type == 'every_n_days:1':
+        if rule.rule_type == 'every_n_days' and (rule.param == '1' or rule.param == ''):
             amt = rule.gains.get('draw_resource', 0)
             if amt > 0:
                 return int(amt)

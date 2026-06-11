@@ -1,10 +1,9 @@
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Union
 import time
 import uuid
 from ..core import (
-    GachaState, Pool, Action, DrawAction, WaitAction,
-    InfoVector, Strategy, StrategyContext, StopCondition, PoolSchedule,
-    TargetCardSet, ResourceGainFunction, CompactResult,
+    GachaState, Pool, DrawAction, WaitAction,
+    InfoVector, Strategy, StrategyContext, StopCondition, TargetCardSet, ResourceGainFunction, CompactResult,
     SimulationCollector, InfoVectorCollector, CompactCollector,
 )
 from ..core.pity import PityEngine, PityState
@@ -62,7 +61,7 @@ class GachaService:
         strategy: Strategy,
         stop_condition: StopCondition,
         target_cards: TargetCardSet,
-        schedule_manager: Optional['PoolScheduleManager'] = None,
+        schedule_manager: Optional['PoolScheduleManager'] = None,  # noqa: F821
         resource_gain: Optional[ResourceGainFunction] = None,
         pity_engine: Optional[PityEngine] = None,
         pity_state: Optional[PityState] = None,

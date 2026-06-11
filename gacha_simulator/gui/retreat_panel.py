@@ -9,11 +9,11 @@ import sys
 import os
 import traceback
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QComboBox, QSplitter,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QEvent
 
 from .chart_webview import ChartWebView
 
@@ -21,8 +21,16 @@ _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from gacha_simulator.core.config_store import ConfigStore
-from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
+from gacha_simulator.core.config_store import ConfigStore  # noqa: E402
+from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold  # noqa: E402
+
+
+class WheelEventFilter(QObject):
+    """阻止 QComboBox/QSpinBox/QDoubleSpinBox 在未聚焦时响应鼠标滚轮。"""
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel and not obj.hasFocus():
+            return True
+        return super().eventFilter(obj, event)
 
 
 class RetreatWorker(QThread):
@@ -40,10 +48,9 @@ class RetreatWorker(QThread):
         num_bins,
         num_curve_points,
         pool_names,
-        desire_weights=None,
-        miss_cost_weights=None,
-        card_value_weights=None,
+        store=None,
         no_draw_resource=None,
+        no_draw_resources=None,
         no_draw_pool_resources=None,
         cost_per_draw=None,
         use_draw_units=False,
@@ -57,10 +64,9 @@ class RetreatWorker(QThread):
         self.num_bins = num_bins
         self.num_curve_points = num_curve_points
         self.pool_names = pool_names
-        self.desire_weights = desire_weights
-        self.miss_cost_weights = miss_cost_weights
-        self.card_value_weights = card_value_weights
+        self._store = store
         self.no_draw_resource = no_draw_resource
+        self.no_draw_resources = no_draw_resources or {}
         self.no_draw_pool_resources = no_draw_pool_resources or {}
         self.cost_per_draw = cost_per_draw
         self.use_draw_units = use_draw_units
@@ -70,6 +76,11 @@ class RetreatWorker(QThread):
             self.progress.emit("正在计算脆弱性分析...", 10)
             from gacha_simulator.core.vulnerability import compute_vulnerability_analysis
 
+            # P33：权重从 ConfigStore 直取，不再由面板搬运
+            desire_weights = self._store.desire_weights if self._store else None
+            miss_cost_weights = self._store.miss_cost_weights if self._store else None
+            card_value_weights = self._store.card_value_weights if self._store else None
+
             analysis = compute_vulnerability_analysis(
                 self.simulation_results,
                 self.target_specs,
@@ -78,9 +89,9 @@ class RetreatWorker(QThread):
                 alpha=self.alpha,
                 num_bins=self.num_bins,
                 num_curve_points=self.num_curve_points,
-                desire_weights=self.desire_weights,
-                miss_cost_weights=self.miss_cost_weights,
-                card_value_weights=self.card_value_weights,
+                desire_weights=desire_weights,
+                miss_cost_weights=miss_cost_weights,
+                card_value_weights=card_value_weights,
                 cost_per_draw=self.cost_per_draw,
                 use_draw_units=self.use_draw_units,
             )
@@ -89,7 +100,13 @@ class RetreatWorker(QThread):
             from gacha_simulator.core.vulnerability import plot_vulnerability, plot_vulnerability_ridge
             import numpy as np
 
-            ridge_fig = plot_vulnerability_ridge(analysis, pool_names=self.pool_names, no_draw_pool_resources=self.no_draw_pool_resources)
+            from gacha_simulator.core.gdr import parse_gdr_key
+            _, _rkey = parse_gdr_key(self.gdr_key)
+            ridge_fig = plot_vulnerability_ridge(
+                analysis, pool_names=self.pool_names,
+                no_draw_pool_resources=self.no_draw_pool_resources,
+                resource_key=_rkey,
+            )
 
             global_edges = np.array(analysis.global_bin_edges) if analysis.global_bin_edges else None
             pool_specs = {}
@@ -117,6 +134,8 @@ class RetreatPanel(QWidget):
     def __init__(self):
         super().__init__()
         self._store = ConfigStore()
+        self._cost_per_draw_by_resource = {}
+        self.cost_per_draw = 160
         self._worker = None
         self._results = None
         self._simulation_results = None
@@ -139,7 +158,7 @@ class RetreatPanel(QWidget):
 
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
-        populate_gdr_combo(self.gdr_combo)
+        populate_gdr_combo(self.gdr_combo, resource_defs=self._store.resource_defs if self._store else None)
         self.gdr_combo.currentIndexChanged.connect(self._on_gdr_changed)
         config_form.addRow("GDR指标:", self.gdr_combo)
 
@@ -197,22 +216,46 @@ class RetreatPanel(QWidget):
         splitter.addWidget(right)
         splitter.setSizes([300, 700])
 
+        # 安装滚轮过滤器——阻止下拉框/数字框在未聚焦时响应滚轮
+        self._wheel_filter = WheelEventFilter(self)
+        for w in self.findChildren((QComboBox, QSpinBox, QDoubleSpinBox)):
+            w.installEventFilter(self._wheel_filter)
+
     def set_store(self, store):
         self._store = store
+        # P22 S2.3：用公共函数提取多资源类型成本
+        if store and hasattr(store, 'pools'):
+            from gacha_simulator.core.retreat_search import extract_cost_per_draw_by_resource
+            self._cost_per_draw_by_resource = extract_cost_per_draw_by_resource(store.pools)
+            self.cost_per_draw = int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
+        # 重新填充 GDR 下拉框以反映多资源类型展开（_setup_ui 时 store 尚为空）
+        if hasattr(self, 'gdr_combo') and store is not None:
+            old_key = self.gdr_combo.currentData()
+            self.gdr_combo.blockSignals(True)
+            populate_gdr_combo(self.gdr_combo, resource_defs=store.resource_defs)
+            if old_key:
+                idx = self.gdr_combo.findData(old_key)
+                if idx >= 0:
+                    self.gdr_combo.setCurrentIndex(idx)
+            self.gdr_combo.blockSignals(False)
+            self._on_gdr_changed(self.gdr_combo.currentIndex())
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
 
-    def set_simulation_results(self, results, target_specs=None, no_draw_resource=None, no_draw_pool_resources=None):
+    def set_simulation_results(self, results, target_specs=None, no_draw_resource=None, no_draw_resources=None, no_draw_pool_resources=None):
         self._simulation_results = results
         self._target_specs = target_specs
         self._no_draw_resource = no_draw_resource
+        self._no_draw_resources = no_draw_resources or {}
         self._no_draw_pool_resources = no_draw_pool_resources or {}
         if results:
             self.status_label.setText(f"已接收 {len(results)} 条模拟结果")
 
     def _on_gdr_changed(self, index):
         key = self.gdr_combo.currentData()
+        if key is None:
+            return
         default = get_default_threshold(key)
         self.gdr_threshold_spin.setValue(default)
 
@@ -234,19 +277,13 @@ class RetreatPanel(QWidget):
         return pool_names
 
     def _extract_cost_per_draw(self):
-        """从配置中提取单抽成本，默认 160。"""
-        if self._store is None or not self._store.pools:
-            return 160
-        for pe in self._store.pools:
-            cost_str = getattr(pe, 'cost', '')
-            if not cost_str:
-                continue
-            try:
-                parts = cost_str.split(':')
-                if len(parts) == 2:
-                    return int(float(parts[1]))
-            except (ValueError, IndexError):
-                continue
+        """【P22 S2.3】取 draw_resource 的每抽成本，回退 160。"""
+        if self._cost_per_draw_by_resource:
+            return int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
+        if self._store and hasattr(self._store, 'pools') and self._store.pools:
+            from gacha_simulator.core.retreat_search import extract_cost_per_draw_by_resource
+            self._cost_per_draw_by_resource = extract_cost_per_draw_by_resource(self._store.pools)
+            return int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
         return 160
 
     def _run_analysis(self):
@@ -267,14 +304,6 @@ class RetreatPanel(QWidget):
         pool_names = self._get_pool_names()
         cost_per_draw = self._extract_cost_per_draw()
 
-        desire_weights = None
-        miss_cost_weights = None
-        card_value_weights = None
-        if self._config_panel:
-            desire_weights = self._config_panel.get_desire_weights()
-            miss_cost_weights = self._config_panel.get_miss_cost_weights()
-            card_value_weights = self._config_panel.get_card_value_weights()
-
         self._worker = RetreatWorker(
             simulation_results=self._simulation_results,
             target_specs=target_specs,
@@ -284,10 +313,9 @@ class RetreatPanel(QWidget):
             num_bins=num_bins,
             num_curve_points=num_curve,
             pool_names=pool_names,
-            desire_weights=desire_weights,
-            miss_cost_weights=miss_cost_weights,
-            card_value_weights=card_value_weights,
+            store=self._store,
             no_draw_resource=getattr(self, '_no_draw_resource', None),
+            no_draw_resources=getattr(self, '_no_draw_resources', {}),
             no_draw_pool_resources=getattr(self, '_no_draw_pool_resources', {}),
             cost_per_draw=cost_per_draw,
         )
@@ -306,38 +334,44 @@ class RetreatPanel(QWidget):
 
     def _on_finished(self, result):
         self.run_btn.setEnabled(True)
+        if not result:
+            return
+        try:
+            self._results = result
+            analysis = result["analysis"]
+            pool_specs = result["pool_specs"]
+            ridge_fig = result.get("ridge_fig")
+            pool_names = result["pool_names"]
 
-        self._results = result
-        analysis = result["analysis"]
-        pool_specs = result["pool_specs"]
-        ridge_fig = result.get("ridge_fig")
-        pool_names = result["pool_names"]
+            summary = (
+                f"总体失败率: {analysis.overall_failure_rate:.1%}  |  "
+                f"模拟次数: {analysis.n_simulations}  |  "
+                f"α = {analysis.alpha}"
+            )
+            self.status_label.setText(summary)
 
-        summary = (
-            f"总体失败率: {analysis.overall_failure_rate:.1%}  |  "
-            f"模拟次数: {analysis.n_simulations}  |  "
-            f"α = {analysis.alpha}"
-        )
-        self.status_label.setText(summary)
+            charts: dict[str, object] = {}
+            if ridge_fig is not None:
+                charts["总览"] = ridge_fig
 
-        charts: dict[str, object] = {}
-        if ridge_fig is not None:
-            charts["总览"] = ridge_fig
+            for pr in analysis.pool_results:
+                pname = pool_names.get(pr.pool_id, pr.pool_id)
+                spec_data = pool_specs.get(pr.pool_id, {})
 
-        for pr in analysis.pool_results:
-            pname = pool_names.get(pr.pool_id, pr.pool_id)
-            spec_data = pool_specs.get(pr.pool_id, {})
+                combined_fig = spec_data.get("combined_figure") if isinstance(spec_data, dict) else None
+                if combined_fig is not None:
+                    charts[pname] = combined_fig
 
-            combined_fig = spec_data.get("combined_figure") if isinstance(spec_data, dict) else None
-            if combined_fig is not None:
-                charts[pname] = combined_fig
+            if charts:
+                self.chart_webview.set_charts(charts)
+            else:
+                self.chart_webview.show_message("无数据可绘制")
 
-        if charts:
-            self.chart_webview.set_charts(charts)
-        else:
-            self.chart_webview.show_message("无数据可绘制")
-
-        self.vulnerability_finished.emit(analysis)
+            self.vulnerability_finished.emit(analysis)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText("结果展示失败，请查看控制台")
 
     def _on_error(self, err):
         self.run_btn.setEnabled(True)

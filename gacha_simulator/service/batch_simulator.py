@@ -13,9 +13,9 @@ from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import Pool as MPPool
 from dataclasses import dataclass, field as dc_field
 
-from gacha_simulator.core.stop_condition import StopCondition, AllPoolsEndCondition
+from gacha_simulator.core.stop_condition import AllPoolsEndCondition
 from gacha_simulator.core.strategy import (
-    STRATEGY_REGISTRY, create_strategy,
+    create_strategy,
 )
 
 
@@ -68,7 +68,7 @@ class SimulationEnv:
 
 def _build_pity_engine_from_gui(pity_config, pools, pool_featured_map=None, pool_ssr_map=None, pool_type_map=None):
     from gacha_simulator.core.pity import (
-        PityEngine, PityState, PoolPitySpec,
+        PityEngine, PoolPitySpec,
         PityDefParsed, SoftPityBehavior, HardPityBehavior,
     )
     if not pity_config.get('enabled', True):
@@ -200,11 +200,12 @@ def _wk_init(env: SimulationEnv, target_specs: Dict[str, int] = None):
     _wk_env = env
     _wk_return_compact = getattr(env, 'return_compact', True)
 
-    # 预导入模拟核心模块，消除首次 _run_single 调用的懒加载开销。
-    # 在 Windows spawn 模式下，每个 worker 是全新 Python 进程，
-    # 首次 import GachaState/GachaService 合计约 200-500ms。
-    import gacha_simulator.core as _core  # noqa: F401
-    import gacha_simulator.service as _svc  # noqa: F401
+    # 不在此处预导入 gacha_simulator.core / .service。
+    # Windows spawn 下每个 worker 同时执行 initializer，若预导入
+    # scipy（通过 core → bootstrap → scipy.stats），4 个 worker
+    # 同时加载大 DLL 可触发页面文件耗尽 (ImportError: DLL load
+    # failed: 页面文件太小)。懒加载在 _run_single 首次调用时触发，
+    # 各 worker 错峰加载，内存峰值更低。
 
     if target_specs:
         from gacha_simulator.core import TargetCard, TargetCardSet
@@ -363,41 +364,111 @@ def run_batch_parallel(
     # 改为 divisor=16 后，chunksize≈4，首次进度约 1 秒内出现，同时保持合理 IPC 效率。
     chunksize = max(1, num_simulations // (max_workers * 16))
 
-    with MPPool(
-        processes=max_workers,
-        initializer=_wk_init,
-        initargs=(env, target_specs),
-    ) as mp_pool:
+    # Windows spawn 模式下频繁创建/销毁 Pool 可导致 worker 进程 EOFError，
+    # 进而引发父进程 MaybeEncodingError。以逐级降并发重试来绕过系统资源瓶颈。
+    mp_failed = False
+    for _retry in range(3):  # workers=N, N/2, N/4
+        workers = max(1, max_workers // (2 ** _retry))
+        try:
+            with MPPool(
+                processes=workers,
+                initializer=_wk_init,
+                initargs=(env, target_specs),
+            ) as mp_pool:
+                results = [] if on_result is None else None
+                extraction_packets = []
+                n_failed = 0
+                for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
+                    # 解包 worker 返回值：
+                    # - tuple (compact, extraction)：return_compact=True 路径（兼容 on_result 回调）
+                    # - 非 tuple：return_compact=False 路径，直接是 extraction_packet
+                    if isinstance(result, tuple) and len(result) == 2:
+                        compact, ext_pkt = result
+                    else:
+                        compact = None
+                        ext_pkt = result
+
+                    if on_result is not None:
+                        if compact is not None:
+                            on_result(compact)
+                        else:
+                            n_failed += 1
+                    elif compact is not None:
+                        results.append(compact)
+
+                    if ext_pkt is not None:
+                        extraction_packets.append(ext_pkt)
+
+                    if progress_callback:
+                        progress_callback(i + 1, num_simulations)
+                if n_failed > 0:
+                    print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
+            break
+        except Exception as e:
+            ename = type(e).__name__
+            if workers > 1:
+                import sys
+                import time
+                print(f"[run_batch_parallel] {ename}，以 workers={max(1, workers // 2)} 重试…",
+                      file=sys.stderr)
+                time.sleep(0.5)
+                continue
+            # workers=1 也失败 → 记录并走单进程兜底
+            import sys
+            import traceback as _tb
+            print(f"[run_batch_parallel] {ename} (workers=1)，回退到单进程内联执行",
+                  file=sys.stderr)
+            _tb.print_exc()
+            mp_failed = True
+            break
+    else:
+        # 循环未 break（3 次迭代全部 workers < 1 或边界情况）
+        mp_failed = True
+
+    if mp_failed:
+        # 单进程兜底：直接在当前线程循环调用 _run_single，不 spawn 子进程
+        # 需要手动初始化 extractor（Pool 路径由 _wk_init 完成）
+        from gacha_simulator.core.streaming import WorkerLocalExtractor
+        _local_extractor = WorkerLocalExtractor(
+            pool_end_times=env.pool_end_times,
+            target_ids=env.target_ids,
+            ssr_ids=env.ssr_ids,
+            target_specs=target_specs or {},
+            initial_resources=env.initial_resources,
+            n_heatmap_bins=getattr(env, 'n_heatmap_bins', 50),
+            max_keep=min(200, max(10, len(target_specs or {}) * 2 + 10)),
+        )
         results = [] if on_result is None else None
         extraction_packets = []
         n_failed = 0
-        for i, result in enumerate(mp_pool.imap_unordered(_wk_run_single, tasks, chunksize=chunksize)):
-            # 解包 worker 返回值：
-            # - tuple (compact, extraction)：return_compact=True 路径（兼容 on_result 回调）
-            # - 非 tuple：return_compact=False 路径，直接是 extraction_packet
-            if isinstance(result, tuple) and len(result) == 2:
-                compact, ext_pkt = result
-            else:
+        for idx in range(num_simulations):
+            s = seeds[idx]
+            try:
+                compact = _run_single(env, target_set, s, initial_resources)
+            except Exception:
+                import traceback as _tb2
+                _tb2.print_exc()
                 compact = None
-                ext_pkt = result
-
-            if on_result is not None:
-                if compact is not None:
+            if compact is not None:
+                ext_pkt = None
+                try:
+                    ext_pkt = _local_extractor.process(compact)
+                except Exception:
+                    pass
+                if on_result is not None:
                     on_result(compact)
                 else:
-                    n_failed += 1
-            elif compact is not None:
-                results.append(compact)
-
-            if ext_pkt is not None:
-                extraction_packets.append(ext_pkt)
-
+                    results.append(compact)
+                if ext_pkt is not None:
+                    extraction_packets.append(ext_pkt)
+            else:
+                n_failed += 1
             if progress_callback:
-                progress_callback(i + 1, num_simulations)
+                progress_callback(idx + 1, num_simulations)
         if n_failed > 0:
-            print(f"[WARNING] {n_failed}/{num_simulations} simulations failed")
+            print(f"[WARNING] {n_failed}/{num_simulations} simulations failed (single-process fallback)")
 
-    # 合并 worker 提取结果
+    # 合并 worker / 单进程提取结果
     merged_extraction = None
     if extraction_packets:
         from gacha_simulator.core.streaming import merge_extraction_packets
@@ -430,9 +501,6 @@ class SimulationEnvBuilder:
     def from_config_store(config_store) -> SimulationEnv:
         from gacha_simulator.core.pool import Pool, Reward, parse_cost_string
         from gacha_simulator.core.schedule import PoolScheduleManager, PoolSchedule
-        from gacha_simulator.core.resource_gain import (
-            PeriodicResourceGain, ScheduleResourceGain, CompositeResourceGain,
-        )
 
         DAY = 86400
         pool_entries = config_store.pools
@@ -623,79 +691,27 @@ class SimulationEnvBuilder:
     @staticmethod
     def _build_resource_gain(config_store, end_time):
         from gacha_simulator.core.resource_gain import (
-            PeriodicResourceGain, ScheduleResourceGain, CompositeResourceGain,
+            ScheduleResourceGain, CompositeResourceGain,
+            expand_gain_rules_to_schedule,
         )
+        import datetime as _dt
+
         gain_functions = []
-        schedule = {}
         total_days = int(end_time / 86400) + 1 if end_time else 30
 
-        for rule in getattr(config_store, 'gain_rules', []):
-            rule_type = getattr(rule, 'rule_type', 'every_n_days')
-            param = getattr(rule, 'param', '1')
-            gains = getattr(rule, 'gains', {}) or {}
-            for rid, amount in gains.items():
-                amount = float(amount)
-                if amount <= 0:
-                    continue
-                if rule_type.startswith('every_n_days'):
-                    n_part = rule_type.split(':', 1)[1] if ':' in rule_type else param
-                    n = int(n_part) if n_part else 1
-                    for day in range(0, total_days, n):
-                        if day not in schedule:
-                            schedule[day] = {}
-                        schedule[day][rid] = schedule[day].get(rid, 0) + amount
-                elif rule_type.startswith('weekly'):
-                    import datetime
-                    wday_part = rule_type.split(':', 1)[1] if ':' in rule_type else param
-                    target_wday = int(wday_part) if wday_part else 1
-                    for day in range(total_days):
-                        try:
-                            d = datetime.date.fromordinal(day + 735000)
-                            if d.isoweekday() == target_wday:
-                                if day not in schedule:
-                                    schedule[day] = {}
-                                schedule[day][rid] = schedule[day].get(rid, 0) + amount
-                        except Exception:
-                            pass
-                elif rule_type.startswith('monthly_day:'):
-                    target_day = int(rule_type.split(':', 1)[1]) if ':' in rule_type else 1
-                    for month_start in range(0, total_days, 30):
-                        day = month_start + target_day - 1
-                        if 0 <= day < total_days:
-                            if day not in schedule:
-                                schedule[day] = {}
-                            schedule[day][rid] = schedule[day].get(rid, 0) + amount
-                elif rule_type.startswith('monthly_week:'):
-                    week_param = rule_type.split(':', 1)[1] if ':' in rule_type else '1-1'
-                    parts = week_param.split('-')
-                    week_num = int(parts[0]) if len(parts) >= 1 and parts[0] else 1
-                    wday = int(parts[1]) if len(parts) >= 2 and parts[1] else 1
-                    import datetime
-                    for month_start in range(0, total_days, 30):
-                        for d_offset in range(30):
-                            day = month_start + d_offset
-                            if day >= total_days:
-                                break
-                            try:
-                                dt = datetime.date.fromordinal(day + 735000)
-                                if dt.isoweekday() == wday:
-                                    week_of_month = (d_offset // 7) + 1
-                                    if week_of_month == week_num:
-                                        if day not in schedule:
-                                            schedule[day] = {}
-                                        schedule[day][rid] = schedule[day].get(rid, 0) + amount
-                            except Exception:
-                                pass
+        # 解析起始日期（Phase 2 预留，当前从 gains.txt 加载）
+        start_date_str = getattr(config_store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+        try:
+            start_date = _dt.date.fromisoformat(start_date_str)
+        except (ValueError, TypeError):
+            start_date = _dt.date(2013, 6, 2)
 
-        for override in getattr(config_store, 'day_overrides', []):
-            day = getattr(override, 'day', 0)
-            gains = getattr(override, 'gains', {}) or {}
-            for rid, amount in gains.items():
-                amount = float(amount)
-                if amount > 0 and 0 <= day < total_days:
-                    if day not in schedule:
-                        schedule[day] = {}
-                    schedule[day][rid] = schedule[day].get(rid, 0) + amount
+        schedule = expand_gain_rules_to_schedule(
+            gain_rules=list(getattr(config_store, 'gain_rules', [])),
+            day_overrides=list(getattr(config_store, 'day_overrides', [])),
+            total_days=total_days,
+            start_date=start_date,
+        )
 
         if schedule:
             gain_functions.append(ScheduleResourceGain(schedule, total_days))
