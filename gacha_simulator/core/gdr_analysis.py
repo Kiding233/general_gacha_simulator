@@ -201,8 +201,8 @@ def compute_gdr_percentage(history: List[InfoVector], target_ids: List[str]) -> 
     return (target / total) * 100.0
 
 
-class GDRCalculator:
-    """广义出率计算器 - 支持多种内置GDR类型"""
+class LegacyGDRCalculator:
+    """[DEPRECATED] 旧版 GDR 计算器（InfoVector 路径）——已被 core.gdr.GDRCalculator 取代。"""
     
     TYPE_COUNT = 'count'
     TYPE_PERCENTAGE = 'percentage'

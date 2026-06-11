@@ -1,4 +1,3 @@
-import pytest
 from gacha_simulator.core.worst_impact import (
     ConditionalResourceDistribution,
     WorstImpactResult,

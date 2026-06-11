@@ -1,7 +1,8 @@
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
-from .strategy import strategy_type_to_key, strategy_key_to_type, STRATEGY_REGISTRY
+from .strategy import strategy_type_to_key, STRATEGY_REGISTRY
 
 
 @dataclass
@@ -103,6 +104,7 @@ class ConfigStore:
     stop_condition_params: Dict[str, Any] = field(default_factory=dict)
     auto_wait: bool = True
     card_weights: Dict[str, CardWeightEntry] = field(default_factory=dict)
+    sim_start_date: str = field(default_factory=lambda: _dt.date.today().isoformat())
     simulation_count: int = 1000
     max_workers: int = 4
     seed: int = 42
@@ -132,6 +134,26 @@ class ConfigStore:
         self.stop_condition_params.clear()
         self.auto_wait = True
         self.card_weights.clear()
+        self.sim_start_date = _dt.date.today().isoformat()
         self.simulation_count = 1000
         self.max_workers = 4
         self.seed = 42
+
+    # ── GDR 权重便捷属性 ──────────────────────────────────────────
+    # 从 card_weights 提取，供 make_gdr_calculator() 使用。
+    # 调用方通过 store.xxx_weights 取值，无需手动搬运 UI 控件。
+
+    @property
+    def desire_weights(self):
+        """Dict[str, float]: 每张目标卡的抽取意愿权重"""
+        return {cid: cw.desire_weight for cid, cw in self.card_weights.items()}
+
+    @property
+    def miss_cost_weights(self):
+        """Dict[str, float]: 每张目标卡的错失代价权重"""
+        return {cid: cw.miss_cost_weight for cid, cw in self.card_weights.items()}
+
+    @property
+    def card_value_weights(self):
+        """Dict[str, float]: 每张卡的卡牌价值权重"""
+        return {cid: cw.card_value for cid, cw in self.card_weights.items()}

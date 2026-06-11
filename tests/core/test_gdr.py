@@ -2,7 +2,7 @@
 import math
 import pytest
 from gacha_simulator.core.gdr import (
-    GDRDefinition, SuccessChecker, compute_success_probability,
+    GDRDefinition, GDRCalculator, compute_success_probability,
     UNIFIED_GDR_REGISTRY, compute_gdr_from_compact, populate_gdr_combo,
 )
 
@@ -57,12 +57,12 @@ def test_success_checker_lower_is_better():
         compute_from_compact=lambda c, **kw: 30.0,
         lower_is_better=True,
     )
-    checker = SuccessChecker({'card_A': 1}, gdr_key=test_key)
+    checker = GDRCalculator({'card_A': 1}, gdr_key=test_key)
     # value=30 <= threshold=50 → 成功
     assert checker.is_success({}) is True
 
     # 阈值更低时 value=30 <= threshold=20 → 失败
-    checker2 = SuccessChecker({'card_A': 1}, gdr_key=test_key, gdr_threshold=20.0)
+    checker2 = GDRCalculator({'card_A': 1}, gdr_key=test_key, gdr_threshold=20.0)
     assert checker2.is_success({}) is False
 
     del UNIFIED_GDR_REGISTRY[test_key]
@@ -270,3 +270,287 @@ def test_populate_gdr_combo_lower_is_better_prefix():
             break
     assert found, "lower_is_better GDR 应出现在 combo 中且带 (-) 前缀"
     del UNIFIED_GDR_REGISTRY[test_key]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# P22 多资源类型支持——新公共函数测试
+# ═══════════════════════════════════════════════════════════════════
+
+class TestParseGdrKey:
+    """parse_gdr_key() 单元测试"""
+
+    def test_plain_key_defaults_to_draw_resource(self):
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, resource_id = parse_gdr_key('resource_remaining')
+        assert base_key == 'resource_remaining'
+        assert resource_id == 'draw_resource'
+
+    def test_qualified_key_parses_correctly(self):
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, resource_id = parse_gdr_key('resource_remaining:exchange_currency')
+        assert base_key == 'resource_remaining'
+        assert resource_id == 'exchange_currency'
+
+    def test_non_resource_key_defaults(self):
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, resource_id = parse_gdr_key('target_achievement')
+        assert base_key == 'target_achievement'
+        assert resource_id == 'draw_resource'
+
+    def test_key_with_multiple_colons(self):
+        """仅第一个 ':' 为分隔符"""
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, resource_id = parse_gdr_key('a:b:c')
+        assert base_key == 'a'
+        assert resource_id == 'b:c'
+
+    def test_none_input_returns_safe_default(self):
+        """GUI 初始化时 currentData() 可能为 None，不应崩溃"""
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, resource_id = parse_gdr_key(None)
+        assert base_key == ''
+        assert resource_id == 'draw_resource'
+
+
+class TestIsResourceGdr:
+    """is_resource_gdr() 单元测试"""
+
+    def test_resource_gdr_plain_key(self):
+        from gacha_simulator.core.gdr import is_resource_gdr
+        assert is_resource_gdr('resource_remaining') is True
+        assert is_resource_gdr('resource_consumed') is True
+        assert is_resource_gdr('resource_per_card') is True
+        assert is_resource_gdr('resource_efficiency') is True
+
+    def test_resource_gdr_qualified_key(self):
+        from gacha_simulator.core.gdr import is_resource_gdr
+        assert is_resource_gdr('resource_remaining:exchange_currency') is True
+
+    def test_non_resource_key(self):
+        from gacha_simulator.core.gdr import is_resource_gdr
+        assert is_resource_gdr('target_achievement') is False
+        assert is_resource_gdr('all_targets') is False
+        assert is_resource_gdr('draw_conversion_efficiency') is False
+
+    def test_invalid_key(self):
+        from gacha_simulator.core.gdr import is_resource_gdr
+        assert is_resource_gdr('nonexistent_gdr') is False
+
+    def test_none_input_returns_false(self):
+        """GUI 初始化时 currentData() 可能为 None，不应崩溃"""
+        from gacha_simulator.core.gdr import is_resource_gdr
+        assert is_resource_gdr(None) is False
+
+
+class TestGetExpandedGdrEntries:
+    """get_expanded_gdr_entries() 单元测试"""
+
+    def test_no_resource_defs_returns_17(self):
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries
+        entries = get_expanded_gdr_entries()
+        assert len(entries) == 17
+
+    def test_two_resource_types_returns_21(self):
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries
+        entries = get_expanded_gdr_entries({
+            'draw_resource': '抽卡资源',
+            'exchange_currency': '兑换货币',
+        })
+        assert len(entries) == 21
+
+    def test_no_duplicate_original_keys(self):
+        """展开后不应出现原始 resource_remaining（无 : 后缀）"""
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries
+        entries = get_expanded_gdr_entries({
+            'draw_resource': '抽卡资源',
+            'exchange_currency': '兑换货币',
+        })
+        keys = [e[0] for e in entries]
+        assert 'resource_remaining' not in keys
+        assert 'resource_remaining:draw_resource' in keys
+        assert 'resource_remaining:exchange_currency' in keys
+
+    def test_display_name_format(self):
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries
+        entries = get_expanded_gdr_entries({
+            'draw_resource': '抽卡资源',
+            'exchange_currency': '兑换货币',
+        })
+        for key, display, lib, thr in entries:
+            if key == 'resource_remaining:exchange_currency':
+                assert '资源剩余' in display
+                assert '兑换货币' in display
+                break
+        else:
+            assert False, "未找到 resource_remaining:exchange_currency"
+
+
+class TestResolveGdrDefinition:
+    """resolve_gdr_definition() 单元测试"""
+
+    def test_hit_by_full_qualified_key(self):
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        defn = resolve_gdr_definition('resource_remaining:exchange_currency')
+        assert defn is not None
+        assert defn.key == 'resource_remaining'
+
+    def test_hit_by_base_key_fallback(self):
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        defn = resolve_gdr_definition('resource_remaining')
+        assert defn is not None
+        assert defn.key == 'resource_remaining'
+
+    def test_invalid_key_returns_none(self):
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        assert resolve_gdr_definition('nonexistent_key') is None
+
+    def test_none_input_returns_none(self):
+        """GUI 初始化时 currentData() 可能为 None，不应崩溃"""
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        assert resolve_gdr_definition(None) is None
+
+    def test_lower_is_better_preserved(self):
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        defn = resolve_gdr_definition('resource_consumed:exchange_currency')
+        assert defn is not None
+        assert defn.lower_is_better is True
+
+
+class TestMultiResourceCompute:
+    """多资源类型端到端 GDR 计算测试"""
+
+    def test_resource_remaining_reads_correct_resource(self):
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        compact = {
+            'final_resources': {'draw_resource': 100.0, 'exchange_currency': 50.0},
+            'total_consumed': {},
+            'card_counts': {},
+        }
+        val_draw = compute_gdr_from_compact(compact, {}, 'resource_remaining')
+        assert val_draw == 100.0
+        val_ex = compute_gdr_from_compact(compact, {}, 'resource_remaining:exchange_currency')
+        assert val_ex == 50.0
+
+    def test_resource_consumed_reads_correct_resource(self):
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        compact = {
+            'final_resources': {},
+            'total_consumed': {'draw_resource': 200.0, 'exchange_currency': 20.0},
+            'card_counts': {},
+        }
+        val_draw = compute_gdr_from_compact(compact, {}, 'resource_consumed')
+        assert val_draw == 200.0
+        val_ex = compute_gdr_from_compact(compact, {}, 'resource_consumed:exchange_currency')
+        assert val_ex == 20.0
+
+    def test_resource_efficiency_uses_resource_id(self):
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        compact = {
+            'final_resources': {},
+            'total_consumed': {'draw_resource': 1600.0, 'exchange_currency': 10.0},
+            'card_counts': {'card_a': 2},
+        }
+        target_specs = {'card_a': 2}
+        val_draw = compute_gdr_from_compact(compact, target_specs, 'resource_efficiency')
+        assert abs(val_draw - 0.00125) < 1e-9
+        val_ex = compute_gdr_from_compact(compact, target_specs, 'resource_efficiency:exchange_currency')
+        assert abs(val_ex - 0.2) < 1e-9
+
+    def test_resource_per_card_uses_resource_id(self):
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        compact = {
+            'final_resources': {},
+            'total_consumed': {'draw_resource': 320.0, 'exchange_currency': 8.0},
+            'card_counts': {'card_a': 1},
+        }
+        target_specs = {'card_a': 1}
+        val_draw = compute_gdr_from_compact(compact, target_specs, 'resource_per_card')
+        assert val_draw == 320.0
+        val_ex = compute_gdr_from_compact(compact, target_specs, 'resource_per_card:exchange_currency')
+        assert val_ex == 8.0
+
+    def test_resource_per_card_nan_when_zero_obtained(self):
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        import math
+        compact = {
+            'final_resources': {},
+            'total_consumed': {'exchange_currency': 8.0},
+            'card_counts': {},
+        }
+        val = compute_gdr_from_compact(compact, {'card_a': 1}, 'resource_per_card:exchange_currency')
+        assert math.isnan(val)
+
+    def test_gdr_kwargs_resource_id_priority(self):
+        """通过 **gdr_kwargs 传入 resource_id 会被解析值覆盖，不抛 TypeError"""
+        from gacha_simulator.core.gdr import compute_gdr_from_compact
+        compact = {
+            'final_resources': {'exchange_currency': 50.0},
+            'total_consumed': {},
+            'card_counts': {},
+        }
+        val = compute_gdr_from_compact(
+            compact, {}, 'resource_remaining:exchange_currency',
+            resource_id='draw_resource',
+        )
+        assert val == 50.0  # 以 key 解析值为准
+
+    def test_compute_vulnerability_analysis_resource_key_fallback(self):
+        """resource_key=None 时从 gdr_key 解析"""
+        from gacha_simulator.core.gdr import parse_gdr_key
+        _, rid = parse_gdr_key('resource_remaining:exchange_currency')
+        assert rid == 'exchange_currency'
+        _, rid_default = parse_gdr_key('all_targets')
+        assert rid_default == 'draw_resource'
+
+    def test_gdr_binning_inf_detection_with_qualified_key(self):
+        """resource_per_card:exchange_currency 的 inf 检测"""
+        from gacha_simulator.core.gdr import parse_gdr_key
+        base_key, _ = parse_gdr_key('resource_per_card:exchange_currency')
+        assert base_key == 'resource_per_card'
+        base_key2, _ = parse_gdr_key('resource_per_card')
+        assert base_key2 == 'resource_per_card'
+
+    def test_resolve_gdr_definition_for_comparison_analyzer(self):
+        """B12a 场景"""
+        from gacha_simulator.core.gdr import resolve_gdr_definition
+        defn = resolve_gdr_definition('resource_remaining:exchange_currency')
+        assert defn is not None
+        assert defn.lower_is_better is False
+
+    def test_resolve_gdr_definition_for_default_threshold(self):
+        """B18 场景"""
+        from gacha_simulator.core.gdr import get_default_threshold
+        thr = get_default_threshold('resource_remaining:exchange_currency')
+        assert thr == 0.0
+
+    def test_get_default_threshold_none_input(self):
+        """GUI 初始化时 currentData() 可能为 None，不应崩溃——返回 1.0"""
+        from gacha_simulator.core.gdr import get_default_threshold
+        assert get_default_threshold(None) == 1.0
+
+    def test_populate_gdr_combo_with_resource_defs(self):
+        """S2.1 场景: 传入 resource_defs 展开 21 条"""
+        from gacha_simulator.core.gdr import populate_gdr_combo
+
+        class _MockCombo:
+            def clear(self):
+                self.items = []
+            def addItem(self, text, data=None):
+                self.items.append((text, data))
+            def count(self):
+                return len(self.items)
+            def itemData(self, i):
+                return self.items[i][1]
+            def itemText(self, i):
+                return self.items[i][0]
+
+        combo = _MockCombo()
+        populate_gdr_combo(combo, resource_defs={
+            'draw_resource': '抽卡资源',
+            'exchange_currency': '兑换货币',
+        })
+        assert combo.count() == 21
+        keys = [combo.itemData(i) for i in range(combo.count())]
+        assert 'resource_remaining' not in keys
+        assert 'resource_remaining:draw_resource' in keys
+        assert 'resource_remaining:exchange_currency' in keys

@@ -1,4 +1,3 @@
-import pytest
 from gacha_simulator.generator.schedule_generator import PeriodicScheduleGenerator
 from gacha_simulator.core.schedule import PoolSchedule
 

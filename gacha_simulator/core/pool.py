@@ -22,6 +22,12 @@ def _parse_atom(token: str) -> CostOption:
 
 
 def _tokenize(cost_str: str) -> List[str]:
+    """将 cost 字符串按逗号或大于号切分为 OR 分支。
+
+    `,` 和 `>` 语义相同——均表示按书写顺序的强制优先级：
+    列表靠前的选项会被优先尝试，付不起才回退到后续选项。
+    `>` 仅用于提升可读性（显式表达优先级意图）。
+    """
     tokens = []
     current = []
     depth = 0
@@ -32,7 +38,7 @@ def _tokenize(cost_str: str) -> List[str]:
         elif ch == ')':
             depth -= 1
             current.append(ch)
-        elif ch == ',' and depth == 0:
+        elif ch in (',', '>') and depth == 0:
             tokens.append(''.join(current).strip())
             current = []
         else:
@@ -116,11 +122,12 @@ def parse_cost_string(cost_str: str) -> PoolCost:
 
 
 def cost_to_string(cost: PoolCost) -> str:
+    """将 PoolCost 序列化为字符串，OR 分支用 `>` 连接以表达优先级语义。"""
     parts = []
     for option in cost:
         sub_parts = [f"{rid}:{amt}" for rid, amt in option.items()]
         parts.append('&'.join(sub_parts))
-    return ','.join(parts)
+    return ' > '.join(parts)
 
 
 @dataclass

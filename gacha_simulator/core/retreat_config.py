@@ -1,3 +1,4 @@
+import datetime as _dt
 from typing import Dict
 from .config_store import ConfigStore, PoolEntry, PityConfig, PityDef, GainRule, DayOverride, TargetCardEntry, CardDefEntry, PoolDistEntry
 
@@ -22,6 +23,18 @@ class RetreatConfigBuilder:
         offset_day = from_pool.end_day if from_pool.end_day > 0 else (from_pool.start_day + 21)
 
         truncated = ConfigStore()
+
+        # Phase 2: 复制原始 sim_start_date 并偏移 offset_day 天
+        original_start_str = getattr(original_store, 'sim_start_date', None)
+        if not original_start_str:
+            original_start = _dt.date.today()
+        else:
+            try:
+                original_start = _dt.date.fromisoformat(original_start_str)
+            except (ValueError, TypeError):
+                original_start = _dt.date.today()
+        truncated_start = original_start + _dt.timedelta(days=offset_day)
+        truncated.sim_start_date = truncated_start.isoformat()
 
         truncated.pools = []
         for p in original_store.pools:

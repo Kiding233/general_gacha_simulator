@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, TYPE_CHECKING
+from typing import List, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .info_vector import InfoVector
@@ -77,8 +77,7 @@ class DropRateBetweenT1T2(GeneralizedDropRate):
         self.t2 = t2
         self.target_id = target_id
 
-    @classmethod
-    def description(cls) -> str:
+    def description(self) -> str:
         return f"{self.t1}到{self.t2}次抽卡之间的平均出率"
 
     def compute(self, t: int, history: List['InfoVector']) -> float:

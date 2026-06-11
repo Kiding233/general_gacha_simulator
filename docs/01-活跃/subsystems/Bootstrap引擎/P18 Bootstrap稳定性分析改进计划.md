@@ -1,3 +1,4 @@
+<!-- META: P18 | module:subsystems/Bootstrap引擎 | status:in_progress | last:2026-06-11 -->
 # P18 Bootstrap 稳定性分析改进计划
 
 > 创建日期：2026-05-26

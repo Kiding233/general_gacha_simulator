@@ -6,7 +6,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple, Union
 
 import numpy as np
 from scipy.stats import bootstrap as _scipy_bootstrap

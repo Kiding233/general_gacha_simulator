@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from ..core.schedule import PoolSchedule, PoolScheduleManager
+from ..core.schedule import PoolSchedule
 
 
 class PoolScheduleGenerator(ABC):

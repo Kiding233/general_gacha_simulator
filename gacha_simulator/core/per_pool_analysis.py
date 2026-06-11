@@ -1,7 +1,7 @@
-from typing import List, Dict, Set, Optional, Any, Callable
+from typing import List, Dict, Set, Callable
 from dataclasses import dataclass, field
 import warnings
-from .gdr import GDRContext, _count_draws, _total_resource_consumed
+from .gdr import GDRContext
 
 
 @dataclass
@@ -304,8 +304,8 @@ def compute_transition_flags_from_gdr(
     if n_sims == 0:
         return []
 
-    from .gdr import UNIFIED_GDR_REGISTRY
-    gdr_defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
+    from .gdr import resolve_gdr_definition
+    gdr_defn = resolve_gdr_definition(gdr_key)
     lower_is_better = gdr_defn.lower_is_better if gdr_defn else False
 
     flags_per_sim = [[] for _ in range(n_sims)]

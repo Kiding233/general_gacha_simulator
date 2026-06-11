@@ -1,8 +1,5 @@
-import pytest
 from gacha_simulator.generator.target_generator import RuleBasedTargetGenerator
 from gacha_simulator.core.pool import Pool, Reward
-from gacha_simulator.core.schedule import PoolSchedule
-from gacha_simulator.core.target_card import TargetCardSet
 
 
 def test_rule_based_generator():

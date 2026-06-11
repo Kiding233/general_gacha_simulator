@@ -305,8 +305,8 @@ class WorstCaseAnalysis:
         return {
             f'VaR({self.alpha})': self.var(),
             f'CVaR({self.alpha})': self.cvar(),
-            f'VaR-均值差': self.var_mean_diff(),
-            f'VaR-中位数差': self.var_median_diff(),
+            'VaR-均值差': self.var_mean_diff(),
+            'VaR-中位数差': self.var_median_diff(),
             '均值': self.dist.mean(),
             '中位数': self.dist.median(),
             '标准差': self.dist.std(),

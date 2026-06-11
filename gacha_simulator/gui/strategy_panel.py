@@ -7,12 +7,11 @@
 
 import sys
 import os
-import traceback
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QSplitter, QFrame, QAbstractItemView, QComboBox, QScrollArea
+    QSplitter, QComboBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -23,8 +22,8 @@ _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from gacha_simulator.core.config_store import ConfigStore
-from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold
+from gacha_simulator.core.config_store import ConfigStore  # noqa: E402
+from gacha_simulator.core.gdr import populate_gdr_combo, get_default_threshold  # noqa: E402
 
 
 class StrategyWorker(QThread):
@@ -383,7 +382,7 @@ class StrategyPanel(QWidget):
 
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
-        populate_gdr_combo(self.gdr_combo)
+        populate_gdr_combo(self.gdr_combo, resource_defs=self._store.resource_defs if self._store else None)
         self.gdr_combo.setCurrentIndex(0)
         self.gdr_combo.currentIndexChanged.connect(self._on_gdr_changed)
         params_layout.addRow("成功判定GDR:", self.gdr_combo)
@@ -528,6 +527,8 @@ class StrategyPanel(QWidget):
 
     def _on_gdr_changed(self, index):
         key = self.gdr_combo.currentData()
+        if key is None:
+            return
         default = get_default_threshold(key)
         self.gdr_threshold_spin.setValue(default)
 
@@ -547,9 +548,7 @@ class StrategyPanel(QWidget):
         num_simulations = self.simulations_spin.value()
         desire_weights, miss_cost_weights = self._get_weights()
 
-        card_value_weights = None
-        if self._config_panel:
-            card_value_weights = self._config_panel.get_card_value_weights()
+        card_value_weights = self._store.card_value_weights if self._store else None
 
         gdr_key = self.gdr_combo.currentData() or 'target_achievement'
 
@@ -640,15 +639,15 @@ class StrategyPanel(QWidget):
 
         steps = result.steps
         if method == "forward":
-            x_labels = [f"+{s.added_card_id}" for s in steps]
+            [f"+{s.added_card_id}" for s in steps]
             x_title = "步骤（添加目标卡）"
         else:
-            x_labels = [f"-{s.removed_card_id}" for s in steps]
+            [f"-{s.removed_card_id}" for s in steps]
             x_title = "步骤（移除目标卡）"
 
         x = np.arange(1, len(steps) + 1)
         y = np.array([s.success_probability for s in steps], dtype=float)
-        target_counts = [len(s.target_set) for s in steps]
+        [len(s.target_set) for s in steps]
 
         threshold = self.success_threshold_spin.value()
         spec = scatter(

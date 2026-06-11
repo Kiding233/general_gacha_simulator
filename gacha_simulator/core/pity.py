@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Set
 import fnmatch
 import os
-import math
 
 
 class PityBehavior(ABC):

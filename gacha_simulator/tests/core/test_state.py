@@ -1,6 +1,5 @@
-import pytest
 from gacha_simulator.core.state import GachaState
-from gacha_simulator.core.pool import Pool, Reward, parse_cost_string
+from gacha_simulator.core.pool import Pool, parse_cost_string
 
 
 def test_can_afford_dict():

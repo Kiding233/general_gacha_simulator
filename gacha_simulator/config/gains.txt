@@ -4,10 +4,11 @@
 # 时间单位统一使用"天"（day），day=0 表示第1天开始
 #
 # === 规则格式 ===
-# [every_n_days: n]       每 n 天循环一次
+# [every_n_days: n]       每 n 天循环一次（n=1 可省略参数写作 [every_n_days]，即每天）
 # [weekly: day_of_week]   每周几（1=周一, 2=周二, ..., 7=周日）
 # [monthly_day: day]      每月第几天（1-31）
-# [monthly_week: week, day_of_week]  每月第几周的周几（week:1-5, day:1-7）
+# [monthly_day: month,day]  每年指定月日触发（1-12, 1-31），如 3,15 = 每年3月15日
+# [monthly_week: week,day_of_week]  每月第几周的周几（week:1-5, day:1-7），分隔符为逗号
 #
 # 规则体: resource_id: amount
 #

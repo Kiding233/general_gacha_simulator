@@ -285,7 +285,8 @@ def compute_bins(
     vals = np.asarray(samples, dtype=np.float64)
 
     # 0.5 resource_per_card 的 inf 处理
-    if gdr_key == "resource_per_card" and np.any(~np.isfinite(vals)):
+    from .gdr import parse_gdr_key
+    if parse_gdr_key(gdr_key)[0] == "resource_per_card" and np.any(~np.isfinite(vals)):
         return _bins_with_inf(vals)
 
     # 1. 第一层：有限格点检测（全量样本）

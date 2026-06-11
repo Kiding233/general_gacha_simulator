@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 import numpy as np
 
@@ -17,8 +17,8 @@ class StreamingSuccessCounter(StreamingAnalyzer):
                  desire_weights=None, miss_cost_weights=None,
                  card_value_weights=None, ssr_ids=None,
                  weapon_character_map=None):
-        from .gdr import SuccessChecker
-        self._checker = SuccessChecker(
+        from .gdr import GDRCalculator
+        self._checker = GDRCalculator(
             target_specs, gdr_key, gdr_threshold,
             desire_weights, miss_cost_weights, card_value_weights,
             ssr_ids, weapon_character_map,
@@ -125,10 +125,10 @@ def extract_process(compact, target_ids, target_specs, gdr_key,
                     desire_weights=None, miss_cost_weights=None,
                     card_value_weights=None, ssr_ids=None,
                     weapon_character_map=None):
-    from .gdr import SuccessChecker
+    from .gdr import GDRCalculator
     from .process_trace import infer_events
 
-    checker = SuccessChecker(
+    checker = GDRCalculator(
         target_specs, gdr_key, gdr_threshold,
         desire_weights, miss_cost_weights, card_value_weights,
         ssr_ids, weapon_character_map,
@@ -270,6 +270,7 @@ class WorkerLocalExtractor:
                     'cumulative_consumed': dict(cum_consumed),
                     'cumulative_gained': dict(cum_gained),
                     'pool_end_resource': pool_end_res.get('draw_resource', 0.0),
+                    'pool_end_resources': dict(pool_end_res),
                 })
                 transition_flags.append(self._check_success(cum_cards))
                 pool_idx += 1
@@ -286,6 +287,7 @@ class WorkerLocalExtractor:
                 'cumulative_consumed': dict(cum_consumed),
                 'cumulative_gained': dict(cum_gained),
                 'pool_end_resource': pool_end_res.get('draw_resource', 0.0),
+                'pool_end_resources': dict(pool_end_res),
             })
             transition_flags.append(self._check_success(cum_cards))
             pool_idx += 1
@@ -484,7 +486,7 @@ class DrawSequenceExtractor(StreamingAnalyzer):
             return
 
         card_ids = compact.get('draw_card_ids', [])
-        pool_ids = compact.get('draw_pool_ids', [])
+        compact.get('draw_pool_ids', [])
         pity_flags = compact.get('draw_pity', [])
         times = compact.get('draw_times', [])
         draw_resources_consumed = compact.get('draw_resources_consumed', [])
@@ -524,6 +526,7 @@ class DrawSequenceExtractor(StreamingAnalyzer):
                 'cumulative_consumed': cumulative_consumed,
                 'cumulative_gained': cumulative_gained,
                 'pool_end_resource': pool_end_res.get('draw_resource', 0.0),
+                'pool_end_resources': dict(pool_end_res),
             })
 
     def _update_transition(self, compact):

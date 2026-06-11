@@ -1,3 +1,4 @@
+<!-- META: P25 | module:subsystems/分布估计 | status:in_progress | last:2026-06-11 -->
 # P25 EVT 改进——离散型与退化分布处理
 
 > 创建日期：2026-05-28 | 状态：设计中（v4——新增 MLE-IC 极端分位数稳定性分析 + Bootstrap 兼容性 + TIB vs 百分位法）

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -153,16 +152,15 @@ class AnalysisItemWidget(QFrame):
         return widget
 
 
-# 支持「以抽数为单位」换算的资源类 GDR（除以 cost_per_draw 转为抽数等价量）
-_DRAW_UNIT_GDR_KEYS = {'resource_remaining', 'resource_consumed', 'resource_per_card'}
 
 class AnalysisWorker(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(str, int)
     error = pyqtSignal(str)
 
-    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_cond_selections=None, best_case_cond_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None, use_draw_units=False, cost_per_draw=160, no_draw_resource=None, no_draw_pool_resources=None, pool_names=None):
+    def __init__(self, results, ctx, pool_end_times, selected, alpha, output_dir, store=None, success_criteria='all_targets', cond_gdr='抽出全部目标卡', target_gdr='资源剩余', cond_threshold=0.5, primary_gdr='简单目标达成率', best_primary_gdr='简单目标达成率', gdr_dist_selections=None, cumulative_by_pool_selections=None, worst_case_cond_selections=None, best_case_cond_selections=None, draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None, use_draw_units=False, cost_per_draw=160, no_draw_resource=None, no_draw_resources=None, no_draw_pool_resources=None, pool_names=None):
         super().__init__()
+        self._store = store
         self.results = results
         self.ctx = ctx
         self.pool_end_times = pool_end_times
@@ -185,7 +183,13 @@ class AnalysisWorker(QThread):
         self.transition_flags = transition_flags or []
         self.use_draw_units = use_draw_units
         self.cost_per_draw = cost_per_draw
+        if store and hasattr(store, 'pools'):
+            from gacha_simulator.core.retreat_search import extract_cost_per_draw_by_resource
+            self._cost_per_draw_by_resource = extract_cost_per_draw_by_resource(store.pools)
+        else:
+            self._cost_per_draw_by_resource = {}
         self.no_draw_resource = no_draw_resource
+        self.no_draw_resources = no_draw_resources or {}
         self.no_draw_pool_resources = no_draw_pool_resources or {}
         self.pool_names = pool_names or {}
 
@@ -205,8 +209,6 @@ class AnalysisWorker(QThread):
             ChartSpec, ChartAnnotation,
             HistogramData, HistogramOverlay, CDFData, RidgeData,
             ScatterData, ScatterTrace, BarData, HeatmapData, Waterfall3DData,
-            histogram, cdf, ridge, scatter, scatter_multi, scatter_colored,
-            bar, heatmap,
         )
 
         def _strip_pid(pid: str) -> str:
@@ -218,7 +220,7 @@ class AnalysisWorker(QThread):
         aggregate_data = self.results
         alpha = self.alpha
 
-        from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact, compute_gdr_from_cumulative
+        from gacha_simulator.core.gdr import make_gdr_calculator, compute_gdr_from_cumulative, get_expanded_gdr_entries, resolve_gdr_definition, is_resource_gdr, parse_gdr_key
         from gacha_simulator.core.gdr_binning import compute_bins
         from gacha_simulator.core.distribution import EmpiricalDistribution, JointSamples
         from gacha_simulator.core.per_pool_analysis import (
@@ -266,34 +268,33 @@ class AnalysisWorker(QThread):
 
         target_specs = ctx.target_specs if ctx else {}
         ssr_ids = ctx.ssr_ids if ctx else set()
+        _gdr_entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store else None
+        )
         _display_to_key = {
-            (('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name): key
-            for key, defn in UNIFIED_GDR_REGISTRY.items()
+            (('(-)' + display) if lower_is_better else display): key
+            for key, display, lower_is_better, _thr in _gdr_entries
         }
         _key_to_display = {
-            key: (('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name)
-            for key, defn in UNIFIED_GDR_REGISTRY.items()
+            key: (('(-)' + display) if lower_is_better else display)
+            for key, display, lower_is_better, _thr in _gdr_entries
         }
 
         gdr_dists = {}
         if any(s[0] == '_prepare_gdr_dists' for s in active_steps):
             self._emit('计算GDR分布 (0/1)...', 0)
-            for gdr_def in UNIFIED_GDR_REGISTRY.values():
-                name = gdr_def.key
+            for gdr_key, display, lower_is_better, _thr in _gdr_entries:
                 try:
-                    values = []
-                    for agg in aggregate_data:
-                        v = compute_gdr_from_compact(agg, target_specs, name)
-                        values.append(v)
-                    gdr_dists[name] = EmpiricalDistribution(values)
+                    checker = make_gdr_calculator(self._store, target_specs, gdr_key, ssr_ids=ssr_ids)
+                    values = [checker.compute_gdr(agg) for agg in aggregate_data]
+                    gdr_dists[gdr_key] = EmpiricalDistribution(values)
                 except Exception:
                     pass
             step_done('GDR分布计算完成')
 
         if self.use_draw_units and self.cost_per_draw > 0:
-            _resource_gdr_keys = _DRAW_UNIT_GDR_KEYS
-            for _key in _resource_gdr_keys:
-                if _key in gdr_dists:
+            for _key in list(gdr_dists.keys()):
+                if is_resource_gdr(_key):
                     _orig = gdr_dists[_key]
                     _converted = [v / self.cost_per_draw for v in _orig.samples]
                     gdr_dists[_key] = EmpiricalDistribution(_converted)
@@ -309,12 +310,15 @@ class AnalysisWorker(QThread):
                     continue
 
                 no_draw_ref = None
-                if metric_key == 'resource_remaining' and self.no_draw_resource is not None:
-                    no_draw_ref = self.no_draw_resource
-                    if self.use_draw_units and self.cost_per_draw > 0:
-                        no_draw_ref = no_draw_ref / self.cost_per_draw
+                if parse_gdr_key(metric_key)[0] == 'resource_remaining':
+                    _rid = parse_gdr_key(metric_key)[1]
+                    _raw_ref = self.no_draw_resources.get(_rid, self.no_draw_resource)
+                    if _raw_ref is not None:
+                        no_draw_ref = _raw_ref
+                        if self.use_draw_units and self.cost_per_draw > 0:
+                            no_draw_ref = no_draw_ref / self.cost_per_draw
 
-                _unit_suffix = ' (抽)' if (metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else ''
+                _unit_suffix = ' (抽)' if (is_resource_gdr(metric_key) and self.use_draw_units) else ''
                 annotations = []
                 if no_draw_ref is not None:
                     annotations.append(ChartAnnotation(
@@ -327,8 +331,8 @@ class AnalysisWorker(QThread):
                     bin_result = compute_bins(
                         metric_key, samples_arr,
                         target_specs=target_specs,
-                        cost_per_draw=self.cost_per_draw,
-                        use_draw_units=self.use_draw_units and metric_key in _DRAW_UNIT_GDR_KEYS,
+                        cost_per_draw=self.cost_per_draw if is_resource_gdr(metric_key) else None,
+                        use_draw_units=self.use_draw_units and is_resource_gdr(metric_key),
                     )
                     _title = f'{metric_name}{_unit_suffix} 分布'
                     if bin_result.inf_label:
@@ -374,7 +378,7 @@ class AnalysisWorker(QThread):
                 if dist.n < 2:
                     continue
                 _display_name = _key_to_display.get(name, name)
-                if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
+                if is_resource_gdr(name) and self.use_draw_units:
                     _display_name = f'{_display_name} (抽)'
                 rows.append({
                     'name': _display_name,
@@ -408,7 +412,7 @@ class AnalysisWorker(QThread):
             primary_name = self.primary_gdr
             primary_key = _display_to_key.get(primary_name, primary_name)
             primary_dist = gdr_dists.get(primary_key)
-            primary_defn = UNIFIED_GDR_REGISTRY.get(primary_key)
+            primary_defn = resolve_gdr_definition(primary_key)
             primary_lib = primary_defn.lower_is_better if primary_defn else False
             if primary_dist and primary_dist.n > 0:
                 from gacha_simulator.core.distribution import JointSamples
@@ -436,7 +440,7 @@ class AnalysisWorker(QThread):
                         g_mean = dist.mean()
                         g_var = dist.var(alpha)
                         _wc_display = _key_to_display.get(name, name)
-                        if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
+                        if is_resource_gdr(name) and self.use_draw_units:
                             _wc_display = f'{_wc_display} (抽)'
                         table_rows.append([
                             _wc_display,
@@ -463,10 +467,10 @@ class AnalysisWorker(QThread):
                     )
 
                 # 主概览图: 直方图 + 尾部叠加
-                _wc_use_du = self.use_draw_units and primary_key in _DRAW_UNIT_GDR_KEYS
+                _wc_use_du = self.use_draw_units and is_resource_gdr(primary_key)
                 _wc_bins = compute_bins(primary_key, np.array(primary_dist.samples),
                                         target_specs=target_specs,
-                                        cost_per_draw=self.cost_per_draw,
+                                        cost_per_draw=self.cost_per_draw if is_resource_gdr(primary_key) else None,
                                         use_draw_units=_wc_use_du)
                 wc_overlays = []
                 wc_anns = [
@@ -511,12 +515,12 @@ class AnalysisWorker(QThread):
                     cond = joint.conditional_second(lambda f: f >= var_val) if primary_lib else joint.conditional_second(lambda f: f <= var_val)
                     if cond.n < 2:
                         continue
-                    _wc2_use_du = self.use_draw_units and name in _DRAW_UNIT_GDR_KEYS
+                    _wc2_use_du = self.use_draw_units and is_resource_gdr(name)
                     _wc_bins2 = compute_bins(name, np.array(dist.samples),
                                              target_specs=target_specs,
-                                             cost_per_draw=self.cost_per_draw,
+                                             cost_per_draw=self.cost_per_draw if is_resource_gdr(name) else None,
                                              use_draw_units=_wc2_use_du)
-                    _wc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
+                    _wc_xlabel = f'{display} (抽)' if (is_resource_gdr(name) and self.use_draw_units) else display
                     wc_cond_op = '≥' if primary_lib else '≤'
                     wc_cond_label = tail_label_short if primary_lib else f'VaR({alpha})'
                     ovs2 = [HistogramOverlay(
@@ -543,7 +547,7 @@ class AnalysisWorker(QThread):
             primary_name = self.best_primary_gdr
             primary_key = _display_to_key.get(primary_name, primary_name)
             primary_dist = gdr_dists.get(primary_key)
-            primary_defn_best = UNIFIED_GDR_REGISTRY.get(primary_key)
+            primary_defn_best = resolve_gdr_definition(primary_key)
             primary_lib_best = primary_defn_best.lower_is_better if primary_defn_best else False
             if primary_dist and primary_dist.n > 0:
                 from gacha_simulator.core.distribution import JointSamples
@@ -570,7 +574,7 @@ class AnalysisWorker(QThread):
                     if cond_dist.n > 0:
                         g_mean = dist.mean()
                         display = _key_to_display.get(name, name)
-                        if name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
+                        if is_resource_gdr(name) and self.use_draw_units:
                             display = f'{display} (抽)'
                         g_var = dist.var(alpha)
                         table_rows.append([
@@ -599,10 +603,10 @@ class AnalysisWorker(QThread):
                     )
 
                 # 主概览图: 直方图 + 顶部叠加
-                _bc_use_du = self.use_draw_units and primary_key in _DRAW_UNIT_GDR_KEYS
+                _bc_use_du = self.use_draw_units and is_resource_gdr(primary_key)
                 _bc_bins = compute_bins(primary_key, np.array(primary_dist.samples),
                                         target_specs=target_specs,
-                                        cost_per_draw=self.cost_per_draw,
+                                        cost_per_draw=self.cost_per_draw if is_resource_gdr(primary_key) else None,
                                         use_draw_units=_bc_use_du)
                 bc_overlays = []
                 bc_anns = [
@@ -648,12 +652,12 @@ class AnalysisWorker(QThread):
                     cond = joint.conditional_second(bc_cond_filter2)
                     if cond.n < 2:
                         continue
-                    _bc2_use_du = self.use_draw_units and name in _DRAW_UNIT_GDR_KEYS
+                    _bc2_use_du = self.use_draw_units and is_resource_gdr(name)
                     _bc_bins2 = compute_bins(name, np.array(dist.samples),
                                              target_specs=target_specs,
-                                             cost_per_draw=self.cost_per_draw,
+                                             cost_per_draw=self.cost_per_draw if is_resource_gdr(name) else None,
                                              use_draw_units=_bc2_use_du)
-                    _bc_xlabel = f'{display} (抽)' if (name in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else display
+                    _bc_xlabel = f'{display} (抽)' if (is_resource_gdr(name) and self.use_draw_units) else display
                     bc_cond_op = '≤' if primary_lib_best else '≥'
                     bc_cond_label2 = best_tail_label_short if primary_lib_best else f'上{1-alpha}分位数'
                     ovs2 = [HistogramOverlay(
@@ -683,10 +687,12 @@ class AnalysisWorker(QThread):
             cond_key = _gdr_key_by_name_cond.get(cond_name)
             target_key = _gdr_key_by_name_cond.get(target_name)
             if cond_key and target_key:
-                cond_values = [compute_gdr_from_compact(agg, target_specs, cond_key, ssr_ids=ssr_ids) for agg in aggregate_data]
-                target_values = [compute_gdr_from_compact(agg, target_specs, target_key, ssr_ids=ssr_ids) for agg in aggregate_data]
+                cond_checker = make_gdr_calculator(self._store, target_specs, cond_key, ssr_ids=ssr_ids)
+                target_checker = make_gdr_calculator(self._store, target_specs, target_key, ssr_ids=ssr_ids)
+                cond_values = [cond_checker.compute_gdr(agg) for agg in aggregate_data]
+                target_values = [target_checker.compute_gdr(agg) for agg in aggregate_data]
                 _target_unit_suffix = ''
-                if target_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units and self.cost_per_draw > 0:
+                if is_resource_gdr(target_key) and self.use_draw_units and self.cost_per_draw > 0:
                     target_values = [v / self.cost_per_draw for v in target_values]
                     _target_unit_suffix = ' (抽)'
                 joint = JointSamples(list(zip(cond_values, target_values)))
@@ -721,12 +727,12 @@ class AnalysisWorker(QThread):
                             title=f'{cond_gdr_name} 条件下 {target_gdr_name} 的分布统计量',
                         )
 
-                    _cond_use_du = self.use_draw_units and target_key in _DRAW_UNIT_GDR_KEYS
+                    _cond_use_du = self.use_draw_units and is_resource_gdr(target_key)
                     _cond_bins = compute_bins(target_key, np.array(all_target.samples),
                                               target_specs=target_specs,
-                                              cost_per_draw=self.cost_per_draw,
+                                              cost_per_draw=self.cost_per_draw if is_resource_gdr(target_key) else None,
                                               use_draw_units=_cond_use_du)
-                    _cond_unit_suffix = ' (抽)' if (target_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units) else ''
+                    _cond_unit_suffix = ' (抽)' if (is_resource_gdr(target_key) and self.use_draw_units) else ''
                     overlays_cond = []
                     cond_anns = []
                     if success_target.n > 0:
@@ -739,9 +745,10 @@ class AnalysisWorker(QThread):
                             samples=np.array(fail_target.samples), color='red', opacity=0.5,
                             label=f'条件<{success_threshold:.4f}(n={fail_target.n})',
                         ))
-                    if target_key == 'resource_remaining' and self.no_draw_resource is not None:
-                        _ref = self.no_draw_resource
-                        if self.use_draw_units and self.cost_per_draw > 0:
+                    if parse_gdr_key(target_key)[0] == 'resource_remaining':
+                        _rid = parse_gdr_key(target_key)[1]
+                        _ref = self.no_draw_resources.get(_rid, self.no_draw_resource)
+                        if _ref is not None and self.use_draw_units and self.cost_per_draw > 0:
                             _ref = _ref / self.cost_per_draw
                         cond_anns.append(ChartAnnotation(
                             type="vline", value=_ref, color="green", dash="dash",
@@ -1101,7 +1108,12 @@ class AnalysisWorker(QThread):
                     target_achievement_rates.append(achieved / total_target_qty if total_target_qty > 0 else 0.0)
                     collected_ssr = sum(1 for cid in ssr_ids if cum_card_counts.get(cid, 0) > 0)
                     ssr_collection_rates.append(collected_ssr / len(ssr_ids) if ssr_ids else 0.0)
-                    res_rem = snap.get('pool_end_resource', 0.0)
+                    # P22：兼容新旧累计快照格式（pool_end_resources 为多资源 dict）
+                    snap_res = snap.get('pool_end_resources')
+                    if snap_res is not None:
+                        res_rem = snap_res.get('draw_resource', 0.0)
+                    else:
+                        res_rem = snap.get('pool_end_resource', 0.0)
                     resource_remainings.append(res_rem)
                     cumulative_draws_list.append(float(snap.get('cumulative_draws', 0)))
                     cumulative_pity_list.append(float(snap.get('cumulative_pity_draws', 0)))
@@ -1140,26 +1152,32 @@ class AnalysisWorker(QThread):
                             raw = []
                             for snap in self.cumulative_snapshots.get(pid, []):
                                 try:
-                                    v = compute_gdr_from_cumulative(snap, target_specs, metric_key, ssr_ids=ssr_ids)
+                                    v = compute_gdr_from_cumulative(
+                                        snap, target_specs, metric_key, ssr_ids=ssr_ids,
+                                        desire_weights=self._store.desire_weights,
+                                        miss_cost_weights=self._store.miss_cost_weights,
+                                        card_value_weights=self._store.card_value_weights,
+                                    )
                                     raw.append(float(v))
                                 except Exception:
                                     pass
                         pool_dists.append(raw)
 
-                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units and self.cost_per_draw > 0:
+                    if is_resource_gdr(metric_key) and self.use_draw_units and self.cost_per_draw > 0:
                         pool_dists = [[v / self.cost_per_draw for v in d] for d in pool_dists]
 
                     per_pool_baselines = {}
-                    if metric_key == 'resource_remaining' and self.no_draw_pool_resources:
+                    if parse_gdr_key(metric_key)[0] == 'resource_remaining' and self.no_draw_pool_resources:
+                        _, _rid = parse_gdr_key(metric_key)
                         for pid in pool_ids:
                             pool_res = self.no_draw_pool_resources.get(pid, {})
-                            if 'draw_resource' in pool_res:
-                                baseline = float(pool_res['draw_resource'])
+                            if _rid in pool_res:
+                                baseline = float(pool_res[_rid])
                                 if self.use_draw_units and self.cost_per_draw > 0:
                                     baseline = baseline / self.cost_per_draw
                                 per_pool_baselines[pid] = baseline
 
-                    n_pools = len(pool_ids)
+                    len(pool_ids)
                     ridge_series = {}
                     for sid, dist in zip(short_ids, pool_dists):
                         if dist:
@@ -1173,19 +1191,19 @@ class AnalysisWorker(QThread):
 
                     # 合并全部池子样本后统一判定分箱——山脊线图各组共享 bin_edges
                     _all_ridge_vals = np.concatenate(list(ridge_series.values()))
-                    _use_du = self.use_draw_units and metric_key in _DRAW_UNIT_GDR_KEYS
+                    _use_du = self.use_draw_units and is_resource_gdr(metric_key)
                     _ridge_bins = compute_bins(
                         metric_key, _all_ridge_vals,
                         target_specs=target_specs,
-                        cost_per_draw=self.cost_per_draw,
+                        cost_per_draw=self.cost_per_draw if is_resource_gdr(metric_key) else None,
                         use_draw_units=_use_du,
                     )
 
                     _xlabel = metric_name
-                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
+                    if is_resource_gdr(metric_key) and self.use_draw_units:
                         _xlabel = f'{metric_name} (抽)'
                     _cum_title = f'{metric_name} (截止每池)'
-                    if metric_key in _DRAW_UNIT_GDR_KEYS and self.use_draw_units:
+                    if is_resource_gdr(metric_key) and self.use_draw_units:
                         _cum_title = f'{metric_name} (抽, 截止每池)'
                     if ridge_series:
                         _ridge_hints = {}
@@ -1236,8 +1254,8 @@ class AnalysisWorker(QThread):
                 charts['correlation'] = ChartSpec(
                     chart_type="heatmap",
                     data=HeatmapData(
-                        matrix=corr,
-                        row_labels=short,
+                        matrix=corr[::-1],            # 反向行顺序，使矩阵对称排列
+                        row_labels=short[::-1],       # 反向行标签，配合 matrix 行反转
                         col_labels=short,
                         colorscale="RdBu_r",
                     ),
@@ -1277,6 +1295,9 @@ class AnalysisWorker(QThread):
                         target_specs, gdr_key=gdr_key, threshold=threshold,
                         scope=scope, aggregates=self.results,
                         ssr_ids=ssr_ids,
+                        desire_weights=self._store.desire_weights,
+                        miss_cost_weights=self._store.miss_cost_weights,
+                        card_value_weights=self._store.card_value_weights,
                     )
                 else:
                     self._emit('警告: 转变分析缺少数据——transition_flags 和 cumulative_snapshots 均为空',
@@ -1295,7 +1316,7 @@ class AnalysisWorker(QThread):
                 # 使用池名替代池 ID
                 def _pool_label(pid):
                     return self.pool_names.get(pid, pid)
-                transition_labels = [f'{_pool_label(t.from_pool_id)}→{_pool_label(t.to_pool_id)}' for t in trans]
+                [f'{_pool_label(t.from_pool_id)}→{_pool_label(t.to_pool_id)}' for t in trans]
 
                 # 成功率变化折线图
                 ts_rates_traces = [
@@ -1365,13 +1386,133 @@ class AnalysisPanel(QWidget):
         self._chart_webview_initialized = False
         self._summary_data = {}
         self._store = None
+        self._cost_per_draw_by_resource = {}
+        self.cost_per_draw = 160
         self.output_dir = Path(get_user_data_dir('output', 'analysis'))
         self._worker = None
+        # P22: 动态 GDR 条目——_setup_ui 初始化时 _store 为空，set_store 后刷新
+        self._gdr_entries = []
+        self._gdr_names = []
+        self._gdr_dist_widget = None
+        self._wc_cond_widget = None
+        self._bc_cond_widget = None
+        self._cum_widget = None
         self._setup_ui()
+
+    def _build_gdr_names(self):
+        """(重新)构建 GDR 条目列表与显示名列表，依赖 self._store。"""
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries
+        self._gdr_entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store else None
+        )
+        self._gdr_names = [
+            ('(-)' + display) if lower_is_better else display
+            for _key, display, lower_is_better, _thr in self._gdr_entries
+        ]
+
+    @staticmethod
+    def _clear_container_layout(container_widget):
+        """安全清空容器 widget 内所有子控件（QHBoxLayout 行）。"""
+        if container_widget is None:
+            return
+        layout = container_widget.layout()
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            row_layout = item.layout()
+            if row_layout:
+                while row_layout.count():
+                    w = row_layout.takeAt(0)
+                    if w.widget():
+                        w.widget().deleteLater()
+
+    def _repopulate_gdr_combos(self):
+        """重填所有 GDR 相关下拉框（primary/best/cond/target），保留用户之前的选择。"""
+        combos = [
+            (self.primary_gdr_combo, '简单目标达成率'),
+            (self.best_primary_gdr_combo, '简单目标达成率'),
+            (self.cond_gdr_combo, '抽出全部目标卡'),
+            (self.target_gdr_combo, None),
+        ]
+        for combo, default_display in combos:
+            old_text = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(self._gdr_names)
+            if old_text and old_text in self._gdr_names:
+                combo.setCurrentText(old_text)
+            elif default_display and default_display in self._gdr_names:
+                combo.setCurrentText(default_display)
+            else:
+                combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        # target_gdr_combo 特殊处理：匹配 resource_remaining base_key
+        _i_rr = 0
+        for _idx, (_k, _d, _lib, _thr) in enumerate(self._gdr_entries):
+            if _k.split(':')[0] if ':' in _k else _k == 'resource_remaining':
+                _i_rr = _idx
+                break
+        self.target_gdr_combo.blockSignals(True)
+        self.target_gdr_combo.setCurrentIndex(_i_rr)
+        self.target_gdr_combo.blockSignals(False)
+
+    def _rebuild_checkbox_group(self, container_widget, checks_dict, checkbox_label):
+        """清空容器并重建 GDR 复选框组。
+
+        Args:
+            container_widget: 含 QVBoxLayout 的容器 QWidget
+            checks_dict: 要重建的字典 {gdr_name: checkbox_or_dict}
+            checkbox_label: 复选框文本标签；'___gdr_dist___' 表示双复选框模式
+        """
+        if container_widget is None:
+            return
+        self._clear_container_layout(container_widget)
+        checks_dict.clear()
+        layout = container_widget.layout()
+        if layout is None:
+            return
+        is_gdr_dist = (checkbox_label == '___gdr_dist___')
+        for gdr_name in self._gdr_names:
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            name_lbl = QLabel(gdr_name)
+            name_lbl.setStyleSheet("font-size: 11px;")
+            name_lbl.setMinimumWidth(90)
+            row.addWidget(name_lbl)
+            if is_gdr_dist:
+                hist_cb = QCheckBox("分布")
+                hist_cb.setStyleSheet("font-size: 11px;")
+                row.addWidget(hist_cb)
+                cdf_cb = QCheckBox("累积分布")
+                cdf_cb.setStyleSheet("font-size: 11px;")
+                row.addWidget(cdf_cb)
+                checks_dict[gdr_name] = {'hist': hist_cb, 'cdf': cdf_cb}
+            else:
+                cb = QCheckBox(checkbox_label)
+                cb.setChecked(False)
+                cb.setStyleSheet("font-size: 11px;")
+                row.addWidget(cb)
+                checks_dict[gdr_name] = cb
+            row.addStretch()
+            layout.addLayout(row)
 
     def set_store(self, store):
         self._store = store
+        # P22 S2.3：用公共函数提取多资源类型成本
+        if store and hasattr(store, 'pools'):
+            from gacha_simulator.core.retreat_search import extract_cost_per_draw_by_resource
+            self._cost_per_draw_by_resource = extract_cost_per_draw_by_resource(store.pools)
+            self.cost_per_draw = int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
         self._update_cost_per_draw_default()
+        # P22: 刷新 GDR 依赖的所有 UI 元素（_setup_ui 时 _store 为空，条目仅 17 条）
+        if hasattr(self, '_gdr_names') and store is not None:
+            self._build_gdr_names()
+            self._repopulate_gdr_combos()
+            self._rebuild_checkbox_group(self._gdr_dist_widget, self._gdr_dist_checks, '___gdr_dist___')
+            self._rebuild_checkbox_group(self._wc_cond_widget, self._worst_case_cond_checks, '条件分布')
+            self._rebuild_checkbox_group(self._bc_cond_widget, self._best_case_cond_checks, '条件分布')
+            self._rebuild_checkbox_group(self._cum_widget, self._cumulative_by_pool_checks, '分析')
 
     def _get_pool_names(self):
         """构建 {pool_id: pool_name} 映射。"""
@@ -1382,18 +1523,13 @@ class AnalysisPanel(QWidget):
         return names
 
     def _extract_cost_per_draw(self):
-        if self._store is None or not self._store.pools:
-            return 160
-        for pe in self._store.pools:
-            cost_str = getattr(pe, 'cost', '')
-            if not cost_str:
-                continue
-            try:
-                parts = cost_str.split(':')
-                if len(parts) == 2:
-                    return int(float(parts[1]))
-            except (ValueError, IndexError):
-                continue
+        """【P22 S2.3】取 draw_resource 的每抽成本，回退 160。"""
+        if self._cost_per_draw_by_resource:
+            return int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
+        if self._store and hasattr(self._store, 'pools') and self._store.pools:
+            from gacha_simulator.core.retreat_search import extract_cost_per_draw_by_resource
+            self._cost_per_draw_by_resource = extract_cost_per_draw_by_resource(self._store.pools)
+            return int(self._cost_per_draw_by_resource.get('draw_resource', 160.0))
         return 160
 
     def _update_cost_per_draw_default(self):
@@ -1471,17 +1607,16 @@ class AnalysisPanel(QWidget):
         unit_layout.addWidget(self.cost_per_draw_spin, 1, 1)
         layout.addWidget(unit_group)
 
-        from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY as _UNIFIED_GDR_REGISTRY
-        _gdr_names = [
-            ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
-            for defn in _UNIFIED_GDR_REGISTRY.values()
-        ]
+        self._build_gdr_names()  # P22: 统一入口，_gdr_entries/_gdr_names 写入实例属性
 
         self._items = {}
         self._gdr_dist_checks = {}
         self._cumulative_by_pool_checks = {}
         self._worst_case_cond_checks = {}
         self._best_case_cond_checks = {}
+
+        _gdr_names = self._gdr_names  # 局部别名，避免冗长 self._
+        _gdr_entries = self._gdr_entries
 
         for category, items in ANALYSIS_CATEGORIES.items():
             cat_label = QLabel(f"── {category} ──")
@@ -1515,6 +1650,7 @@ class AnalysisPanel(QWidget):
                             gdr_config_layout.addLayout(row)
                             self._gdr_dist_checks[gdr_name] = {'hist': hist_cb, 'cdf': cdf_cb}
                         item_w.add_config_widget(gdr_config_widget)
+                        self._gdr_dist_widget = gdr_config_widget
 
                     if key == 'risk_worst_case':
                         self.primary_gdr_combo = _NoWheelComboBox()
@@ -1543,6 +1679,7 @@ class AnalysisPanel(QWidget):
                             wc_cond_layout.addLayout(row)
                             self._worst_case_cond_checks[gdr_name] = cb
                         item_w.add_config_row("条件分布指标:", wc_cond_widget)
+                        self._wc_cond_widget = wc_cond_widget
 
                     if key == 'risk_best_case':
                         self.best_primary_gdr_combo = _NoWheelComboBox()
@@ -1571,6 +1708,7 @@ class AnalysisPanel(QWidget):
                             bc_cond_layout.addLayout(row)
                             self._best_case_cond_checks[gdr_name] = cb
                         item_w.add_config_row("条件分布指标:", bc_cond_widget)
+                        self._bc_cond_widget = bc_cond_widget
 
                     if key == 'conditional_dist':
                         self.cond_gdr_combo = _NoWheelComboBox()
@@ -1583,7 +1721,12 @@ class AnalysisPanel(QWidget):
                         self.target_gdr_combo = _NoWheelComboBox()
                         self.target_gdr_combo.setMaxVisibleItems(30)
                         self.target_gdr_combo.addItems(_gdr_names)
-                        _i_rr = _gdr_names.index('资源剩余') if '资源剩余' in _gdr_names else 0
+                        # 展开后显示名含资源类型（如「资源剩余 (抽卡资源)」），遍历匹配 base_key
+                        _i_rr = 0
+                        for _idx, (_k, _d, _lib, _thr) in enumerate(_gdr_entries):
+                            if _k.split(':')[0] if ':' in _k else _k == 'resource_remaining':
+                                _i_rr = _idx
+                                break
                         self.target_gdr_combo.setCurrentIndex(_i_rr)
                         item_w.add_config_row("目标指标:", self.target_gdr_combo)
 
@@ -1642,6 +1785,7 @@ class AnalysisPanel(QWidget):
                             cum_layout.addLayout(row)
                             self._cumulative_by_pool_checks[gdr_name] = cb
                         item_w.add_config_widget(cum_widget)
+                        self._cum_widget = cum_widget
 
                     layout.addWidget(item_w)
                 else:
@@ -1737,16 +1881,28 @@ class AnalysisPanel(QWidget):
         if not self.results:
             self.status_label.setText("无模拟结果，无法计算预设阈值")
             return
-        from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries, make_gdr_calculator
         from gacha_simulator.core.distribution import EmpiricalDistribution
         cond_name = self.cond_gdr_combo.currentText()
-        _gdr_key_by_name = {defn.display_name: key for key, defn in UNIFIED_GDR_REGISTRY.items()}
-        cond_key = _gdr_key_by_name.get(cond_name)
+        _entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store else None
+        )
+        # combo 显示名含 '(-)' 前缀，条目中的 display 不含前缀
+        _gdr_key_by_name = {}
+        for _k, _d, _lib, _thr in _entries:
+            _d_with_prefix = ('(-)' + _d) if _lib else _d
+            _gdr_key_by_name[_d_with_prefix] = _k
+         # 同步填充组合框的 data（key 存储在 combo item data 中）
+        cond_key = self.cond_gdr_combo.currentData()
+        if not cond_key:
+            # 回退：通过显示名查找
+            cond_key = _gdr_key_by_name.get(cond_name)
         if not cond_key:
             return
         target_specs = self._gdr_context.target_specs if self._gdr_context else {}
         ssr_ids = self._gdr_context.ssr_ids if self._gdr_context else set()
-        vals = [compute_gdr_from_compact(h, target_specs, cond_key, ssr_ids=ssr_ids) for h in self.results]
+        checker = make_gdr_calculator(self._store, target_specs, cond_key, ssr_ids=ssr_ids)
+        vals = [checker.compute_gdr(h) for h in self.results]
         dist = EmpiricalDistribution(vals)
         if dist.n == 0:
             return
@@ -1850,7 +2006,8 @@ class AnalysisPanel(QWidget):
             self._worker = AnalysisWorker(
                 self.results, self._gdr_context, self._pool_end_times,
                 chart_keys, self.alpha_spin.value(), self.output_dir,
-                self.success_criteria_combo.currentData(),
+                store=self._store,
+                success_criteria=self.success_criteria_combo.currentData(),
                 cond_gdr=self.cond_gdr_combo.currentText(),
                 target_gdr=self.target_gdr_combo.currentText(),
                 cond_threshold=self.threshold_spin.value(),
@@ -1867,6 +2024,7 @@ class AnalysisPanel(QWidget):
                 use_draw_units=self.draw_unit_cb.isChecked(),
                 cost_per_draw=self.cost_per_draw_spin.value(),
                 no_draw_resource=self._no_draw_resource,
+                no_draw_resources=getattr(self, '_no_draw_resources', {}),
                 no_draw_pool_resources=self._no_draw_pool_resources,
                 pool_names=pool_names,
             )
@@ -1895,69 +2053,77 @@ class AnalysisPanel(QWidget):
         QMessageBox.critical(self, "分析异常", err_msg)
 
     def _on_analysis_done(self, charts):
-        from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY
-        from gacha_simulator.visualization.chart_spec import ChartSpec
-        key_to_display = {k: d.display_name for k, d in UNIFIED_GDR_REGISTRY.items()}
-
-        # 收集所有 ChartSpec（表格已统一为 chart_type="table"）
-        chart_specs = {}
-        for key, data in charts.items():
-            if isinstance(data, ChartSpec):
-                chart_specs[key] = data
-
-        # 图表型结果：使用 ChartWebView
-        if chart_specs:
-            self.chart_webview.setVisible(True)
-            # 判断哪些 chart key 是全新的（HTML 中尚无对应 div）
-            new_keys = {k for k in chart_specs if not self.chart_webview.has_chart(k)}
-            if self._chart_webview_initialized and not new_keys:
-                # 纯增量更新：所有 key 均已存在于 HTML 中，只更新数据
-                for key, spec in chart_specs.items():
-                    self.chart_webview.update_chart(key, spec)
-                    self._computed_conditions[key] = self._get_conditions_for_key(key)
-                self._chart_specs_cache.update(chart_specs)  # 同步缓存，避免后续全量重建时混入过期数据
-            else:
-                # 有新增图表或首次加载：合并到缓存后全量重建 HTML
-                self._chart_specs_cache.update(chart_specs)
-                self.chart_webview.set_charts(self._get_ordered_charts(), use_tabs=False)
-                self._chart_webview_initialized = True
-                for key in chart_specs:
-                    self._computed_conditions[key] = self._get_conditions_for_key(key)
-
-        if any(k.startswith('gdr_dist_') for k in charts):
-            self._computed_conditions['gdr_dist'] = self._get_conditions_for_key('gdr_dist')
-        if any(k.startswith('cumulative_by_pool_') for k in charts):
-            self._computed_conditions['cumulative_by_pool'] = self._get_conditions_for_key('cumulative_by_pool')
-        if any(k.startswith('risk_worst_case_') for k in charts):
-            self._computed_conditions['risk_worst_case'] = self._get_conditions_for_key('risk_worst_case')
-        if any(k.startswith('risk_best_case_') for k in charts):
-            self._computed_conditions['risk_best_case'] = self._get_conditions_for_key('risk_best_case')
-        if any(k.startswith('time_heatmap_') for k in charts):
-            self._computed_conditions['time_heatmap'] = self._get_conditions_for_key('time_heatmap')
-        if any(k.startswith('transition_analysis_') for k in charts):
-            self._computed_conditions['transition_analysis'] = self._get_conditions_for_key('transition_analysis')
-
-        if getattr(self, '_pending_statistics', False):
-            self._compute_statistics_unit()
-            self._pending_statistics = False
-
-        selected = self._get_selected()
-        if 'gdr_statistics' in selected and self._needs_computation('gdr_statistics'):
-            self._compute_statistics_unit()
-
-        if self._placeholder_label:
-            self._placeholder_label.setVisible(False)
-
         self.run_btn.setEnabled(True)
-        self.progress_bar.setValue(100)
-        chart_count = len(chart_specs)
-        self.status_label.setText(f"完成，共 {chart_count} 个图表")
+        try:
+            from gacha_simulator.core.gdr import get_expanded_gdr_entries
+            from gacha_simulator.visualization.chart_spec import ChartSpec
+            _gdr_entries_done = get_expanded_gdr_entries(
+                self._store.resource_defs if self._store else None
+            )
+            {k: d for k, d, _lib, _thr in _gdr_entries_done}
+
+            # 收集所有 ChartSpec（表格已统一为 chart_type="table"）
+            chart_specs = {}
+            for key, data in charts.items():
+                if isinstance(data, ChartSpec):
+                    chart_specs[key] = data
+
+            # 图表型结果：使用 ChartWebView
+            if chart_specs:
+                self.chart_webview.setVisible(True)
+                # 判断哪些 chart key 是全新的（HTML 中尚无对应 div）
+                new_keys = {k for k in chart_specs if not self.chart_webview.has_chart(k)}
+                if self._chart_webview_initialized and not new_keys:
+                    # 纯增量更新：所有 key 均已存在于 HTML 中，只更新数据
+                    for key, spec in chart_specs.items():
+                        self.chart_webview.update_chart(key, spec)
+                        self._computed_conditions[key] = self._get_conditions_for_key(key)
+                    self._chart_specs_cache.update(chart_specs)  # 同步缓存，避免后续全量重建时混入过期数据
+                else:
+                    # 有新增图表或首次加载：合并到缓存后全量重建 HTML
+                    self._chart_specs_cache.update(chart_specs)
+                    self.chart_webview.set_charts(self._get_ordered_charts(), use_tabs=False)
+                    self._chart_webview_initialized = True
+                    for key in chart_specs:
+                        self._computed_conditions[key] = self._get_conditions_for_key(key)
+
+            if any(k.startswith('gdr_dist_') for k in charts):
+                self._computed_conditions['gdr_dist'] = self._get_conditions_for_key('gdr_dist')
+            if any(k.startswith('cumulative_by_pool_') for k in charts):
+                self._computed_conditions['cumulative_by_pool'] = self._get_conditions_for_key('cumulative_by_pool')
+            if any(k.startswith('risk_worst_case_') for k in charts):
+                self._computed_conditions['risk_worst_case'] = self._get_conditions_for_key('risk_worst_case')
+            if any(k.startswith('risk_best_case_') for k in charts):
+                self._computed_conditions['risk_best_case'] = self._get_conditions_for_key('risk_best_case')
+            if any(k.startswith('time_heatmap_') for k in charts):
+                self._computed_conditions['time_heatmap'] = self._get_conditions_for_key('time_heatmap')
+            if any(k.startswith('transition_analysis_') for k in charts):
+                self._computed_conditions['transition_analysis'] = self._get_conditions_for_key('transition_analysis')
+
+            if getattr(self, '_pending_statistics', False):
+                self._compute_statistics_unit()
+                self._pending_statistics = False
+
+            selected = self._get_selected()
+            if 'gdr_statistics' in selected and self._needs_computation('gdr_statistics'):
+                self._compute_statistics_unit()
+
+            if self._placeholder_label:
+                self._placeholder_label.setVisible(False)
+
+            self.progress_bar.setValue(100)
+            chart_count = len(chart_specs)
+            self.status_label.setText(f"完成，共 {chart_count} 个图表")
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText("结果展示失败，请查看控制台")
 
     def _compute_statistics_unit(self):
         if not self.results or not self._gdr_context:
             return
 
-        from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY, compute_gdr_from_compact
+        from gacha_simulator.core.gdr import get_expanded_gdr_entries, make_gdr_calculator, is_resource_gdr
         from gacha_simulator.core.bootstrap import BootstrapEngine
         import numpy as np
 
@@ -1981,22 +2147,24 @@ class AnalysisPanel(QWidget):
         cost_per_draw = self.cost_per_draw_spin.value()
         engine = BootstrapEngine(B=1000, ci_level=ci_level, random_seed=42)
 
+        _entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store else None
+        )
+
         from gacha_simulator.core.distribution import EmpiricalDistribution
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
+        for key, _d_name, lower_is_better, _thr in _entries:
             try:
-                vals = []
-                for r in self.results:
-                    v = compute_gdr_from_compact(r, target_specs, key, ssr_ids=ssr_ids)
-                    vals.append(v)
-                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units and cost_per_draw > 0:
+                checker = make_gdr_calculator(self._store, target_specs, key, ssr_ids=ssr_ids)
+                vals = [checker.compute_gdr(r) for r in self.results]
+                if is_resource_gdr(key) and use_draw_units and cost_per_draw > 0:
                     vals = [v / cost_per_draw for v in vals]
                 n = len(vals)
                 mean_val = np.mean(vals)
                 median_val = np.median(vals)
                 std_val = np.std(vals)
                 var_val = EmpiricalDistribution(vals).var(alpha)
-                _display_name = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
-                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units:
+                _display_name = ('(-)' + _d_name) if lower_is_better else _d_name
+                if is_resource_gdr(key) and use_draw_units:
                     _display_name = f'{_display_name} (抽)'
 
                 if n >= 100:
@@ -2034,8 +2202,8 @@ class AnalysisPanel(QWidget):
                 ])
                 self._summary_data[_display_name] = {'mean': f"{mean_val:.4f}"}
             except Exception:
-                _display_name = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
-                if key in _DRAW_UNIT_GDR_KEYS and use_draw_units:
+                _display_name = ('(-)' + _d_name) if lower_is_better else _d_name
+                if is_resource_gdr(key) and use_draw_units:
                     _display_name = f'{_display_name} (抽)'
                 rows.append([_display_name, "-", "-", "-", "-", "-", "-", "-"])
                 self._summary_data[_display_name] = {'mean': "-"}
@@ -2104,7 +2272,7 @@ class AnalysisPanel(QWidget):
 
     def update_results(self, results, target_ids=None, ssr_ids=None, gdr_context=None, pool_end_times=None,
                        draw_sequences=None, heatmap_data=None, cumulative_snapshots=None, transition_flags=None,
-                       no_draw_resource=None, no_draw_pool_resources=None):
+                       no_draw_resource=None, no_draw_resources=None, no_draw_pool_resources=None):
         self.results = results
         self._gdr_context = gdr_context
         self._pool_end_times = pool_end_times or {}
@@ -2113,6 +2281,7 @@ class AnalysisPanel(QWidget):
         self._cumulative_snapshots = cumulative_snapshots or {}
         self._transition_flags = transition_flags or []
         self._no_draw_resource = no_draw_resource
+        self._no_draw_resources = no_draw_resources or {}
         self._no_draw_pool_resources = no_draw_pool_resources or {}
         self._clear_results()
         self.status_label.setText(f"已加载 {len(results)} 条模拟结果，请选择分析项并运行")

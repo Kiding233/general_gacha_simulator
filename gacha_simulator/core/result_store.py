@@ -75,6 +75,7 @@ class StoredDataset:
     cumulative_snapshots: Dict[str, Any] = field(default_factory=dict)
     transition_flags: List[Any] = field(default_factory=list)
     no_draw_resource: Optional[float] = None
+    no_draw_resources: Dict[str, float] = field(default_factory=dict)
     no_draw_pool_resources: Dict[str, Any] = field(default_factory=dict)
     pool_types: Dict[str, str] = field(default_factory=dict)
     initial_resources: Dict[str, float] = field(default_factory=dict)
@@ -101,6 +102,7 @@ class StoredDataset:
             'cumulative_snapshots': self.cumulative_snapshots,
             'transition_flags': self.transition_flags,
             'no_draw_resource': self.no_draw_resource,
+            'no_draw_resources': self.no_draw_resources,
             'no_draw_pool_resources': self.no_draw_pool_resources,
             'pool_types': self.pool_types,
             'initial_resources': self.initial_resources,
@@ -127,6 +129,7 @@ class StoredDataset:
             cumulative_snapshots=d.get('cumulative_snapshots', {}),
             transition_flags=d.get('transition_flags', []),
             no_draw_resource=d.get('no_draw_resource'),
+            no_draw_resources={str(k): float(v) for k, v in d.get('no_draw_resources', {}).items()},
             no_draw_pool_resources=d.get('no_draw_pool_resources', {}),
             pool_types={str(k): str(v) for k, v in d.get('pool_types', {}).items()},
             initial_resources={str(k): float(v) for k, v in d.get('initial_resources', {}).items()},
@@ -292,7 +295,7 @@ class ResultStore(QObject):
                 for attr in ['target_cards', 'initial_resources', 'pool_ids']:
                     a = getattr(fp_a, attr)
                     b = getattr(fp_b, attr)
-                    dims[pair_key][attr] = 'same' if a == b else f'different'
+                    dims[pair_key][attr] = 'same' if a == b else 'different'
         return ComparabilityDiff(
             names=tuple(names),
             dimensions=dimensions_to_flat(dims, names),

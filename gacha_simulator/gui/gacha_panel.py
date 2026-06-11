@@ -3,11 +3,11 @@
 
 import traceback
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QPushButton, QLabel,
     QProgressBar, QTextEdit, QGroupBox, QFormLayout, QSpinBox,
-    QComboBox, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
 import sys
@@ -34,7 +34,7 @@ class SimulationThread(QThread):
 
     def run(self):
         try:
-            from .batch_simulator import SimulationEnvBuilder, SimulationEnv
+            from .batch_simulator import SimulationEnvBuilder
 
             config_store = self.config_store
             N = self.simulation_count
@@ -93,6 +93,7 @@ class SimulationThread(QThread):
             self.status_update.emit("正在计算基线…")
 
             no_draw_resource = None
+            no_draw_resources = {}
             no_draw_pool_resources = {}
             try:
                 no_draw_results = run_batch_parallel(
@@ -105,7 +106,8 @@ class SimulationThread(QThread):
                     strategy_name='no_draw',
                 )
                 if no_draw_results and no_draw_results[0]:
-                    no_draw_resource = no_draw_results[0].get('final_resources', {}).get('draw_resource', None)
+                    no_draw_resources = no_draw_results[0].get('final_resources', {})
+                    no_draw_resource = no_draw_resources.get('draw_resource', None)
                     no_draw_pool_resources = no_draw_results[0].get('pool_end_resources', {})
             except Exception:
                 pass
@@ -138,6 +140,7 @@ class SimulationThread(QThread):
                     'n_results': ext.get('n_results', 0),
                     'n_requested': N,
                     'no_draw_resource': no_draw_resource,
+                    'no_draw_resources': no_draw_resources,
                     'no_draw_pool_resources': no_draw_pool_resources,
                 }
             else:
@@ -156,12 +159,13 @@ class SimulationThread(QThread):
                     'n_results': 0,
                     'n_requested': N,
                     'no_draw_resource': no_draw_resource,
+                    'no_draw_resources': no_draw_resources,
                     'no_draw_pool_resources': no_draw_pool_resources,
                 }
 
             self.finished.emit(result_bundle)
 
-        except Exception as e:
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 

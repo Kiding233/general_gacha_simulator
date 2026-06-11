@@ -5,12 +5,10 @@ import sys
 import os
 import traceback
 from datetime import datetime
-from pathlib import Path
 from PyQt6.QtWidgets import (
-    QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QMessageBox, QFileDialog, QStatusBar, QMenuBar, QMenu, QLabel
+    QMainWindow, QTabWidget, QWidget, QVBoxLayout, QMessageBox, QFileDialog, QStatusBar, QLabel
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 
 from .config_panel import ConfigPanel
@@ -90,6 +88,7 @@ class MainWindow(QMainWindow):
         self.process_analysis_panel = ProcessAnalysisPanel()
 
         self.comparison_analysis_panel = ComparisonAnalysisPanel(self.result_store)
+        self.comparison_analysis_panel.set_config_store(self._store)
 
         # 数据管理面板
         self.data_manager_panel = DataManagerPanel(self.result_store)
@@ -103,9 +102,11 @@ class MainWindow(QMainWindow):
         self.gacha_panel.set_config_panel(self.config_panel)
         self.analysis_panel.set_store(self._store)
         self.plan_search_panel.set_store(self._store)
+        self.plan_search_panel.set_config_panel(self.config_panel)
         self.retreat_panel.set_store(self._store)
         self.retreat_panel.set_config_panel(self.config_panel)
         self.worst_impact_panel.set_config_panel(self.config_panel)
+        self.process_analysis_panel.set_store(self._store)
 
         self.tabs.addTab(self.config_panel, "配置")
         self.tabs.addTab(self.gacha_panel, "批量模拟")
@@ -181,8 +182,10 @@ class MainWindow(QMainWindow):
 
     def _on_config_changed(self, config):
         self.config_panel.apply_to_store()
+        self.analysis_panel.set_store(self._store)
         self.plan_search_panel.set_store(self._store)
         self.retreat_panel.set_store(self._store)
+        self.process_analysis_panel.set_store(self._store)
 
     def _on_tab_changed(self, index):
         widget = self.tabs.widget(index)
@@ -190,6 +193,8 @@ class MainWindow(QMainWindow):
             self.plan_search_panel.set_store(self._store)
         elif widget is self.retreat_panel:
             self.retreat_panel.set_store(self._store)
+        elif widget is self.analysis_panel:
+            self.analysis_panel.set_store(self._store)
         elif widget is self.worst_impact_panel:
             self.worst_impact_panel.set_store(self._store)
         elif widget is self.data_manager_panel:
@@ -199,7 +204,9 @@ class MainWindow(QMainWindow):
         try:
             load_store_from_directory(_DEFAULT_CONFIG_DIR, self._store)
             self.config_panel.refresh_from_store()
+            self.analysis_panel.set_store(self._store)
             self.plan_search_panel.set_store(self._store)
+            self.process_analysis_panel.set_store(self._store)
             self.status_bar.showMessage(f"已加载默认配置: {_DEFAULT_CONFIG_DIR}")
         except Exception as e:
             traceback.print_exc()
@@ -212,7 +219,9 @@ class MainWindow(QMainWindow):
                 self.config_panel.apply_to_store()
                 load_store_from_directory(path, self._store)
                 self.config_panel.refresh_from_store()
+                self.analysis_panel.set_store(self._store)
                 self.plan_search_panel.set_store(self._store)
+                self.process_analysis_panel.set_store(self._store)
                 self.status_bar.showMessage(f"配置已导入: {path}")
             except Exception as e:
                 traceback.print_exc()
@@ -302,6 +311,7 @@ class MainWindow(QMainWindow):
         self.simulation_results = aggregate_data
 
         no_draw_resource = result_bundle.get('no_draw_resource') if isinstance(result_bundle, dict) else None
+        no_draw_resources = result_bundle.get('no_draw_resources', {}) if isinstance(result_bundle, dict) else {}
         no_draw_pool_resources = result_bundle.get('no_draw_pool_resources', {}) if isinstance(result_bundle, dict) else {}
 
         self.analysis_panel.update_results(
@@ -315,6 +325,7 @@ class MainWindow(QMainWindow):
             gdr_context=gdr_context,
             pool_end_times=pool_end_times,
             no_draw_resource=no_draw_resource,
+            no_draw_resources=no_draw_resources,
             no_draw_pool_resources=no_draw_pool_resources,
         )
 
@@ -324,7 +335,7 @@ class MainWindow(QMainWindow):
                 target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
         self.worst_impact_panel.set_simulation_results(aggregate_data, target_specs)
         self.worst_impact_panel._load_last_pool_config()
-        self.retreat_panel.set_simulation_results(aggregate_data, target_specs, no_draw_resource=no_draw_resource, no_draw_pool_resources=no_draw_pool_resources)
+        self.retreat_panel.set_simulation_results(aggregate_data, target_specs, no_draw_resource=no_draw_resource, no_draw_resources=no_draw_resources, no_draw_pool_resources=no_draw_pool_resources)
 
         pool_types = {}
         for pe in self._store.pools:
@@ -414,6 +425,7 @@ class MainWindow(QMainWindow):
             cumulative_snapshots=cumulative_snapshots,
             transition_flags=transition_flags,
             no_draw_resource=no_draw_resource,
+            no_draw_resources=no_draw_resources,
             no_draw_pool_resources=no_draw_pool_resources,
             pool_types=pool_types,
             initial_resources=initial_resources,
@@ -459,6 +471,7 @@ class MainWindow(QMainWindow):
             gdr_context=gdr_context,
             pool_end_times=ds.pool_end_times,
             no_draw_resource=ds.no_draw_resource,
+            no_draw_resources=getattr(ds, 'no_draw_resources', {}),
             no_draw_pool_resources=ds.no_draw_pool_resources,
         )
 
@@ -468,6 +481,7 @@ class MainWindow(QMainWindow):
         self.retreat_panel.set_simulation_results(
             ds.aggregate_data, ds.target_specs,
             no_draw_resource=ds.no_draw_resource,
+            no_draw_resources=getattr(ds, 'no_draw_resources', {}),
             no_draw_pool_resources=ds.no_draw_pool_resources,
         )
 

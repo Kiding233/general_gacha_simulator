@@ -4,7 +4,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QWidget, QLabel,
     QTextBrowser, QDialogButtonBox, QHBoxLayout,
 )
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 
@@ -204,6 +203,7 @@ day: 天数 | resource_id: 数量, resource_id: 数量</pre>
 
         <h4>广义出率（GDR）计算</h4>
         <p>支持 17 种 GDR 指标，均从 CompactResult 中 O(1) 计算。标有 <b>↓</b> 的指标 lower_is_better（值越低越好）。</p>
+        <p><b>多资源类型支持</b>（v2.0）：资源剩余、资源消耗、目标卡出卡效率、每目标卡资源消耗 4 个指标支持按资源类型展开（如「资源剩余 (抽卡资源)」「资源剩余 (兑换货币)」）。GDR 下拉框中选中不同资源类型的指标后，公式中的 <code>resource_id</code> 自动联动切换，从 CompactResult 的对应字段读取数据。</p>
 
         <h5>目标达成类</h5>
         <ul>
@@ -215,13 +215,14 @@ day: 天数 | resource_id: 数量, resource_id: 数量</pre>
 
         <h5>资源效率类</h5>
         <ul>
-            <li><b>资源剩余</b> = 模拟结束时的抽卡资源剩余量</li>
-            <li><b>资源消耗</b> <b>↓</b> = 模拟期间消耗的抽卡资源总量</li>
-            <li><b>目标卡出卡效率</b> = &Sigma; min(抽到数<sub>i</sub>, 需求量<sub>i</sub>) / 资源消耗量</li>
+            <li><b>资源剩余</b> = 模拟结束时的 <code>final_resources[resource_id]</code>（<code>resource_id</code> 由 GDR key 中 <code>:</code> 后的部分指定，默认 <code>draw_resource</code>）</li>
+            <li><b>资源消耗</b> <b>↓</b> = 模拟期间消耗的 <code>total_consumed[resource_id]</code></li>
+            <li><b>目标卡出卡效率</b> = &Sigma; min(抽到数<sub>i</sub>, 需求量<sub>i</sub>) / 资源消耗量。分母取 <code>total_consumed[resource_id]</code></li>
             <li><b>每目标卡资源消耗</b> <b>↓</b> = 资源消耗量 / &Sigma; min(抽到数<sub>i</sub>, 需求量<sub>i</sub>)（与出卡效率互为倒数，分母为0时返回NaN）</li>
-            <li><b>抽数转化效率</b> = (角色/武器池实际抽数 &times; 每抽成本) / 资源消耗量。衡量资源是否被分流到兑换等非抽卡途径：纯抽卡=1.0，有兑换则&lt;1.0</li>
+            <li><b>抽数转化效率</b> = (角色/武器池实际抽数 &times; 每抽成本) / 资源消耗量。<b>固定使用 <code>draw_resource</code>，不参与多资源类型展开。</b>原因：分子（实际抽数 × 每抽成本）和分母（资源消耗）处于同一资源体系（抽卡资源），衡量的是抽卡资源体系内部的转化效率；兑换货币有独立的获取/消耗路径，不存在「抽数」与「兑换货币消耗」之间的转化关系，公式本身对兑换货币无意义。</li>
             <li><b>额外目标卡</b> = &Sigma; max(抽到数<sub>i</sub> - 需求量<sub>i</sub>, 0)</li>
         </ul>
+        <p><b>⚠ 语义警示</b>：「目标卡出卡效率」和「每目标卡资源消耗」使用 <code>exchange_currency</code>（兑换货币）时的解释力取决于兑换货币是否用于获取目标卡。若兑换货币仅用于兑换非目标卡，则这两个指标的分母（兑换货币消耗量）与分子（目标卡获得量）不在同一因果链上，指标数值可能不反映实际出卡效率。建议仅在兑换池产出目标卡时使用兑换货币维度的这两个指标。</p>
 
         <h5>抽卡过程类</h5>
         <ul>

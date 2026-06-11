@@ -1,4 +1,3 @@
-import pytest
 from gacha_simulator.core.resource_gain import (
     LinearResourceGain, PeriodicResourceGain, CompositeResourceGain
 )

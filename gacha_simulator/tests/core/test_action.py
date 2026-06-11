@@ -1,5 +1,4 @@
-import pytest
-from gacha_simulator.core.action import Action, DrawAction, WaitAction
+from gacha_simulator.core.action import DrawAction, WaitAction
 
 
 def test_draw_action_repr():

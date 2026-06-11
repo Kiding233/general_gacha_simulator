@@ -1,6 +1,5 @@
-import pytest
 from gacha_simulator.core.strategy import (
-    Strategy, FixedCountStrategy, TargetHuntingStrategy, StrategyContext
+    FixedCountStrategy, TargetHuntingStrategy, StrategyContext
 )
 from gacha_simulator.core.action import DrawAction, WaitAction
 from gacha_simulator.core.state import GachaState

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Any, List
-from ..core import Pool, Reward, GachaState
+from ..core import Pool, Reward
 
 
 class ConfigService:
