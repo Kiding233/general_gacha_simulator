@@ -238,7 +238,7 @@ class TestEventModeConversions:
         ]
         trace = _make_trace(events, is_success=True)
         results = compute_aa([trace], 'custom', constraints={'early_hit': ('>=', 1), 'miss': ('=', 1)})
-        patterns = [r['pattern'] for r in results]
+        [r['pattern'] for r in results]
         has_nonzero = any(r['count'] > 0 for r in results)
         has_zero = any(r['count'] == 0 for r in results)
         assert has_nonzero

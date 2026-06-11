@@ -1,4 +1,4 @@
-from typing import List, Dict, Callable, Optional, Any
+from typing import List, Dict, Callable, Any
 from .distribution import EmpiricalDistribution, WorstCaseAnalysis, BestCaseAnalysis
 from .gdr import GDRContext, resource_remaining
 

@@ -2,8 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QProgressBar, QGroupBox, QFormLayout, QDoubleSpinBox,
     QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QRadioButton, QButtonGroup, QComboBox, QSizePolicy,
-    QSplitter, QLineEdit, QScrollArea, QCheckBox,
+    QRadioButton, QButtonGroup, QComboBox, QSplitter, QLineEdit, QScrollArea, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen
@@ -154,7 +153,22 @@ class WorstImpactPanel(QWidget):
 
     def set_store(self, store):
         self._store = store
-        self._load_last_pool_config()
+        # 重新填充 GDR 下拉框以反映多资源类型展开（_setup_ui 时 store 尚为 None）
+        if hasattr(self, 'gdr_combo') and store is not None:
+            old_key = self.gdr_combo.currentData()
+            self.gdr_combo.blockSignals(True)
+            populate_gdr_combo(self.gdr_combo, resource_defs=store.resource_defs)
+            if old_key:
+                idx = self.gdr_combo.findData(old_key)
+                if idx >= 0:
+                    self.gdr_combo.setCurrentIndex(idx)
+            self.gdr_combo.blockSignals(False)
+            self._on_gdr_changed(self.gdr_combo.currentIndex())
+        try:
+            self._load_last_pool_config()
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def set_config_panel(self, config_panel):
         self._config_panel = config_panel
@@ -223,7 +237,7 @@ class WorstImpactPanel(QWidget):
 
         self.gdr_combo = QComboBox()
         self.gdr_combo.setMaxVisibleItems(30)
-        populate_gdr_combo(self.gdr_combo)
+        populate_gdr_combo(self.gdr_combo, resource_defs=self._store.resource_defs if self._store else None)
         self.gdr_combo.setCurrentIndex(1)
         self.gdr_combo.currentIndexChanged.connect(self._on_gdr_changed)
         config_form.addRow("广义出率:", self.gdr_combo)
@@ -361,81 +375,77 @@ class WorstImpactPanel(QWidget):
 
     def _on_gdr_changed(self, index):
         key = self.gdr_combo.currentData()
+        if key is None:
+            return
         default = get_default_threshold(key)
         self.gdr_threshold_spin.setValue(default)
 
     def _on_run(self):
-        gdr_key = self.gdr_combo.currentData() or 'all_targets'
-        gdr_threshold = self.gdr_threshold_spin.value()
+        try:
+            gdr_key = self.gdr_combo.currentData() or 'all_targets'
+            gdr_threshold = self.gdr_threshold_spin.value()
 
-        custom_resource = None
-        if self.custom_resource_check.isChecked():
-            try:
-                custom_resource = float(self.custom_resource_input.text() or '0')
-            except ValueError:
-                self.status_label.setText("请输入有效的自定义资源数值")
+            custom_resource = None
+            if self.custom_resource_check.isChecked():
+                try:
+                    custom_resource = float(self.custom_resource_input.text() or '0')
+                except ValueError:
+                    self.status_label.setText("请输入有效的自定义资源数值")
+                    return
+
+            if custom_resource is None and not self._simulation_results:
+                self.status_label.setText("请先运行批量模拟")
                 return
 
-        if custom_resource is None and not self._simulation_results:
-            self.status_label.setText("请先运行批量模拟")
-            return
+            target_specs = self._target_specs or {}
+            if not target_specs and self._store:
+                for tc in self._store.target_cards:
+                    target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
+            if not target_specs:
+                self.status_label.setText("缺少目标卡规格，请先配置目标卡")
+                return
 
-        target_specs = self._target_specs or {}
-        if not target_specs and self._store:
-            for tc in self._store.target_cards:
-                target_specs[tc.card_id] = getattr(tc, 'quantity', 1)
-        if not target_specs:
-            self.status_label.setText("缺少目标卡规格，请先配置目标卡")
-            return
+            if self.cond_success.isChecked():
+                condition = 'success'
+            elif self.cond_failure.isChecked():
+                condition = 'failure'
+            else:
+                condition = 'all'
 
-        if self.cond_success.isChecked():
-            condition = 'success'
-        elif self.cond_failure.isChecked():
-            condition = 'failure'
-        else:
-            condition = 'all'
+            custom_pool = {
+                'duration_days': self.pool_duration_spin.value(),
+                'cost': self.pool_cost_edit.text().strip(),
+                'distribution': self._custom_distribution or [],
+            }
 
-        custom_pool = {
-            'duration_days': self.pool_duration_spin.value(),
-            'cost': self.pool_cost_edit.text().strip(),
-            'distribution': self._custom_distribution or [],
-        }
+            from ..core.worst_impact import WorstImpactAnalyzer
 
-        from ..core.worst_impact import WorstImpactAnalyzer
+            analyzer = WorstImpactAnalyzer(
+                simulation_results=self._simulation_results,
+                target_specs=target_specs,
+                store=self._store,
+                gdr_key=gdr_key,
+                gdr_threshold=gdr_threshold,
+                custom_pool_config=custom_pool,
+            )
 
-        desire_weights = None
-        miss_cost_weights = None
-        card_value_weights = None
-        if self._config_panel:
-            desire_weights = self._config_panel.get_desire_weights()
-            miss_cost_weights = self._config_panel.get_miss_cost_weights()
-            card_value_weights = self._config_panel.get_card_value_weights()
+            self._worker = WorstImpactWorker(
+                analyzer, condition,
+                self.alpha_spin.value(),
+                self.sim_spin.value(),
+                custom_resource=custom_resource,
+            )
+            self._worker.progress.connect(self._on_progress)
+            self._worker.finished.connect(self._on_finished)
+            self._worker.error.connect(self._on_error)
 
-        analyzer = WorstImpactAnalyzer(
-            simulation_results=self._simulation_results,
-            target_specs=target_specs,
-            store=self._store,
-            gdr_key=gdr_key,
-            gdr_threshold=gdr_threshold,
-            custom_pool_config=custom_pool,
-            desire_weights=desire_weights,
-            miss_cost_weights=miss_cost_weights,
-            card_value_weights=card_value_weights,
-        )
-
-        self._worker = WorstImpactWorker(
-            analyzer, condition,
-            self.alpha_spin.value(),
-            self.sim_spin.value(),
-            custom_resource=custom_resource,
-        )
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.error.connect(self._on_error)
-
-        self.run_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self._worker.start()
+            self.run_btn.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self._worker.start()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText(f"启动分析失败: {e}")
 
     def _on_progress(self, msg, pct):
         self.progress_bar.setValue(pct)
@@ -446,32 +456,36 @@ class WorstImpactPanel(QWidget):
         self.run_btn.setEnabled(True)
         if not result:
             return
+        try:
+            self.coverage_gauge.set_value(result.pity_coverage)
 
-        self.coverage_gauge.set_value(result.pity_coverage)
+            lines = [
+                f"<b>保守资源:</b> {result.worst_resource:.0f}"
+                f" &nbsp;|&nbsp; <b>大保底覆盖:</b> {result.pity_coverage:.2f} 倍"
+                f" &nbsp;|&nbsp; <b>期望新池子数:</b> {result.expected_pools:.2f}",
+            ]
+            self.summary_label.setText('<br>'.join(lines))
 
-        lines = [
-            f"<b>保守资源:</b> {result.worst_resource:.0f}"
-            f" &nbsp;|&nbsp; <b>大保底覆盖:</b> {result.pity_coverage:.2f} 倍"
-            f" &nbsp;|&nbsp; <b>期望新池子数:</b> {result.expected_pools:.2f}",
-        ]
-        self.summary_label.setText('<br>'.join(lines))
+            if result.pool_distribution:
+                self.detail_table.setRowCount(len(result.pool_distribution))
+                cumulative = 0.0
+                for i, (k, prob) in enumerate(sorted(result.pool_distribution.items())):
+                    self.detail_table.setItem(i, 0, QTableWidgetItem(str(k)))
+                    self.detail_table.setItem(i, 1, QTableWidgetItem(f"{prob:.2%}"))
+                    p_ge = result.get_p_ge(k)
+                    self.detail_table.setItem(i, 2, QTableWidgetItem(f"{p_ge:.2%}"))
+                    cumulative += prob
+                    self.detail_table.setItem(i, 3, QTableWidgetItem(f"{cumulative:.2%}"))
+                    self.detail_table.setItem(i, 4, QTableWidgetItem(
+                        f"成功{k}个新池子" if k > 0 else "未成功"
+                    ))
 
-        if result.pool_distribution:
-            self.detail_table.setRowCount(len(result.pool_distribution))
-            cumulative = 0.0
-            for i, (k, prob) in enumerate(sorted(result.pool_distribution.items())):
-                self.detail_table.setItem(i, 0, QTableWidgetItem(str(k)))
-                self.detail_table.setItem(i, 1, QTableWidgetItem(f"{prob:.2%}"))
-                p_ge = result.get_p_ge(k)
-                self.detail_table.setItem(i, 2, QTableWidgetItem(f"{p_ge:.2%}"))
-                cumulative += prob
-                self.detail_table.setItem(i, 3, QTableWidgetItem(f"{cumulative:.2%}"))
-                self.detail_table.setItem(i, 4, QTableWidgetItem(
-                    f"成功{k}个新池子" if k > 0 else "未成功"
-                ))
-
-        self._plot_distribution(result)
-        self.status_update.emit("最差后期影响分析完成")
+            self._plot_distribution(result)
+            self.status_update.emit("最差后期影响分析完成")
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText("结果展示失败，请查看控制台")
 
     def _plot_distribution(self, result):
         if not result.pool_distribution:

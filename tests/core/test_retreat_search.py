@@ -51,13 +51,13 @@ class TestForwardMethod:
     """前进法 search_max_targets_forward 的单元测试（mock 模拟调用）"""
 
     @staticmethod
-    def _make_engine(store, desire_weights=None, success_threshold=0.95):
+    def _make_engine(store, add_order=None, success_threshold=0.95):
         return RetreatSearchEngine(
             config_store=store,
             from_pool_id='pool_1',
             base_resource=0.0,
             pity_counter_init={},
-            desire_weights=desire_weights or {},
+            add_order=add_order or {},
             success_threshold=success_threshold,
         )
 
@@ -83,7 +83,7 @@ class TestForwardMethod:
         """单张候选卡、模拟成功 → 1 个 point，包含该卡"""
         from gacha_simulator.core.config_store import ConfigStore
         store = ConfigStore()
-        engine = self._make_engine(store, desire_weights={'card_a': 2.0})
+        engine = self._make_engine(store, add_order={'card_a': 2.0})
         engine._filter_obtainable_targets = lambda specs: specs
         mock_env = self._mock_env()
         monkeypatch.setattr(engine, '_build_truncated_env', lambda specs, base: mock_env)
@@ -100,7 +100,7 @@ class TestForwardMethod:
         from gacha_simulator.core.config_store import ConfigStore
         store = ConfigStore()
         desire = {'card_a': 1.0, 'card_b': 3.0, 'card_c': 2.0}
-        engine = self._make_engine(store, desire_weights=desire)
+        engine = self._make_engine(store, add_order=desire)
         engine._filter_obtainable_targets = lambda specs: specs
         mock_env = self._mock_env()
         monkeypatch.setattr(engine, '_build_truncated_env', lambda specs, base: mock_env)
@@ -118,7 +118,7 @@ class TestForwardMethod:
         from gacha_simulator.core.config_store import ConfigStore
         store = ConfigStore()
         desire = {'card_a': 3.0, 'card_b': 2.0}
-        engine = self._make_engine(store, desire_weights=desire, success_threshold=0.95)
+        engine = self._make_engine(store, add_order=desire, success_threshold=0.95)
         engine._filter_obtainable_targets = lambda specs: specs
         mock_env = self._mock_env()
         monkeypatch.setattr(engine, '_build_truncated_env', lambda specs, base: mock_env)
@@ -144,7 +144,7 @@ class TestForwardMethod:
         """第一张候选卡就失败 → 仍保留该卡的方案（最差情况）"""
         from gacha_simulator.core.config_store import ConfigStore
         store = ConfigStore()
-        engine = self._make_engine(store, desire_weights={'card_a': 1.0}, success_threshold=0.95)
+        engine = self._make_engine(store, add_order={'card_a': 1.0}, success_threshold=0.95)
         engine._filter_obtainable_targets = lambda specs: specs
         mock_env = self._mock_env()
         monkeypatch.setattr(engine, '_build_truncated_env', lambda specs, base: mock_env)
@@ -160,7 +160,7 @@ class TestForwardMethod:
         from gacha_simulator.core.config_store import ConfigStore
         store = ConfigStore()
         desire = {'card_a': 3.0, 'card_b': 2.0, 'card_c': 1.0}
-        engine = self._make_engine(store, desire_weights=desire)
+        engine = self._make_engine(store, add_order=desire)
         engine._filter_obtainable_targets = lambda specs: specs
         mock_env = self._mock_env()
         monkeypatch.setattr(engine, '_build_truncated_env', lambda specs, base: mock_env)

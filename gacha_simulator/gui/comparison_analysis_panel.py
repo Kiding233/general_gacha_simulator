@@ -2,8 +2,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QGroupBox, QSplitter, QFrame,
-    QAbstractItemView, QDoubleSpinBox,
+    QScrollArea, QGroupBox, QAbstractItemView, QDoubleSpinBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -15,7 +14,7 @@ from gacha_simulator.core.comparison_analyzer import (
     compute_dominance_matrix, compute_pvalue_matrix,
     ParetoFrontier,
 )
-from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY
+from gacha_simulator.core.gdr import get_expanded_gdr_entries
 from gacha_simulator.gui.chart_webview import ChartWebView
 
 
@@ -26,7 +25,9 @@ class ComparisonWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, datasets, gdr_key, threshold, test_method, correction,
-                 target_specs_list, parent=None):
+                 target_specs_list,
+                 desire_weights=None, miss_cost_weights=None,
+                 card_value_weights=None, parent=None):
         super().__init__(parent)
         self._datasets = datasets
         self._gdr_key = gdr_key
@@ -34,12 +35,18 @@ class ComparisonWorker(QThread):
         self._test_method = test_method
         self._correction = correction
         self._target_specs_list = target_specs_list
+        self._desire_weights = desire_weights
+        self._miss_cost_weights = miss_cost_weights
+        self._card_value_weights = card_value_weights
 
     def run(self):
         try:
             self.progress.emit("正在提取 GDR 值...")
             values_list, names, lower_is_better = compute_gdr_values_for_datasets(
                 self._datasets, self._gdr_key, self._target_specs_list, self._threshold,
+                desire_weights=self._desire_weights,
+                miss_cost_weights=self._miss_cost_weights,
+                card_value_weights=self._card_value_weights,
             )
             if not values_list or len(values_list) < 2:
                 self.error.emit("无法计算 GDR 值或数据集不足")
@@ -92,6 +99,7 @@ class ComparisonAnalysisPanel(QWidget):
     def __init__(self, result_store, parent=None):
         super().__init__(parent)
         self._store = result_store
+        self._config_store = None
         self._dataset_names: list = []
         self._current_gdr_key = 'target_achievement'
         self._current_threshold = 1.0
@@ -111,9 +119,12 @@ class ComparisonAnalysisPanel(QWidget):
 
         control_bar.addWidget(QLabel("GDR 指标"))
         self._gdr_combo = QComboBox()
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            display = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
-            self._gdr_combo.addItem(display, key)
+        _entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store and hasattr(self._store, 'resource_defs') else None
+        )
+        for key, display, lower_is_better, _thr in _entries:
+            _d = ('(-)' + display) if lower_is_better else display
+            self._gdr_combo.addItem(_d, key)
         self._gdr_combo.currentIndexChanged.connect(self._on_gdr_changed)
         control_bar.addWidget(self._gdr_combo)
 
@@ -239,13 +250,18 @@ class ComparisonAnalysisPanel(QWidget):
         l4_layout.addWidget(self._l4_chart_view)
         scroll_layout.addWidget(l4_group)
 
-        # 填充 L4 combo
-        for key, defn in UNIFIED_GDR_REGISTRY.items():
-            display = defn.display_name
+        # 填充 L4 combo（支持多资源展开）
+        _l4_entries = get_expanded_gdr_entries(
+            self._store.resource_defs if self._store and hasattr(self._store, 'resource_defs') else None
+        )
+        for key, display, lower_is_better, _thr in _l4_entries:
             self._l4_x_combo.addItem(display, key)
             self._l4_y_combo.addItem(display, key)
         self._l4_x_combo.setCurrentIndex(0)
+        # resource_efficiency:draw_resource 的 key 匹配
         idx_y = self._l4_y_combo.findData('resource_efficiency')
+        if idx_y < 0:
+            idx_y = self._l4_y_combo.findData('resource_efficiency:draw_resource')
         if idx_y >= 0:
             self._l4_y_combo.setCurrentIndex(idx_y)
 
@@ -254,6 +270,54 @@ class ComparisonAnalysisPanel(QWidget):
         main_layout.addWidget(scroll)
 
     # —— 公共接口 ——
+    def set_config_store(self, config_store):
+        """接收 ConfigStore —— 用于展开多资源类型 GDR 条目。
+
+        _setup_ui 时仅有 ResultStore（无 resource_defs），
+        此方法由 MainWindow 在 ConfigStore 就绪后调用。
+        """
+        self._config_store = config_store
+        resource_defs = config_store.resource_defs if config_store else None
+        if not resource_defs:
+            return
+        self._refresh_gdr_combo(resource_defs)
+        self._refresh_l4_combos(resource_defs)
+
+    def _refresh_gdr_combo(self, resource_defs):
+        """用展开后的 GDR 条目重新填充主 GDR 下拉框。"""
+        _entries = get_expanded_gdr_entries(resource_defs)
+        old_key = self._gdr_combo.currentData()
+        self._gdr_combo.blockSignals(True)
+        self._gdr_combo.clear()
+        for key, display, lower_is_better, _thr in _entries:
+            _d = ('(-)' + display) if lower_is_better else display
+            self._gdr_combo.addItem(_d, key)
+        if old_key:
+            idx = self._gdr_combo.findData(old_key)
+            if idx >= 0:
+                self._gdr_combo.setCurrentIndex(idx)
+        self._gdr_combo.blockSignals(False)
+        self._on_gdr_changed(self._gdr_combo.currentIndex())
+
+    def _refresh_l4_combos(self, resource_defs):
+        """用展开后的 GDR 条目重新填充 L4 散点图 X/Y 轴下拉框。"""
+        _l4_entries = get_expanded_gdr_entries(resource_defs)
+        self._l4_x_combo.blockSignals(True)
+        self._l4_y_combo.blockSignals(True)
+        self._l4_x_combo.clear()
+        self._l4_y_combo.clear()
+        for key, display, lower_is_better, _thr in _l4_entries:
+            self._l4_x_combo.addItem(display, key)
+            self._l4_y_combo.addItem(display, key)
+        self._l4_x_combo.setCurrentIndex(0)
+        idx_y = self._l4_y_combo.findData('resource_efficiency')
+        if idx_y < 0:
+            idx_y = self._l4_y_combo.findData('resource_efficiency:draw_resource')
+        if idx_y >= 0:
+            self._l4_y_combo.setCurrentIndex(idx_y)
+        self._l4_x_combo.blockSignals(False)
+        self._l4_y_combo.blockSignals(False)
+
     def set_datasets(self, names: list):
         """设置要比较的数据集列表"""
         self._dataset_names = names
@@ -268,6 +332,8 @@ class ComparisonAnalysisPanel(QWidget):
 
     # —— 参数变化 ——
     def _on_gdr_changed(self, idx):
+        if idx < 0:
+            return
         self._current_gdr_key = self._gdr_combo.itemData(idx)
         self._on_params_changed()
 
@@ -300,6 +366,9 @@ class ComparisonAnalysisPanel(QWidget):
             datasets, self._current_gdr_key, self._current_threshold,
             self._current_test_method, self._current_correction,
             target_specs_list,
+            desire_weights=self._config_store.desire_weights if self._config_store else None,
+            miss_cost_weights=self._config_store.miss_cost_weights if self._config_store else None,
+            card_value_weights=self._config_store.card_value_weights if self._config_store else None,
         )
         self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished.connect(self._on_analysis_finished)
@@ -311,19 +380,24 @@ class ComparisonAnalysisPanel(QWidget):
         self.status_update.emit(msg)
 
     def _on_analysis_finished(self, results: dict):
-        self._last_results = results
-        names = results['names']
-        values_list = results['values_list']
-        lower_is_better = results['lower_is_better']
-
-        self._update_l1(results['stats_list'], values_list, names, lower_is_better)
-        self._update_l2(results['dom_results'], names)
-        self._update_l3(results['pmat'], names, results['correction'])
-
         self._run_btn.setEnabled(True)
         self._run_btn.setText("运行分析")
-        self._loading_label.setText("✓ 完成")
-        self.status_update.emit(f"分析完成: {len(names)} 个数据集, GDR={self._current_gdr_key}")
+        try:
+            self._last_results = results
+            names = results['names']
+            values_list = results['values_list']
+            lower_is_better = results['lower_is_better']
+
+            self._update_l1(results['stats_list'], values_list, names, lower_is_better)
+            self._update_l2(results['dom_results'], names)
+            self._update_l3(results['pmat'], names, results['correction'])
+
+            self._loading_label.setText("✓ 完成")
+            self.status_update.emit(f"分析完成: {len(names)} 个数据集, GDR={self._current_gdr_key}")
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.status_label.setText("结果展示失败，请查看控制台")
 
     def _on_worker_error(self, msg: str):
         self._run_btn.setEnabled(True)
@@ -476,13 +550,10 @@ class ComparisonAnalysisPanel(QWidget):
     def _update_l3(self, pmat, names, correction):
         if correction == 'BH':
             matrix = pmat['bh_matrix']
-            title = 'BH 校正'
         elif correction == 'Holm':
             matrix = pmat['holm_matrix']
-            title = 'Holm 校正'
         else:
             matrix = pmat['raw_matrix']
-            title = '原始 p 值'
 
         direction = pmat['direction_matrix']
         n = len(names)
@@ -529,9 +600,17 @@ class ComparisonAnalysisPanel(QWidget):
         target_specs_list = [ds.target_specs for ds in datasets]
 
         x_vals, x_names, x_lib = compute_gdr_values_for_datasets(
-            datasets, x_key, target_specs_list, self._current_threshold)
+            datasets, x_key, target_specs_list, self._current_threshold,
+            desire_weights=self._config_store.desire_weights if self._config_store else None,
+            miss_cost_weights=self._config_store.miss_cost_weights if self._config_store else None,
+            card_value_weights=self._config_store.card_value_weights if self._config_store else None,
+        )
         y_vals, y_names, y_lib = compute_gdr_values_for_datasets(
-            datasets, y_key, target_specs_list, self._current_threshold)
+            datasets, y_key, target_specs_list, self._current_threshold,
+            desire_weights=self._config_store.desire_weights if self._config_store else None,
+            miss_cost_weights=self._config_store.miss_cost_weights if self._config_store else None,
+            card_value_weights=self._config_store.card_value_weights if self._config_store else None,
+        )
 
         if not x_vals or not y_vals:
             self._l4_chart_view.show_message("无法计算帕累托前沿：数据不足")

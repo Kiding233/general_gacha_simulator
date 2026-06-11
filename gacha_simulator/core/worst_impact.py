@@ -1,17 +1,16 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set
 from collections import defaultdict
 
 from .distribution import EmpiricalDistribution
 from .pool import Pool, Reward, parse_cost_string
 from .pity import (
-    PityEngine, PityState, PoolPitySpec, PityDefParsed,
+    PityEngine, PoolPitySpec, PityDefParsed,
     SoftPityBehavior, HardPityBehavior,
 )
 from .action import DrawAction, WaitAction
-from .target_card import TargetCard, TargetCardSet
-from .stop_condition import StopCondition, AllPoolsEndCondition, ConsecutivePoolTargetCondition
+from .stop_condition import ConsecutivePoolTargetCondition
 from .strategy import Strategy, StrategyContext, STRATEGY_REGISTRY
 from .schedule import PoolSchedule, PoolScheduleManager
 
@@ -102,18 +101,13 @@ STRATEGY_REGISTRY['draw_target']['class'] = DrawTargetStrategy
 class WorstImpactAnalyzer:
     def __init__(self, simulation_results, target_specs, store,
                  gdr_key='all_targets', gdr_threshold=1.0,
-                 custom_pool_config=None,
-                 desire_weights=None, miss_cost_weights=None,
-                 card_value_weights=None):
+                 custom_pool_config=None):
         self.simulation_results = simulation_results
         self.target_specs = target_specs
         self.store = store
         self.gdr_key = gdr_key
         self.gdr_threshold = gdr_threshold
         self.custom_pool_config = custom_pool_config
-        self.desire_weights = desire_weights or {}
-        self.miss_cost_weights = miss_cost_weights or {}
-        self.card_value_weights = card_value_weights or {}
         self.cond_dist = None
         self._pity_engine = None
         self._ref_pool_entry = None
@@ -151,9 +145,10 @@ class WorstImpactAnalyzer:
                 self.simulation_results, main_checker.is_success,
                 resource=self._resource_name,
             )
+            from .gdr import is_resource_gdr
             # 资源类 GDR + success 条件时，成功组资源被下界截断，EVT 外推可能越界
             _skip_evt = (
-                self.gdr_key in ('resource_remaining', 'resource_efficiency', 'resource_consumed')
+                is_resource_gdr(self.gdr_key)
                 and condition == 'success'
             )
             worst_resource = self.cond_dist.get_worst_case_resource(
@@ -328,14 +323,12 @@ class WorstImpactAnalyzer:
         return resource / pity_cost if pity_cost > 0 else float('inf')
 
     def _build_success_checker(self, target_specs=None, ssr_ids=None):
-        from .gdr import SuccessChecker
-        self._checker = SuccessChecker(
-            target_specs=target_specs or self.target_specs,
-            gdr_key=self.gdr_key,
+        from .gdr import make_gdr_calculator
+        self._checker = make_gdr_calculator(
+            self.store,
+            target_specs or self.target_specs,
+            self.gdr_key,
             gdr_threshold=self.gdr_threshold,
-            desire_weights=self.desire_weights,
-            miss_cost_weights=self.miss_cost_weights,
-            card_value_weights=self.card_value_weights,
             ssr_ids=ssr_ids or self._ssr_ids,
         )
         return self._checker
@@ -370,7 +363,13 @@ class WorstImpactAnalyzer:
 
         cost_str = getattr(pe, 'cost', 'draw_resource:160')
         self._parsed_cost = parse_cost_string(cost_str)
-        self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
+        # 优先从 gdr_key 解析 resource_id；解析失败则从 cost 字段提取；最终回退 'draw_resource'
+        from .gdr import parse_gdr_key
+        _, parsed_rid = parse_gdr_key(self.gdr_key)
+        if parsed_rid != 'draw_resource' and self._parsed_cost and parsed_rid in self._parsed_cost[0]:
+            self._resource_name = parsed_rid
+        else:
+            self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
 
         rewards = []
         if pe.distribution:
@@ -419,7 +418,12 @@ class WorstImpactAnalyzer:
 
         cost_str = cfg.get('cost', 'draw_resource:160')
         self._parsed_cost = parse_cost_string(cost_str)
-        self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
+        from .gdr import parse_gdr_key
+        _, parsed_rid = parse_gdr_key(self.gdr_key)
+        if parsed_rid != 'draw_resource' and self._parsed_cost and parsed_rid in self._parsed_cost[0]:
+            self._resource_name = parsed_rid
+        else:
+            self._resource_name = list(self._parsed_cost[0].keys())[0] if self._parsed_cost else 'draw_resource'
 
         rewards = []
         for d in cfg.get('distribution', []):

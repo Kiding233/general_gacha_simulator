@@ -1,31 +1,25 @@
 #!/usr/bin/env python3
 
-from collections import Counter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QGroupBox, QComboBox, QDoubleSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
     QTabWidget, QSizePolicy, QProgressBar, QSpinBox, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from .chart_webview import ChartWebView
 
-from ..core.process_trace import PoolEvent, SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
+from ..core.process_trace import SampleTrace, infer_events, compute_pool_gdr_cumulative, compute_pool_gdr_single_pool
 from ..core.process_analysis import (
     compute_aa, compute_bb, compute_ab, compute_ba,
-    EVENT_MODE_MAP, SUCCESS_MODE_MAP,
-    _get_event_label, get_event_type_order, _hashable,
+    EVENT_MODE_MAP, _get_event_label, get_event_type_order, _hashable,
 )
-from ..core.gdr import UNIFIED_GDR_REGISTRY, SuccessChecker, compute_gdr_from_compact, populate_gdr_combo, get_default_threshold
+from ..core.gdr import UNIFIED_GDR_REGISTRY, make_gdr_calculator, populate_gdr_combo, get_default_threshold, resolve_gdr_definition
 
-_gdr_key_to_display = {}
-def _refresh_gdr_display_map():
-    _gdr_key_to_display.clear()
-    for key, defn in UNIFIED_GDR_REGISTRY.items():
-        _gdr_key_to_display[key] = ('(-)' + defn.display_name) if defn.lower_is_better else defn.display_name
-_refresh_gdr_display_map()
+# 显示名惰性查找——通过 resolve_gdr_definition(gdr_key).display_name 获取
+# （已移除静态 _gdr_key_to_display 映射，因 :qualified key 在模块加载时不可知）
 
 
 class _NoWheelComboBox(QComboBox):
@@ -41,6 +35,7 @@ class _NoWheelDoubleSpinBox(QDoubleSpinBox):
 class ProcessAnalysisPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._store = None
         self._aggregate_data = []
         self._target_ids = set()
         self._ssr_ids = set()
@@ -54,6 +49,15 @@ class ProcessAnalysisPanel(QWidget):
         self._ab_results = []
         self._selected_ab_row = None
         self._setup_ui()
+
+    def set_store(self, store):
+        self._store = store
+        # 刷新 GDR 下拉框以反映多资源类型展开
+        from gacha_simulator.core.gdr import populate_gdr_combo
+        if hasattr(self, 'gdr_combo'):
+            populate_gdr_combo(self.gdr_combo, resource_defs=store.resource_defs if store else None)
+        if hasattr(self, 'cond_gdr_combo'):
+            populate_gdr_combo(self.cond_gdr_combo, resource_defs=store.resource_defs if store else None)
 
     def _setup_ui(self):
         main_layout = QHBoxLayout(self)
@@ -365,6 +369,8 @@ class ProcessAnalysisPanel(QWidget):
 
     def _on_gdr_changed(self, index):
         key = self.gdr_combo.currentData()
+        if key is None:
+            return
         default = get_default_threshold(key)
         self.threshold_spin.setValue(default)
 
@@ -466,8 +472,8 @@ class ProcessAnalysisPanel(QWidget):
         )
         initial_resources = self._initial_resources
 
-        checker = SuccessChecker(
-            target_specs, gdr_key, gdr_threshold=threshold,
+        checker = make_gdr_calculator(
+            self._store, target_specs, gdr_key, gdr_threshold=threshold,
             ssr_ids=ssr_ids,
             weapon_character_map=weapon_character_map,
         )
@@ -487,6 +493,9 @@ class ProcessAnalysisPanel(QWidget):
                     pool_gdr_mode, agg, pid, sample_idx,
                     target_specs, gdr_key, ssr_ids,
                     weapon_character_map, initial_resources,
+                    desire_weights=self._store.desire_weights,
+                    miss_cost_weights=self._store.miss_cost_weights,
+                    card_value_weights=self._store.card_value_weights,
                 )
                 pool_gdr_values[pid] = pool_gdr_val if pool_gdr_val is not None else 0.0
                 if pool_gdr_val is None:
@@ -508,7 +517,8 @@ class ProcessAnalysisPanel(QWidget):
 
     def _compute_pool_gdr(self, mode, agg, pool_id, sample_idx,
                           target_specs, gdr_key, ssr_ids,
-                          weapon_character_map, initial_resources):
+                          weapon_character_map, initial_resources,
+                          **gdr_kwargs):
         if mode == 'cumulative':
             pool_snaps = self._cumulative_snapshots.get(pool_id, [])
             if sample_idx < len(pool_snaps):
@@ -517,6 +527,7 @@ class ProcessAnalysisPanel(QWidget):
                     ssr_ids=ssr_ids,
                     weapon_character_map=weapon_character_map,
                     initial_resources=initial_resources,
+                    **gdr_kwargs,
                 )
             return None
         else:
@@ -524,6 +535,7 @@ class ProcessAnalysisPanel(QWidget):
                 agg, pool_id, target_specs, gdr_key,
                 ssr_ids=ssr_ids,
                 weapon_character_map=weapon_character_map,
+                **gdr_kwargs,
             )
 
     def _format_event_pattern(self, pattern, event_mode):
@@ -706,7 +718,11 @@ class ProcessAnalysisPanel(QWidget):
 
     def _on_cond_dist_toggled(self, checked):
         if checked and self._selected_ab_row is not None:
-            self._update_cond_dist()
+            try:
+                self._update_cond_dist()
+            except Exception:
+                import traceback
+                traceback.print_exc()
 
     def _update_cond_dist(self):
         if not self.cond_dist_group.isChecked():
@@ -726,7 +742,8 @@ class ProcessAnalysisPanel(QWidget):
 
         base_func = EVENT_MODE_MAP.get(event_mode, EVENT_MODE_MAP['sequence'])
         if event_mode == 'custom' and constraints:
-            event_func = lambda ev: base_func(ev, constraints=constraints)
+            def event_func(ev):
+                return base_func(ev, constraints=constraints)
         else:
             event_func = base_func
 
@@ -734,7 +751,7 @@ class ProcessAnalysisPanel(QWidget):
         cond_text = {'all': '全部', 'success': '仅成功', 'failure': '仅失败'}.get(cond, cond)
 
         gdr_key = self.cond_gdr_combo.currentData() or next(iter(UNIFIED_GDR_REGISTRY), 'target_achievement')
-        gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
+        gdr_def = resolve_gdr_definition(gdr_key)
         gdr_name = gdr_def.display_name if gdr_def else gdr_key
 
         filtered = []
@@ -767,17 +784,16 @@ class ProcessAnalysisPanel(QWidget):
             self.cond_chart_webview.show_message(f"样本量不足（n={n}<5），无法显示分布")
             return
 
-        from ..visualization.chart_spec import histogram, ChartAnnotation
+        from ..visualization.chart_spec import histogram
         import numpy as np
         from ..core.gdr_binning import compute_bins
 
-        from ..core.gdr import UNIFIED_GDR_REGISTRY
-        gdr_def = UNIFIED_GDR_REGISTRY.get(gdr_key)
+        gdr_def = resolve_gdr_definition(gdr_key)
         display_name = gdr_def.display_name if gdr_def else gdr_key
 
         samples = np.array(values, dtype=float)
-        mean_val = float(np.mean(samples))
-        median_val = float(np.median(samples))
+        float(np.mean(samples))
+        float(np.median(samples))
 
         bin_result = compute_bins(gdr_key, samples)
         spec = histogram(
@@ -787,7 +803,6 @@ class ProcessAnalysisPanel(QWidget):
             ylabel="频数" if not bin_result.density else "频次",
             mean_line=True,
             quantile_lines=[0.5],
-            density=bin_result.density,
             **bin_result.to_layout_hints(),
         )
         self.cond_chart_webview.set_chart(spec)
@@ -880,7 +895,9 @@ class ProcessAnalysisPanel(QWidget):
 
         orig_idx, trace = filtered[display_idx]
 
-        gdr_display = _gdr_key_to_display.get(self.gdr_combo.currentData(), '')
+        _gdr_key = self.gdr_combo.currentData()
+        _gdr_def = resolve_gdr_definition(_gdr_key) if _gdr_key else None
+        gdr_display = ('(-)' + _gdr_def.display_name) if (_gdr_def and _gdr_def.lower_is_better) else (_gdr_def.display_name if _gdr_def else '')
         success_mark = "✓ 成功" if trace.is_success else "✗ 失败"
         self.trace_summary_label.setText(
             f"原始序号: {orig_idx}  |  整体GDR({gdr_display}): {trace.gdr_value:.4f}  |  {success_mark}"

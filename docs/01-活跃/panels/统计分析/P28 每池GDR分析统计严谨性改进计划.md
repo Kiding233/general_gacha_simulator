@@ -1,3 +1,4 @@
+<!-- META: P28 | module:panels/统计分析 | status:in_progress | last:2026-06-11 -->
 # P28 每池GDR分析统计严谨性改进计划
 
 > 日期：2026-05-29 | 版本：v1

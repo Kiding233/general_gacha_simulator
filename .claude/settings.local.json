@@ -1,4 +1,53 @@
 {
+  "env": {
+    "PYTHONIOENCODING": "utf-8"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/inject_state.py", "timeout": 30}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/safety_gate.py", "timeout": 5},
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/check_commit_msg.py", "timeout": 5},
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/sync_version.py", "timeout": 10},
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/fast_gate.py", "timeout": 30},
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/push_gate.py", "timeout": 120}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/log_change.py", "timeout": 5}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/check_doc_rot.py", "timeout": 10}
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "python d:/Users/DELL/Desktop/gacha_simulator/抽卡模拟与分析程序/.claude/hooks/save_context.py", "timeout": 10}
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(python -m pytest tests/core/test_vulnerability.py -v)",

@@ -1,6 +1,5 @@
 """旧 matplotlib 绑图测试已迁移至 test_chart_spec.py 和 test_plotly_charts.py。
 此文件保留为占位，确保 test_plots 模块可被 pytest 发现。"""
-import pytest
 import numpy as np
 
 

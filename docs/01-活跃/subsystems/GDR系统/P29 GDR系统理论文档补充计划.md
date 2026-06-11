@@ -1,3 +1,4 @@
+<!-- META: P29 | module:subsystems/GDR系统 | status:designing | last:2026-06-11 -->
 # P29 GDR系统理论文档补充计划
 
 > 日期：2026-05-29 | 版本：v1

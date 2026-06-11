@@ -1,4 +1,3 @@
-import pytest
 from gacha_simulator.core.pool import Pool, Reward, parse_cost_string
 
 

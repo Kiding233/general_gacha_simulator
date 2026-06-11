@@ -1,4 +1,3 @@
-import pytest
 from gacha_simulator.core.target_card import TargetCard, TargetCardSet
 
 

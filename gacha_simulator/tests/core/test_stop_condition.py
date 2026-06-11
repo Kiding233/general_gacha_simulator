@@ -1,7 +1,6 @@
-import pytest
 from gacha_simulator.core.stop_condition import (
     FixedActionCountCondition, ResourceThresholdCondition,
-    TargetAcquiredCondition, TimeLimitCondition, CompositeStopCondition
+    TargetAcquiredCondition, CompositeStopCondition
 )
 from gacha_simulator.core.state import GachaState
 

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
-from scipy import stats as sp_stats
+# scipy 仅在需要时惰性导入——避免 Windows multiprocessing spawn 时
+# 每个子进程都加载 scipy DLL，触发"页面文件太小"错误
 
 
 @dataclass
@@ -41,6 +42,7 @@ class DescriptiveStats:
         std_v = float(np.std(values, ddof=1)) if n > 1 else 0.0
         # 偏度：Fisher-Pearson 标准化矩
         if std_v > 1e-15 and n > 2:
+            from scipy import stats as sp_stats  # 惰性导入
             skewness_v = float(sp_stats.skew(values, bias=False))
             kurtosis_v = float(sp_stats.kurtosis(values, bias=False))
         else:
@@ -82,14 +84,24 @@ def compute_gdr_values_for_datasets(
     gdr_key: str,
     target_specs_list: List[Dict[str, int]],
     threshold: float = 1.0,
+    *,
+    desire_weights: Dict[str, float] = None,
+    miss_cost_weights: Dict[str, float] = None,
+    card_value_weights: Dict[str, float] = None,
+    ssr_ids: set = None,
+    weapon_character_map: Dict[str, str] = None,
 ) -> Tuple[List[np.ndarray], List[str], bool]:
     """从多个数据集提取指定 GDR 的逐次模拟值。
 
+    权重参数由调用方从 ConfigStore 提取后传入——多数据集场景下各数据集
+    target_specs 不同，无法用单一 GDRCalculator 绑定，因此直接透传给
+    compute_gdr_from_compact。
+
     返回: (values_list, names_list, lower_is_better)
     """
-    from gacha_simulator.core.gdr import UNIFIED_GDR_REGISTRY
+    from gacha_simulator.core.gdr import resolve_gdr_definition, compute_gdr_from_compact
 
-    defn = UNIFIED_GDR_REGISTRY.get(gdr_key)
+    defn = resolve_gdr_definition(gdr_key)
     if defn is None:
         return [], [], False
 
@@ -102,7 +114,14 @@ def compute_gdr_values_for_datasets(
         for compact in ds.aggregate_data:
             if compact is None:
                 continue
-            v = defn.compute_from_compact(compact, target_specs=specs)
+            v = compute_gdr_from_compact(
+                compact, target_specs=specs, gdr_key=gdr_key,
+                desire_weights=desire_weights,
+                miss_cost_weights=miss_cost_weights,
+                card_value_weights=card_value_weights,
+                ssr_ids=ssr_ids,
+                weapon_character_map=weapon_character_map,
+            )
             if not np.isnan(v):
                 vals.append(v)
         names.append(ds.name)
@@ -313,6 +332,7 @@ class HypothesisTestResult:
     def from_samples(cls, samples_a: np.ndarray, samples_b: np.ndarray,
                      method: str, lower_is_better: bool = False,
                      alpha: float = 0.05) -> HypothesisTestResult:
+        from scipy import stats as sp_stats  # 惰性导入
         if method == 'KS':
             stat, p = sp_stats.ks_2samp(samples_a, samples_b)
             statistic = float(stat)
