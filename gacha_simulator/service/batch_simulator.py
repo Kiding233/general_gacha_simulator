@@ -699,12 +699,15 @@ class SimulationEnvBuilder:
         gain_functions = []
         total_days = int(end_time / 86400) + 1 if end_time else 30
 
-        # 解析起始日期（Phase 2 预留，当前从 gains.txt 加载）
-        start_date_str = getattr(config_store, 'sim_start_date', '2013-06-02') or '2013-06-02'
-        try:
-            start_date = _dt.date.fromisoformat(start_date_str)
-        except (ValueError, TypeError):
-            start_date = _dt.date(2013, 6, 2)
+        # 解析起始日期（默认当天）
+        start_date_str = getattr(config_store, 'sim_start_date', None)
+        if not start_date_str:
+            start_date = _dt.date.today()
+        else:
+            try:
+                start_date = _dt.date.fromisoformat(start_date_str)
+            except (ValueError, TypeError):
+                start_date = _dt.date.today()
 
         schedule = expand_gain_rules_to_schedule(
             gain_rules=list(getattr(config_store, 'gain_rules', [])),

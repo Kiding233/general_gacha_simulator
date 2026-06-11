@@ -256,7 +256,7 @@ def _load_gains(dir_path: str, store: ConfigStore):
                 # 检查可选的 # start_date: YYYY-MM-DD 注释行
                 if line.startswith('# start_date:') or line.startswith('# start_date：'):
                     date_part = line.split(':', 1)[-1].strip().replace('：', ':')
-                    # 二次 split 处理中文冒号：'# start_date： 2013-06-02' → '2013-06-02'
+                    # 二次 split 处理中文冒号
                     if ':' in date_part:
                         date_part = date_part.split(':', 1)[-1].strip()
                     try:
@@ -265,9 +265,10 @@ def _load_gains(dir_path: str, store: ConfigStore):
                         store.sim_start_date = date_part
                     except (ValueError, TypeError):
                         import logging as _log
+                        today = _dt.date.today().isoformat()
                         _log.warning(
-                            "_load_gains: start_date '%s' 无效，回退默认值 '2013-06-02'", date_part)
-                        store.sim_start_date = '2013-06-02'
+                            "_load_gains: start_date '%s' 无效，回退当天 '%s'", date_part, today)
+                        store.sim_start_date = today
                 continue
 
             if line.startswith('[') and line.endswith(']'):
@@ -464,7 +465,8 @@ def _save_gains(dir_path: str, store: ConfigStore):
         f.write("# day: day_number | resource_id: amount, resource_id: amount\n")
         f.write("#\n")
         f.write("# 最终所有规则都会转换为按天指定\n")
-        f.write(f"# start_date: {getattr(store, 'sim_start_date', '2013-06-02') or '2013-06-02'}\n\n")
+        import datetime as _dt
+        f.write(f"# start_date: {getattr(store, 'sim_start_date', None) or _dt.date.today().isoformat()}\n\n")
         for rule in store.gain_rules:
             rule_type = rule.rule_type
             param = getattr(rule, 'param', '')

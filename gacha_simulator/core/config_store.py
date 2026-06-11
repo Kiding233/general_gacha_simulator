@@ -1,3 +1,4 @@
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
@@ -103,7 +104,7 @@ class ConfigStore:
     stop_condition_params: Dict[str, Any] = field(default_factory=dict)
     auto_wait: bool = True
     card_weights: Dict[str, CardWeightEntry] = field(default_factory=dict)
-    sim_start_date: str = '2013-06-02'
+    sim_start_date: str = field(default_factory=lambda: _dt.date.today().isoformat())
     simulation_count: int = 1000
     max_workers: int = 4
     seed: int = 42
@@ -133,7 +134,7 @@ class ConfigStore:
         self.stop_condition_params.clear()
         self.auto_wait = True
         self.card_weights.clear()
-        self.sim_start_date = '2013-06-02'
+        self.sim_start_date = _dt.date.today().isoformat()
         self.simulation_count = 1000
         self.max_workers = 4
         self.seed = 42

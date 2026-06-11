@@ -142,8 +142,8 @@ def _week_of_month(day: int) -> int:
     return (d.day - 1) // 7 + 1
 
 
-# ── 默认模拟起始日期（ordinal=735000 → 2013-06-02）──
-_DEFAULT_START_DATE = _dt.date(2013, 6, 2)
+# ── 默认模拟起始日期（当天）──
+_DEFAULT_START_DATE = _dt.date.today()
 
 
 def expand_gain_rules_to_schedule(
@@ -161,7 +161,7 @@ def expand_gain_rules_to_schedule(
         gain_rules: 规则列表（GainRule 对象）。
         day_overrides: 指定日期覆盖列表（DayOverride 对象）。
         total_days: 模拟总天数。
-        start_date: day=0 对应的真实日期，默认为 2013-06-02。
+        start_date: day=0 对应的真实日期，默认为当天。
 
     Returns:
         {day: {rid: amount}} 字典，key 为绝对天数偏移。

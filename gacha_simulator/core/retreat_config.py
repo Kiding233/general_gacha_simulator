@@ -25,13 +25,16 @@ class RetreatConfigBuilder:
         truncated = ConfigStore()
 
         # Phase 2: 复制原始 sim_start_date 并偏移 offset_day 天
-        original_start_str = getattr(original_store, 'sim_start_date', '2013-06-02') or '2013-06-02'
-        try:
-            original_start = _dt.date.fromisoformat(original_start_str)
-            truncated_start = original_start + _dt.timedelta(days=offset_day)
-            truncated.sim_start_date = truncated_start.isoformat()
-        except (ValueError, TypeError):
-            truncated.sim_start_date = '2013-06-02'
+        original_start_str = getattr(original_store, 'sim_start_date', None)
+        if not original_start_str:
+            original_start = _dt.date.today()
+        else:
+            try:
+                original_start = _dt.date.fromisoformat(original_start_str)
+            except (ValueError, TypeError):
+                original_start = _dt.date.today()
+        truncated_start = original_start + _dt.timedelta(days=offset_day)
+        truncated.sim_start_date = truncated_start.isoformat()
 
         truncated.pools = []
         for p in original_store.pools:

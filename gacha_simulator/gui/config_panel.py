@@ -1553,7 +1553,7 @@ class ConfigPanel(QWidget):
         self.sim_start_date_edit = QDateEdit()
         self.sim_start_date_edit.setCalendarPopup(True)
         self.sim_start_date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.sim_start_date_edit.setDate(QDate(2013, 6, 2))
+        self.sim_start_date_edit.setDate(QDate.currentDate())
         self.sim_start_date_edit.dateChanged.connect(self._on_sim_start_date_changed)
         date_layout.addWidget(self.sim_start_date_edit)
         date_layout.addStretch()
@@ -1966,7 +1966,7 @@ class ConfigPanel(QWidget):
             return
 
         import datetime as _dt
-        start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+        start_date_str = getattr(self._store, 'sim_start_date', None) or _dt.date.today().isoformat()
         try:
             start_date = _dt.date.fromisoformat(start_date_str)
         except (ValueError, TypeError):
@@ -2000,10 +2000,10 @@ class ConfigPanel(QWidget):
     def _on_calendar_toggled(self, checked):
         """日历预览展开/折叠时触发。"""
         if checked:
+            import datetime as _dt
             # 展开时跳转到模拟起始日期所在月份
-            start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+            start_date_str = getattr(self._store, 'sim_start_date', None) or _dt.date.today().isoformat()
             try:
-                import datetime as _dt
                 sd = _dt.date.fromisoformat(start_date_str)
                 self.calendar_widget.setCurrentPage(sd.year, sd.month)
             except (ValueError, TypeError):
@@ -2094,7 +2094,7 @@ class ConfigPanel(QWidget):
 
             gain_rules = list(getattr(self._store, 'gain_rules', []))
             day_overrides = list(getattr(self._store, 'day_overrides', []))
-            start_date_str = getattr(self._store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+            start_date_str = getattr(self._store, 'sim_start_date', None) or _dt.date.today().isoformat()
             try:
                 start_date = _dt.date.fromisoformat(start_date_str)
             except (ValueError, TypeError):
@@ -2441,7 +2441,8 @@ class ConfigPanel(QWidget):
             )
 
         # Phase 2: 恢复模拟起始日期
-        store.sim_start_date = config.get('sim_start_date', '2013-06-02')
+        import datetime as _dt
+        store.sim_start_date = config.get('sim_start_date') or _dt.date.today().isoformat()
 
         self.refresh_from_store()
 
@@ -3022,7 +3023,7 @@ class ConfigPanel(QWidget):
             self._set_weight_data(weight_data)
 
         # Phase 2: 同步模拟起始日期
-        start_date_str = getattr(store, 'sim_start_date', '2013-06-02') or '2013-06-02'
+        start_date_str = getattr(store, 'sim_start_date', None) or QDate.currentDate().toString('yyyy-MM-dd')
         try:
             qd = QDate.fromString(start_date_str, "yyyy-MM-dd")
             if qd.isValid():
